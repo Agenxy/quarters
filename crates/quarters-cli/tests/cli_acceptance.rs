@@ -61,6 +61,8 @@ fn exec_redirects_state_and_preserves_real_uid() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
     create(temporary.path(), "work")?;
     let output = run(quarters(temporary.path())
+        .env("NPM_CONFIG_USERCONFIG", "/tmp/host-npm-credentials")
+        .env("SSH_AUTH_SOCK", "/tmp/host-ssh-agent")
         .env("UNLISTED_SECRET", "must-not-cross")
         .args(["exec", "work", "--", "/usr/bin/env"]))?;
     let environment = String::from_utf8(output.stdout)?;
@@ -70,6 +72,9 @@ fn exec_redirects_state_and_preserves_real_uid() -> Result<(), Box<dyn Error>> {
     assert!(environment.lines().any(|line| {
         line.starts_with("SSH_AUTH_SOCK=") && line.contains("/quarters-") && line.ends_with("/ssh-agent.sock")
     }));
+    assert!(!environment.contains("host-npm-credentials"));
+    assert!(!environment.contains("host-ssh-agent"));
+    assert!(!environment.contains("QUARTERS_HOST_PROFILE_"));
     assert!(!environment.contains("UNLISTED_SECRET="));
     let git_config = std::fs::read_to_string(expected_home.join(".gitconfig"))?;
     assert!(git_config.contains("helper =\n"));

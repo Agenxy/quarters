@@ -8,7 +8,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const PROFILE_VARIABLES: &[&str] = &[
+const REDIRECTED_VARIABLES: &[&str] = &[
     "CARGO_HOME",
     "CFFIXED_USER_HOME",
     "CLAUDE_CONFIG_DIR",
@@ -98,7 +98,6 @@ impl EnvironmentPlan {
             explicit_inheritance.insert(name.clone());
         }
         let runtime = platform::runtime_directory(space, host)?;
-        preserve_profile_host_values(&mut values, host);
         insert_profile_values(&mut values, space, effective_home, &runtime, host);
         if effective_home != space.home() {
             values.insert("QUARTERS_NO_HOST_ESCAPE".into(), "home-view".into());
@@ -144,9 +143,8 @@ impl EnvironmentPlan {
 #[must_use]
 pub fn host_command_environment() -> BTreeMap<OsString, Option<OsString>> {
     let mut changes = BTreeMap::new();
-    for variable in PROFILE_VARIABLES {
-        changes.insert(OsString::from(variable), env::var_os(profile_backup_name(variable)));
-        changes.insert(profile_backup_name(variable), None);
+    for variable in REDIRECTED_VARIABLES {
+        changes.insert(OsString::from(variable), None);
     }
     restore_host_value(&mut changes, "HOME", "QUARTERS_HOST_HOME");
     restore_host_value(&mut changes, "PATH", "QUARTERS_HOST_PATH");
@@ -292,18 +290,6 @@ fn preserve_host_value(
     if let Some(value) = host.get(source) {
         values.insert(OsString::from(destination), value.clone());
     }
-}
-
-fn preserve_profile_host_values(values: &mut BTreeMap<OsString, OsString>, host: &HostEnvironment) {
-    for variable in PROFILE_VARIABLES {
-        if let Some(value) = host.get(variable) {
-            values.insert(profile_backup_name(variable), value.clone());
-        }
-    }
-}
-
-fn profile_backup_name(variable: &str) -> OsString {
-    OsString::from(format!("QUARTERS_HOST_PROFILE_{variable}"))
 }
 
 fn restore_host_value(changes: &mut BTreeMap<OsString, Option<OsString>>, destination: &str, source: &str) {
