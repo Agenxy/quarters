@@ -81,4 +81,3 @@ target/release/quarters rm clean --confirm clean
 
 Quarters refuses removal while a supervised entry is active. Removal is not
 secure erasure from backups or filesystem snapshots.
-

@@ -29,4 +29,3 @@ eight. Never weaken a gate to land a change.
 Read `docs/security/THREAT-MODEL.md` before changing process launching,
 environment policy, filesystem behavior or platform capabilities. Add an ADR
 for changes to the trust boundary or platform contract.
-

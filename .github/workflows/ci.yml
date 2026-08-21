@@ -55,4 +55,3 @@ jobs:
         with:
           rust-version: "1.97.1"
           command: check licenses sources
-

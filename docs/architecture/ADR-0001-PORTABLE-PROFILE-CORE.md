@@ -30,4 +30,3 @@ The default works on both platforms and has one honest authority model. Linux
 can reach passwd-home compatibility at the cost of `sudo` and distro-policy
 constraints. macOS retains a larger Class C compatibility surface. The CLI and
 documentation must show those differences instead of claiming parity.
-

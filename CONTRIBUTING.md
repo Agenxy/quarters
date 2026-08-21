@@ -14,4 +14,3 @@ platform module, and capability requests fail rather than degrading silently.
 
 Changes to process authority, environment inheritance, filesystem mutation,
 stored schema or platform guarantees need tests and an architecture decision.
-

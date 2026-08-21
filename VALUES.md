@@ -10,4 +10,3 @@ and errors that name both the limitation and the next safe action.
 The tool must never encourage someone to treat a profile as protection from a
 malicious process. Platform depth is welcome only when its guarantee can be
 tested and stated precisely.
-

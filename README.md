@@ -122,5 +122,6 @@ transaction and quiescence contract is recorded in
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Compatibility matrix](docs/compatibility/MATRIX.md)
 - [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
 Apache 2.0. No account, service, telemetry or proprietary dependency.

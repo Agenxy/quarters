@@ -31,4 +31,3 @@ current host. It does not read credentials.
 | `sudo` | D | host authority | escapes baseline; unavailable in Linux home view |
 | systemd user services | D | none | attached to real login user manager |
 | macOS Keychain and TCC | D | none | attached to real login identity and code signature |
-
