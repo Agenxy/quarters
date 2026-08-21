@@ -33,6 +33,9 @@ Before publishing a version:
 4. Publish prereleases under registry prerelease semantics: PEP 440 handles the
    PyPI alpha and npm uses the explicit `alpha` tag.
 5. Verify the public registry metadata and install the exact published version.
+6. Create the GitHub prerelease only after registry verification. Publishing a
+   GitHub release does not write to any package registry; each registry publish
+   is a separate, explicit workflow dispatch with `publish` enabled.
 
 The npm registry has no transaction spanning four packages. The workflow
 dry-runs every tarball before its first write, publishes native packages before

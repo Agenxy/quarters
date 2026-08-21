@@ -1,9 +1,6 @@
 name: Build and publish npm packages
 
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       publish:
@@ -107,7 +104,7 @@ jobs:
 
   publish:
     name: Publish to npm
-    if: github.event_name == 'release' || inputs.publish
+    if: inputs.publish
     needs:
       - launcher
       - native
