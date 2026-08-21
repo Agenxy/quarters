@@ -18,12 +18,12 @@ pub(super) fn platform_capabilities() -> Capabilities {
             detail: "macOS has no per-process mount namespace".to_owned(),
         },
         confinement: CapabilityStatus {
-            available: seatbelt,
-            status: "capability-only".to_owned(),
+            available: false,
+            status: "not-implemented".to_owned(),
             detail: if seatbelt {
-                "deprecated sandbox-exec exists, but this alpha does not claim a reviewed Seatbelt policy"
+                "deprecated sandbox-exec exists, but this alpha has no reviewed Seatbelt policy"
             } else {
-                "sandbox-exec is absent"
+                "sandbox-exec is absent and this alpha has no Seatbelt backend"
             }
             .to_owned(),
         },
@@ -42,4 +42,16 @@ pub(super) fn platform_runtime_base(_host: &HostEnvironment) -> PathBuf {
 
 pub(super) fn platform_enter_home_view(_space_home: &Path, _host_home: &Path) -> Result<()> {
     Err(unsupported_home_view())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::platform_capabilities;
+
+    #[test]
+    fn seatbelt_presence_does_not_claim_unimplemented_confinement() {
+        let confinement = platform_capabilities().confinement;
+        assert!(!confinement.available);
+        assert_eq!(confinement.status, "not-implemented");
+    }
 }

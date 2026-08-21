@@ -13,8 +13,8 @@ compatibility notes will be called out here.
 - Refuse non-private existing storage roots without changing their permissions.
 - Add tested, prerelease-safe PyPI and multi-platform npm distributions with
   short-lived trusted-publishing workflows.
-- Add distribution-version, target-build, npm runtime and package-content
-  checks to the release gate.
+- Add distribution-version, target-build and npm runtime checks, plus package
+  assembly preflights, to the release gate.
 
 ## 0.1.0-alpha.1 — 2026-08-20
 

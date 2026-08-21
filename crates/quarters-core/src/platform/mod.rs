@@ -38,7 +38,7 @@ pub struct Capabilities {
 pub struct CapabilityStatus {
     /// Whether this build and host can attempt the capability.
     pub available: bool,
-    /// Stability level: stable, experimental or unavailable.
+    /// Stability level: stable, experimental, unavailable or not-implemented.
     pub status: String,
     /// Human-readable evidence or limitation.
     pub detail: String,

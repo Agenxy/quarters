@@ -37,7 +37,9 @@ ordinary `sudo` does not work inside that view. Quarters fails closed instead of
 starting a home view that would silently reduce the account's group authority.
 
 Filesystem confinement is not implemented. `doctor` reports Seatbelt and
-Landlock as capabilities or gaps without claiming protection.
+Landlock as implementation gaps without claiming protection. The prebuilt
+macOS npm binaries are unsigned and unnotarized in this alpha; use Homebrew or
+Cargo to build locally if host policy rejects them.
 
 ## Try it
 
@@ -57,13 +59,19 @@ quarters current
 ```
 
 Install the current checkout with `make install`. The command is placed under
-`~/.local/bin` by default. Published builds are also available through
-Homebrew and Cargo:
+`~/.local/bin` by default. Install the exact public alpha through any published
+channel:
 
 ```sh
 brew install agenxy/tap/quarters
-cargo install --locked quarters
+cargo install --locked --version 0.1.0-alpha.2 quarters
+uv tool install 'quarters==0.1.0a2'
+npm install --global quarters-cli@alpha
 ```
+
+The PyPI and npm packages select native builds for macOS arm64, macOS x64 and
+Linux x64. Linux arm64 is not yet prebuilt and falls back to the PyPI source
+distribution, which requires Rust. npm rejects unsupported targets directly.
 
 ## Commands
 
@@ -121,7 +129,9 @@ pass any additional variable deliberately. Quarters never prints its value.
 account has supplementary groups; when it is available, ordinary `sudo` cannot
 cross the unmapped root identity and is expected to fail. `quarters host`
 restores default host state paths only; it cannot recover credential variables
-that were never inherited.
+that were never inherited. It keeps the current working directory; use an
+explicit executable path if command lookup must not depend on the active
+space's launch context.
 
 ## Why copy commands are not in this alpha
 

@@ -193,6 +193,16 @@ fn removal_requires_exact_confirmation() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[test]
+fn doctor_does_not_advertise_unimplemented_confinement() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let doctor = run(quarters(temporary.path()).args(["--json", "doctor"]))?;
+    let report: Value = serde_json::from_slice(&doctor.stdout)?;
+    assert_eq!(report["result"]["platform"]["confinement"]["available"], false);
+    assert_eq!(report["result"]["platform"]["confinement"]["status"], "not-implemented");
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn linux_home_view_is_exercised_or_fails_closed() -> Result<(), Box<dyn Error>> {

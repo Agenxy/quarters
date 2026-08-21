@@ -110,7 +110,7 @@ the real UID and GID to the same numeric values, creates a private mount
 namespace, makes propagation private and bind-mounts the space home over the
 passwd home. The target still has the same numeric user and host DAC authority.
 
-This mode is opt-in for two reasons:
+This mode is opt-in for three reasons:
 
 1. AppArmor, sysctls or distribution policy can block unprivileged user
    namespaces.
