@@ -27,7 +27,7 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --workspace --release
       - name: Smoke-test command
-        run: target/release/elsehome --version
+        run: target/release/quarters --version
 
   advisories:
     name: RustSec advisories

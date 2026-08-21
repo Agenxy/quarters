@@ -17,4 +17,3 @@ First public alpha.
 - Offer an opt-in Linux bind-mounted home view backed by user and mount
   namespaces, with unsupported configurations failing closed.
 - Provide stable JSON output for management and inspection commands.
-

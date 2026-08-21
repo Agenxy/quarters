@@ -116,6 +116,7 @@ use linux::{platform_capabilities, platform_enter_home_view, platform_extend_env
 #[cfg(target_os = "macos")]
 use macos::{platform_capabilities, platform_enter_home_view, platform_extend_environment, platform_runtime_base};
 
+#[cfg(target_os = "macos")]
 fn unsupported_home_view() -> QuartersError {
     QuartersError::new(
         ErrorKind::Unsupported,
