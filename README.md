@@ -56,12 +56,11 @@ quarters current
 
 Install the current checkout with `make install`. The command is placed under
 `~/.local/bin` by default. Published builds are also available through
-Homebrew, Cargo and PyPI:
+Homebrew and Cargo:
 
 ```sh
 brew install agenxy/tap/quarters
 cargo install --locked quarters
-uv tool install quarters
 ```
 
 ## Commands

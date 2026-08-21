@@ -1,0 +1,48 @@
+{
+  "name": "quarters-cli",
+  "version": "0.1.0-alpha.1",
+  "description": "Persistent alternate user-state profiles for native processes",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "quarters": "dist/src/quarters.js"
+  },
+  "files": [
+    "dist/src/*.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Agenxy/quarters.git",
+    "directory": "packaging/npm/quarters-cli"
+  },
+  "homepage": "https://github.com/Agenxy/quarters",
+  "bugs": {
+    "url": "https://github.com/Agenxy/quarters/issues"
+  },
+  "keywords": [
+    "cli",
+    "environment",
+    "profile",
+    "shell",
+    "userspace"
+  ],
+  "optionalDependencies": {
+    "quarters-cli-darwin-arm64": "0.1.0-alpha.1",
+    "quarters-cli-darwin-x64": "0.1.0-alpha.1",
+    "quarters-cli-linux-x64": "0.1.0-alpha.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "typescript": "7.0.2"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "check": "tsc --project tsconfig.json --noEmit && npm test",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  }
+}

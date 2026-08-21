@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 QUARTERS_INSTALL_ROOT ?= $(HOME)/.local
 
-.PHONY: help format check test quality dependencies docs install
+.PHONY: help format check test quality npm-check dependencies docs install
 
 help:
 	@printf '%s\n' \
@@ -11,6 +11,7 @@ help:
 	  '  make check    Run the complete local quality suite' \
 	  '  make test     Run all tests' \
 	  '  make quality  Enforce structural ceilings' \
+	  '  make npm-check  Check the typed npm launcher' \
 	  '  make dependencies  Audit advisories, licences and sources' \
 	  '  make docs     Build warning-free API documentation' \
 	  '  make install  Install quarters under ~/.local/bin'
@@ -24,12 +25,20 @@ check:
 	cargo test --workspace --all-targets
 	cargo run --quiet -p quarters-quality -- check
 	RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
+	npm ci --ignore-scripts --prefix packaging/npm/quarters-cli
+	npm run check --prefix packaging/npm/quarters-cli
+	npm audit --audit-level high --prefix packaging/npm/quarters-cli
 
 test:
 	cargo test --workspace --all-targets
 
 quality:
 	cargo run --quiet -p quarters-quality -- check
+
+npm-check:
+	npm ci --ignore-scripts --prefix packaging/npm/quarters-cli
+	npm run check --prefix packaging/npm/quarters-cli
+	npm audit --audit-level high --prefix packaging/npm/quarters-cli
 
 dependencies:
 	cargo deny check
