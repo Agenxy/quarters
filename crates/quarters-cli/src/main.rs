@@ -20,7 +20,7 @@ fn main() -> ExitCode {
             } else if let Err(print_error) = error.print() {
                 eprintln!("quarters: could not print command help: {print_error}");
             }
-            return ExitCode::from(2);
+            return exit_code(error.exit_code());
         }
     };
     match app::run(cli) {

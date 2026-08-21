@@ -31,6 +31,17 @@ fn create(root: &Path, name: &str) -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn help_and_version_are_successful_control_flow() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let help = run(quarters(temporary.path()).arg("--help"))?;
+    assert!(String::from_utf8(help.stdout)?.contains("Usage: quarters"));
+
+    let version = run(quarters(temporary.path()).arg("--version"))?;
+    assert!(String::from_utf8(version.stdout)?.starts_with("quarters 0.1.0-alpha.1"));
+    Ok(())
+}
+
+#[test]
 fn create_and_list_have_stable_json() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
     let output = run(quarters(temporary.path()).args(["--json", "create", "alpha"]))?;
