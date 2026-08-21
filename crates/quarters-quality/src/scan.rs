@@ -10,12 +10,53 @@ pub(crate) fn check_repository() -> Result<(), Vec<String>> {
     let mut violations = Vec::new();
     check_required_files(&root, &mut violations);
     check_distribution_versions(&root, &mut violations);
+    check_mcp_network_dependency_gate(&root, &mut violations);
     let files = rust_files(&root).map_err(|error| vec![error])?;
     for path in files {
         inspect_rust_file(&path, &mut violations);
     }
     check_for_shell_scripts(&root, &mut violations);
     if violations.is_empty() { Ok(()) } else { Err(violations) }
+}
+
+fn check_mcp_network_dependency_gate(root: &Path, violations: &mut Vec<String>) {
+    let path = root.join("Cargo.lock");
+    let source = match fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(error) => {
+            violations.push(format!("{}: could not read: {error}", path.display()));
+            return;
+        }
+    };
+    for package in [
+        "axum",
+        "curl",
+        "curl-sys",
+        "h2",
+        "hyper",
+        "hyper-util",
+        "isahc",
+        "mio",
+        "native-tls",
+        "openssl",
+        "openssl-sys",
+        "reqwest",
+        "rustls",
+        "socket2",
+        "sse-stream",
+        "tokio-rustls",
+        "tokio-tungstenite",
+        "tonic",
+        "tower-http",
+        "tungstenite",
+        "ureq",
+    ] {
+        if source.lines().any(|line| line == format!("name = \"{package}\"")) {
+            violations.push(format!(
+                "Cargo.lock: network transport dependency '{package}' violates the MCP stdio-only boundary"
+            ));
+        }
+    }
 }
 
 fn repository_root() -> Result<PathBuf, String> {

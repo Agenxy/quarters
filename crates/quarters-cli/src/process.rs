@@ -3,10 +3,14 @@
 use quarters_core::platform;
 use quarters_core::{EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, Result, Space, Store};
 use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static RUNTIME_COPY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct ProfileLaunch<'a> {
     pub(crate) store: &'a Store,
@@ -89,10 +93,14 @@ impl ProfileLaunch<'_> {
 }
 
 pub(crate) fn run_shell(launch: &ProfileLaunch<'_>, shell: &Path, login: bool) -> Result<i32> {
-    if !shell.is_absolute() || !shell.is_file() {
+    let executable = fs::metadata(shell).is_ok_and(|metadata| metadata.is_file() && metadata.mode() & 0o111 != 0);
+    if !shell.is_absolute() || !executable {
         return Err(QuartersError::new(
             ErrorKind::InvalidInput,
-            format!("shell must be an existing absolute file: {}", shell.display()),
+            format!(
+                "shell must be an existing absolute executable file: {}",
+                shell.display()
+            ),
         ));
     }
     let mut command = vec![shell.as_os_str().to_owned()];
@@ -159,13 +167,36 @@ fn install_runtime_binary(source: &Path, environment: &EnvironmentPlan) -> Resul
         )
     })?;
     let destination = PathBuf::from(runtime).join("bin/quarters");
-    let temporary = destination.with_extension(format!("tmp-{}", std::process::id()));
-    fs::copy(source, &temporary)
-        .map_err(|error| QuartersError::io("stage the home-view launcher", &temporary, error))?;
-    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700))
-        .map_err(|error| QuartersError::io("protect the home-view launcher", &temporary, error))?;
+    let sequence = RUNTIME_COPY_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary = destination.with_extension(format!("tmp-{}-{sequence}", std::process::id()));
+    if let Err(error) = copy_private_executable(source, &temporary) {
+        let _cleanup = fs::remove_file(&temporary);
+        return Err(error);
+    }
     fs::rename(&temporary, &destination)
         .map_err(|error| QuartersError::io("publish the home-view launcher", &destination, error))
+}
+
+fn copy_private_executable(source: &Path, destination: &Path) -> Result<()> {
+    let mut source_file =
+        File::open(source).map_err(|error| QuartersError::io("open the home-view launcher", source, error))?;
+    let mut options = OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .mode(0o700)
+        .custom_flags(nix::libc::O_CLOEXEC | nix::libc::O_NOFOLLOW);
+    let mut destination_file = options
+        .open(destination)
+        .map_err(|error| QuartersError::io("stage the home-view launcher", destination, error))?;
+    std::io::copy(&mut source_file, &mut destination_file)
+        .map_err(|error| QuartersError::io("copy the home-view launcher", destination, error))?;
+    destination_file
+        .flush()
+        .map_err(|error| QuartersError::io("flush the home-view launcher", destination, error))?;
+    destination_file
+        .sync_all()
+        .map_err(|error| QuartersError::io("sync the home-view launcher", destination, error))
 }
 
 fn split_command(raw_command: &[OsString]) -> Result<(&OsStr, &[OsString])> {

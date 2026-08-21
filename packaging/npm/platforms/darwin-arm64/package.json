@@ -1,6 +1,6 @@
 {
   "name": "quarters-cli-darwin-arm64",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "description": "Quarters native binary for macOS arm64",
   "license": "Apache-2.0",
   "os": ["darwin"],

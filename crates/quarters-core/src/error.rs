@@ -19,6 +19,8 @@ pub enum ErrorKind {
     Unsupported,
     /// Stored state was malformed or violated an invariant.
     CorruptState,
+    /// A bounded operation refused attacker-controlled or unexpectedly large input.
+    ResourceLimit,
     /// An operating-system operation failed.
     System,
 }
@@ -34,6 +36,7 @@ impl ErrorKind {
             Self::SpaceActive => "space_active",
             Self::Unsupported => "unsupported",
             Self::CorruptState => "corrupt_state",
+            Self::ResourceLimit => "resource_limit",
             Self::System => "system",
         }
     }

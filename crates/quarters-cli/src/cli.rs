@@ -24,8 +24,10 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     /// Create a private, persistent space.
     Create(CreateArgs),
-    /// List spaces and their stored homes.
+    /// List each space entry, its health and its stored home.
     List,
+    /// Report current and cooperative lease state for spaces.
+    Status(StatusArgs),
     /// Print the current space, or "host" outside Quarters.
     Current,
     /// Show the exact environment Quarters would apply.
@@ -36,10 +38,14 @@ pub(crate) enum Command {
     Exec(ExecArgs),
     /// Run a command with host user-state paths from a baseline space.
     Host(RawCommand),
-    /// Inspect platform capabilities and installed-tool compatibility.
+    /// Inspect capabilities and optionally prepare and validate one environment.
     Doctor(DoctorArgs),
     /// Remove an inactive space after exact-name confirmation.
     Rm(RemoveArgs),
+    /// Reclaim abandoned internal creation and deletion state.
+    Recover(RecoverArgs),
+    /// Serve the local agent interface over bounded MCP stdio.
+    Mcp,
     /// Internal Linux launcher used to isolate namespace setup to a child.
     #[command(name = "__linux-launch", hide = true)]
     LinuxLaunch(LinuxLaunchArgs),
@@ -53,6 +59,12 @@ pub(crate) struct CreateArgs {
     /// Default absolute shell path. Uses the host SHELL or /bin/sh.
     #[arg(long, value_name = "PATH")]
     pub(crate) shell: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct StatusArgs {
+    /// Inspect one space instead of listing every space.
+    pub(crate) name: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -113,6 +125,13 @@ pub(crate) struct RemoveArgs {
 
     /// Must exactly repeat the space name.
     #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RecoverArgs {
+    /// Must be exactly "stale-state" before reserved paths are removed.
+    #[arg(long, value_name = "stale-state")]
     pub(crate) confirm: String,
 }
 

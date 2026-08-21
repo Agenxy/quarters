@@ -48,6 +48,7 @@ fn error_exit_code(error: &QuartersError) -> u8 {
         ErrorKind::SpaceActive => 5,
         ErrorKind::Unsupported => 6,
         ErrorKind::CorruptState => 7,
+        ErrorKind::ResourceLimit => 8,
         ErrorKind::System => 1,
     }
 }

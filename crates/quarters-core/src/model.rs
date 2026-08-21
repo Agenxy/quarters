@@ -1,7 +1,7 @@
 //! Stored space model and validated names.
 
 use crate::{ErrorKind, QuartersError, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// A validated portable space name.
-#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct SpaceName(String);
 
@@ -44,7 +44,17 @@ impl SpaceName {
 
 impl Display for SpaceName {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.pad(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for SpaceName {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -99,5 +109,17 @@ impl Space {
     #[must_use]
     pub const fn manifest(&self) -> &SpaceManifest {
         &self.manifest
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SpaceName;
+
+    #[test]
+    fn deserialization_enforces_the_name_grammar() {
+        assert!(serde_json::from_str::<SpaceName>(r#""work_2""#).is_ok());
+        assert!(serde_json::from_str::<SpaceName>(r#""\u001b[31mrogue""#).is_err());
+        assert!(serde_json::from_str::<SpaceName>(r#""name-that-is-more-than-thirty-two-characters""#).is_err());
     }
 }

@@ -2,12 +2,13 @@
 members = [
     "crates/quarters-cli",
     "crates/quarters-core",
+    "crates/quarters-mcp",
     "crates/quarters-quality",
 ]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 edition = "2024"
 rust-version = "1.97.1"
 license = "Apache-2.0"
@@ -16,13 +17,19 @@ homepage = "https://github.com/Agenxy/quarters"
 
 [workspace.dependencies]
 clap = "=4.6.6"
+futures = "=0.3.34"
 fs4 = "=1.1.0"
+jsonschema = { version = "=0.50.0", default-features = false }
 nix = "=0.31.3"
 proc-macro2 = "=1.0.107"
+rmcp = { version = "=3.1.4", default-features = false, features = ["macros", "schemars", "server", "transport-io"] }
+schemars = "=1.2.2"
 serde = "=1.0.229"
 serde_json = "=1.0.151"
 syn = { version = "=3.0.3", default-features = false, features = ["full", "parsing", "printing", "visit"] }
 tempfile = "=3.27.0"
+tokio = { version = "=1.53.1", features = ["io-std", "io-util", "macros", "rt", "sync", "time"] }
+tokio-util = { version = "=0.7.19", features = ["codec", "rt"] }
 
 [workspace.lints.rust]
 warnings = "deny"

@@ -4,6 +4,42 @@ Quarters follows [Semantic Versioning](https://semver.org/). Until 1.0, minor
 versions may refine the space format and environment contract; migrations and
 compatibility notes will be called out here.
 
+## 0.1.0-alpha.3 — unreleased
+
+- Add a stdio-only MCP server with separately tested `2026-07-28` stateless and
+  `2025-11-25` initialized lifecycles.
+- Expose typed, schema-validated status, doctor and create tools plus bounded
+  help, security and private-status resources; deliberately omit process
+  execution, environment inheritance, root selection and deletion.
+- Bound MCP frames, response-lifetime concurrency, legacy request IDs, store
+  listings and blocking filesystem workers; harden cancellation, duplicate IDs,
+  output backpressure and untrusted stored-name presentation.
+- Preserve every decoded MCP transport error across SDK receive cancellation,
+  reject batches and invalid IDs correctly, and prove recovery after a
+  200-request over-capacity burst.
+- Bound ordinary MCP responses, transport errors and shutdown to the same
+  two-second output-drain deadline.
+- Add honest cooperative-lease inspection through `quarters status [NAME]`.
+- Validate the `QUARTERS_SPACE` marker against the active store before `current`
+  or status reports a process as being inside a space.
+- Validate space roots, homes, manifests and activity locks before use,
+  rejecting symlinked or non-private anchors.
+- Keep healthy spaces inspectable when a sibling is damaged, and permit
+  exact-name removal only when the damaged entry's root and lock remain safe.
+- Make `doctor NAME` construct and validate the space's baseline environment.
+- Add bounded reporting and confirmed cleanup for interrupted internal creation
+  and retirement state.
+- Serialize lease observation, launch acquisition and removal retirement to
+  avoid false activity and deleted-home races.
+- Give read-only observation, management and supervisor leases separate bounded
+  contention deadlines with jittered retry.
+- Classify same-name creation and removal races deterministically, and preserve
+  the current-space report inside Linux home-view where the authoritative store
+  is intentionally hidden.
+- Validate stored names during deserialization and escape terminal control
+  characters without damaging printable Unicode.
+- Request npm provenance attestations for every native and launcher package.
+
 ## 0.1.0-alpha.2 — 2026-08-20
 
 - Stop carrying host credential and agent paths under backup variable names;
