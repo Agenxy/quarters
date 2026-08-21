@@ -79,5 +79,7 @@ Exit every process launched in the space, inspect the name, then run:
 target/release/quarters rm clean --confirm clean
 ```
 
-Quarters refuses removal while a supervised entry is active. Removal is not
+Quarters refuses removal while the supervising `quarters` process for an entry
+is active. It cannot portably detect a detached child, background job or server
+after that supervisor exits, so stop those processes first. Removal is not
 secure erasure from backups or filesystem snapshots.

@@ -18,11 +18,11 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 quarters-core = { version = "=0.1.0-alpha.1", path = "../quarters-core" }
-nix = { workspace = true, features = ["signal", "user"] }
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+nix = { workspace = true, features = ["user"] }
 tempfile.workspace = true
 
 [lints]

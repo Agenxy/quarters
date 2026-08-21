@@ -203,7 +203,7 @@ impl Store {
             &home.join(".ssh/config"),
             b"# Quarters-owned SSH configuration. Add only identities for this space.\nHost *\n  AddKeysToAgent no\n  IdentitiesOnly yes\n",
         )?;
-        File::create(root.join(".active")).map_err(|error| QuartersError::io("create activity lock", root, error))?;
+        write_private_file(&root.join(".active"), b"")?;
         let manifest = SpaceManifest {
             schema_version: SCHEMA_VERSION,
             name,

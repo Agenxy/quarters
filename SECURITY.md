@@ -6,8 +6,9 @@ that the real account can read.
 
 Security reports should not include real credentials, exported homes, command
 histories or personal paths. Replace them with the smallest synthetic example.
-Until a public repository exists, keep a local reproducer and contact an Agenxy
-maintainer through an established private channel.
+Report vulnerabilities privately through [GitHub's security advisory
+form](https://github.com/Agenxy/quarters/security/advisories/new). Do not open a
+public issue before a fix or coordinated disclosure is ready.
 
 ## Supported version
 

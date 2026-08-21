@@ -64,15 +64,23 @@ Install the current checkout with `make install`. The command is placed under
 | `create NAME` | Atomically create a private persistent space |
 | `list` | List spaces and their homes |
 | `current` | Print the current space or `host` |
-| `env NAME` | Show the exact computed environment; explicit inherited values are redacted |
+| `env NAME` | Prepare and show the exact computed environment; explicit inherited values are redacted |
 | `enter NAME` | Open the space's interactive shell |
 | `exec NAME -- COMMAND` | Run one native command |
 | `host -- COMMAND` | Restore host state paths from a baseline space |
 | `doctor [NAME]` | Inspect platform and installed-tool compatibility |
-| `rm NAME --confirm NAME` | Remove an inactive space after exact-name confirmation |
+| `rm NAME --confirm NAME` | Remove a space after exact-name confirmation and an inactive supervisor lease |
 
 Management and inspection commands accept `--json`. Pass-through commands do
 not because child standard output must remain unchanged.
+
+`env` prepares the private runtime directories that the displayed environment
+references. It does not start a child or inspect any state stored in the space.
+
+Removal is blocked while the supervising `quarters` process for an entry is
+running. A detached process, background job or server can outlive that
+supervisor and is not discoverable portably. Exit those processes before
+removing their space.
 
 ## What moves into a space
 

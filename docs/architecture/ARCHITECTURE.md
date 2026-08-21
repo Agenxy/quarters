@@ -48,9 +48,11 @@ same filesystem, syncs private files and publishes it with `rename()`. A schema
 marker and matching directory name are required when opening a space.
 
 Removal takes an exclusive nonblocking lock, atomically renames the space under
-`trash`, then removes that exact retired directory. Every launched process is
-supervised by a Quarters parent holding a shared lease, so removal fails while
-an entry is active.
+`trash`, then removes that exact retired directory. A Quarters supervisor holds
+a shared lease while its direct entry is running, so removal fails during that
+period. A detached descendant, tmux server or other process that outlives its
+supervisor is outside this portable lease model and must be stopped by the user
+before removal.
 
 ## Environment authority
 

@@ -11,7 +11,9 @@ use quarters_core::QuartersError;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let json_requested = std::env::args_os().any(|argument| argument == "--json");
+    let json_requested = std::env::args_os()
+        .take_while(|argument| argument != "--")
+        .any(|argument| argument == "--json");
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {

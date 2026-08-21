@@ -109,6 +109,20 @@ fn explicit_inheritance_crosses_and_diagnostics_redact() -> Result<(), Box<dyn E
 }
 
 #[test]
+fn child_json_flag_does_not_change_quarters_error_format() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "work")?;
+    let output = quarters(temporary.path())
+        .args(["exec", "work", "--", "/definitely/not/a/quarters-command", "--json"])
+        .output()?;
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr)?;
+    assert!(error.starts_with("quarters: could not start profile command"));
+    assert!(!error.trim_start().starts_with('{'));
+    Ok(())
+}
+
+#[test]
 fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
     create(temporary.path(), "work")?;
@@ -171,5 +185,41 @@ fn removal_requires_exact_confirmation() -> Result<(), Box<dyn Error>> {
 
     run(quarters(temporary.path()).args(["rm", "short-lived", "--confirm", "short-lived"]))?;
     assert!(!temporary.path().join("spaces/short-lived").exists());
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_home_view_is_exercised_or_fails_closed() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "work")?;
+    let home = temporary.path().join("spaces/work/home");
+    std::fs::write(home.join(".quarters-home-view-marker"), b"home-view\n")?;
+
+    let doctor = run(quarters(temporary.path()).args(["--json", "doctor"]))?;
+    let report: Value = serde_json::from_slice(&doctor.stdout)?;
+    let available = report["result"]["platform"]["home_view"]["available"] == true;
+    let output = quarters(temporary.path())
+        .args([
+            "exec",
+            "work",
+            "--home-view",
+            "--",
+            "/bin/sh",
+            "-c",
+            "test -f \"$HOME/.quarters-home-view-marker\"",
+        ])
+        .output()?;
+
+    if available {
+        assert!(
+            output.status.success(),
+            "home-view was reported available but failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    } else {
+        assert_eq!(output.status.code(), Some(6));
+        assert!(String::from_utf8(output.stderr)?.contains("--home-view is unavailable"));
+    }
     Ok(())
 }

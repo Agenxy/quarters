@@ -317,3 +317,35 @@ fn store_root(space: &Space) -> PathBuf {
         .and_then(Path::parent)
         .map_or_else(|| PathBuf::from("/"), Path::to_path_buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{safe_to_inherit, validate_variable_name};
+    use std::ffi::OsString;
+
+    #[test]
+    fn allowlist_keeps_terminal_context_and_rejects_credentials() {
+        for name in ["LANG", "LC_MESSAGES", "PATH", "TERM", "WAYLAND_DISPLAY"] {
+            assert!(safe_to_inherit(&OsString::from(name)), "expected {name} to be safe");
+        }
+        for name in [
+            "ANTHROPIC_API_KEY",
+            "AWS_SECRET_ACCESS_KEY",
+            "GITHUB_TOKEN",
+            "OPENAI_API_KEY",
+            "SSH_AUTH_SOCK",
+        ] {
+            assert!(!safe_to_inherit(&OsString::from(name)), "expected {name} to be blocked");
+        }
+    }
+
+    #[test]
+    fn explicit_variable_names_follow_portable_environment_syntax() {
+        for name in ["TOKEN", "_TOKEN", "TOKEN_2"] {
+            assert!(validate_variable_name(name).is_ok(), "expected {name} to be valid");
+        }
+        for name in ["", "2TOKEN", "TOKEN-NAME", "TOKEN=VALUE", "TOKEN.NAME"] {
+            assert!(validate_variable_name(name).is_err(), "expected {name} to be invalid");
+        }
+    }
+}

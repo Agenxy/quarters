@@ -26,7 +26,8 @@ policy.
 |---|---|
 | Path traversal through a name | Strict 1-32 character validated name type |
 | Partial creation | Same-filesystem temporary directory and atomic rename |
-| Broad deletion | Manifest/name validation, exact confirmation, exclusive lease, rename then delete |
+| Wrong removal target | Manifest/name validation, exact confirmation, rename then delete |
+| Removal during a supervised entry | Shared lease held for the lifetime of the Quarters supervisor |
 | Credential environment leakage | `env_clear()` plus safe allowlist; explicit values are redacted |
 | Host Git helper reuse | Generated config clears inherited credential helpers |
 | Shared SSH agent | Per-space short `SSH_AUTH_SOCK`; host socket is not inherited |
@@ -42,6 +43,7 @@ policy.
 - separating network, process, device or IPC namespaces
 - virtualizing macOS Keychain, TCC, app containers or Secure Enclave
 - preserving ordinary `sudo` inside Linux `--home-view`
+- discovering detached descendants or same-user servers after their Quarters supervisor exits
 - secure deletion from snapshots, backups or recovery media
 - crash-consistent live snapshot or export
 
@@ -62,5 +64,6 @@ is expected to fail.
 Compatibility contracts can change between tool releases. `doctor` reports
 installed executables and Quarters' configured route, but the alpha does not
 trace every file open. A tool can ignore its documented variable. Absolute paths
-and same-user services remain reachable. CoreFoundation's override is
-undocumented and may change.
+and same-user services remain reachable. Detached processes can keep using a
+space after its supervisor releases the activity lease, so users must stop them
+before removal. CoreFoundation's override is undocumented and may change.
