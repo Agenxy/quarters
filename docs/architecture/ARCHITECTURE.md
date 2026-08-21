@@ -114,8 +114,11 @@ This mode is opt-in for two reasons:
 
 1. AppArmor, sysctls or distribution policy can block unprivileged user
    namespaces.
-2. Only the user's identity is mapped. Set-id root programs such as ordinary
-   `sudo` cannot work inside the view.
+2. An unprivileged process cannot preserve arbitrary supplementary groups.
+   Quarters reports the view as unavailable when the account has any, rather
+   than silently reducing its filesystem authority.
+3. Only the user's primary identity is mapped. Set-id root programs such as
+   ordinary `sudo` cannot work inside the view.
 
 The internal child prevents namespace calls from changing the invoking shell
 or the supervising Quarters process. Requested setup fails closed.

@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "quarters"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "clap",
  "nix",
@@ -236,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "quarters-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "fs4",
  "nix",
@@ -247,9 +247,10 @@ dependencies = [
 
 [[package]]
 name = "quarters-quality"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "proc-macro2",
+ "serde_json",
  "syn",
 ]
 

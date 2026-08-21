@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-quarters-core = { version = "=0.1.0-alpha.1", path = "../quarters-core" }
+quarters-core = { version = "=0.1.0-alpha.2", path = "../quarters-core" }
 serde.workspace = true
 serde_json.workspace = true
 

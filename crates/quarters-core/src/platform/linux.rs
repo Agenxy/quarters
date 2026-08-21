@@ -4,7 +4,7 @@ use super::{Capabilities, CapabilityStatus};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use nix::mount::{MsFlags, mount};
 use nix::sched::{CloneFlags, unshare};
-use nix::unistd::{Gid, Uid};
+use nix::unistd::{Gid, Uid, getgroups};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
@@ -40,6 +40,7 @@ pub(super) fn platform_runtime_base(host: &HostEnvironment) -> PathBuf {
 
 pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
     validate_home_view_paths(space_home, host_home)?;
+    ensure_no_extra_groups()?;
     let uid = Uid::current().as_raw();
     let gid = Gid::current().as_raw();
     unshare(CloneFlags::CLONE_NEWUSER).map_err(|error| namespace_error("create a user namespace", error))?;
@@ -69,6 +70,13 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> R
 }
 
 fn user_namespace_status() -> CapabilityStatus {
+    if let Some(detail) = supplementary_group_block() {
+        return CapabilityStatus {
+            available: false,
+            status: "unavailable".to_owned(),
+            detail,
+        };
+    }
     let apparmor_restricted = read_boolean_sysctl("/proc/sys/kernel/apparmor_restrict_unprivileged_userns");
     let namespaces = fs::read_to_string("/proc/sys/user/max_user_namespaces")
         .ok()
@@ -86,6 +94,32 @@ fn user_namespace_status() -> CapabilityStatus {
         status: if available { "experimental" } else { "unavailable" }.to_owned(),
         detail: detail.to_owned(),
     }
+}
+
+fn ensure_no_extra_groups() -> Result<()> {
+    if let Some(detail) = supplementary_group_block() {
+        return Err(QuartersError::new(ErrorKind::Unsupported, detail)
+            .with_hint("omit --home-view to preserve the host's complete group authority"));
+    }
+    Ok(())
+}
+
+fn supplementary_group_block() -> Option<String> {
+    match getgroups() {
+        Ok(groups) => {
+            let count = extra_group_count(&groups, Gid::current());
+            (count > 0).then(|| {
+                format!(
+                    "the account has {count} supplementary group(s), which an unprivileged home view cannot preserve"
+                )
+            })
+        }
+        Err(error) => Some(format!("could not inspect supplementary groups: {error}")),
+    }
+}
+
+fn extra_group_count(groups: &[Gid], primary: Gid) -> usize {
+    groups.iter().filter(|group| **group != primary).count()
 }
 
 fn read_boolean_sysctl(path: &str) -> Option<bool> {
@@ -122,4 +156,17 @@ fn namespace_error(operation: &str, source: nix::errno::Errno) -> QuartersError 
     QuartersError::new(ErrorKind::Unsupported, format!("could not {operation}"))
         .with_hint("omit --home-view for the portable environment-profile mode")
         .with_source(source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extra_group_count;
+    use nix::unistd::Gid;
+
+    #[test]
+    fn primary_group_is_not_treated_as_supplementary_authority() {
+        let primary = Gid::from_raw(20);
+        assert_eq!(extra_group_count(&[primary], primary), 0);
+        assert_eq!(extra_group_count(&[primary, Gid::from_raw(80)], primary), 1);
+    }
 }

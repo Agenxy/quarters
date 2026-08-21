@@ -32,7 +32,9 @@ the host UID, GID and permissions.
 Linux uses the same baseline. An experimental `--home-view` can additionally
 bind the space home over the real passwd home inside an unprivileged user and
 mount namespace. It is opt-in because distro policy can disable user
-namespaces, and ordinary `sudo` does not work inside that view.
+namespaces, supplementary groups cannot be mapped without added privilege, and
+ordinary `sudo` does not work inside that view. Quarters fails closed instead of
+starting a home view that would silently reduce the account's group authority.
 
 Filesystem confinement is not implemented. `doctor` reports Seatbelt and
 Landlock as capabilities or gaps without claiming protection.
@@ -73,7 +75,7 @@ cargo install --locked quarters
 | `env NAME` | Prepare and show the exact computed environment; explicit inherited values are redacted |
 | `enter NAME` | Open the space's interactive shell |
 | `exec NAME -- COMMAND` | Run one native command |
-| `host -- COMMAND` | Restore host state paths from a baseline space |
+| `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
 | `doctor [NAME]` | Inspect platform and installed-tool compatibility |
 | `rm NAME --confirm NAME` | Remove a space after exact-name confirmation and an inactive supervisor lease |
 
@@ -115,10 +117,11 @@ pass any additional variable deliberately. Quarters never prints its value.
 - programs that insist on `getpwuid()` paths on macOS
 - explicit absolute paths into the real home
 
-`sudo` escapes a baseline profile. In Linux `--home-view`, ordinary `sudo`
-cannot cross the unmapped root identity and is expected to fail. `quarters host`
-restores state paths only; it cannot recover credential variables that were
-never inherited.
+`sudo` escapes a baseline profile. Linux `--home-view` is unavailable when the
+account has supplementary groups; when it is available, ordinary `sudo` cannot
+cross the unmapped root identity and is expected to fail. `quarters host`
+restores default host state paths only; it cannot recover credential variables
+that were never inherited.
 
 ## Why copy commands are not in this alpha
 
@@ -136,6 +139,7 @@ transaction and quiescence contract is recorded in
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Compatibility matrix](docs/compatibility/MATRIX.md)
 - [Security policy](SECURITY.md)
+- [Registry publishing](docs/operations/REGISTRY-PUBLISHING.md)
 - [Changelog](CHANGELOG.md)
 
 Apache 2.0. No account, service, telemetry or proprietary dependency.

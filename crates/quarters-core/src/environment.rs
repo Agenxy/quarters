@@ -98,10 +98,10 @@ impl EnvironmentPlan {
             explicit_inheritance.insert(name.clone());
         }
         let runtime = platform::runtime_directory(space, host)?;
-        insert_profile_values(&mut values, space, effective_home, &runtime, host);
+        insert_profile_values(&mut values, space, effective_home, &runtime, host)?;
         if effective_home != space.home() {
             values.insert("QUARTERS_NO_HOST_ESCAPE".into(), "home-view".into());
-            prepend_path(&mut values, &runtime.join("bin"));
+            prepend_path(&mut values, &runtime.join("bin"))?;
         }
         platform::extend_environment(&mut values, effective_home);
         Ok(Self {
@@ -172,7 +172,7 @@ fn insert_profile_values(
     home: &Path,
     runtime: &Path,
     host: &HostEnvironment,
-) {
+) -> Result<()> {
     let config = home.join(".config");
     let local = home.join(".local");
     let cache = home.join(".cache");
@@ -216,21 +216,25 @@ fn insert_profile_values(
     preserve_host_value(values, host, "PATH", "QUARTERS_HOST_PATH");
     preserve_host_value(values, host, "TMPDIR", "QUARTERS_HOST_TMPDIR");
     preserve_host_value(values, host, "XDG_RUNTIME_DIR", "QUARTERS_HOST_XDG_RUNTIME_DIR");
-    prepend_profile_path(values, home);
+    prepend_profile_path(values, home)
 }
 
-fn prepend_profile_path(values: &mut BTreeMap<OsString, OsString>, home: &Path) {
-    prepend_path(values, &home.join(".local/bin"));
+fn prepend_profile_path(values: &mut BTreeMap<OsString, OsString>, home: &Path) -> Result<()> {
+    prepend_path(values, &home.join(".local/bin"))
 }
 
-fn prepend_path(values: &mut BTreeMap<OsString, OsString>, prefix: &Path) {
+fn prepend_path(values: &mut BTreeMap<OsString, OsString>, prefix: &Path) -> Result<()> {
     let mut paths = vec![prefix.to_path_buf()];
     if let Some(existing) = values.get(OsStr::new("PATH")) {
         paths.extend(env::split_paths(existing));
     }
-    if let Ok(joined) = env::join_paths(paths) {
-        values.insert("PATH".into(), joined);
-    }
+    let joined = env::join_paths(paths).map_err(|error| {
+        QuartersError::new(ErrorKind::InvalidInput, "host PATH cannot be represented safely")
+            .with_hint("remove entries containing platform path separators, then retry")
+            .with_source(error)
+    })?;
+    values.insert("PATH".into(), joined);
+    Ok(())
 }
 
 fn safe_to_inherit(name: &OsString) -> bool {

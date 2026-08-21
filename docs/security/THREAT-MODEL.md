@@ -34,6 +34,7 @@ policy.
 | Runtime socket collision | Mode-0700 short runtime directory per UID and space |
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
+| Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
 | Secret diagnostics | No state content reads; explicit inherited values render as redacted |
 
 ## Explicit non-goals
@@ -50,9 +51,12 @@ policy.
 ## Host and sudo escape
 
 `quarters host` is a named convenience boundary, not an authority transition.
-It restores captured host state paths. It is disabled in `--home-view` because
-the real home is hidden in that mount namespace and restrictions cannot be
-undone safely from inside the process tree.
+It restores captured `HOME`, `PATH`, `TMPDIR` and `XDG_RUNTIME_DIR` values and
+clears Quarters' tool-specific overrides so tools use their defaults below the
+host home. Custom host credential and profile variables never cross implicitly.
+The command is disabled in `--home-view` because the real home is hidden in that
+mount namespace and restrictions cannot be undone safely from inside the
+process tree.
 
 In baseline mode, `sudo` uses host policy and normally switches to the target
 user's home. It can write outside the profile. Users must treat it as a full

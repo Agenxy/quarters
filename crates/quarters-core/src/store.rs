@@ -2,9 +2,10 @@
 
 use crate::{ErrorKind, QuartersError, Result, SCHEMA_VERSION, Space, SpaceManifest, SpaceName};
 use fs4::FileExt;
-use std::fs::{self, File, OpenOptions};
+use nix::unistd::Uid;
+use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -80,7 +81,7 @@ impl Store {
                 format!("space '{name}' already exists"),
             ));
         }
-        let temporary = self.temporary_path(&name);
+        let temporary = self.temporary_path(&name)?;
         if temporary.exists() {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
@@ -180,13 +181,13 @@ impl Store {
         })?;
         let trash_root = self.root.join("trash");
         create_private_dir(&trash_root)?;
-        let retired = trash_root.join(format!("{}-{}", space.manifest().name, unique_suffix()));
+        let retired = trash_root.join(format!("{}-{}", space.manifest().name, unique_suffix()?));
         fs::rename(space.root(), &retired).map_err(|error| QuartersError::io("retire space", space.root(), error))?;
         fs::remove_dir_all(&retired).map_err(|error| QuartersError::io("delete retired space", &retired, error))
     }
 
     fn ensure_layout(&self) -> Result<()> {
-        create_private_dir(&self.root)?;
+        ensure_store_root(&self.root)?;
         create_private_dir(&self.root.join("spaces"))?;
         create_private_dir(&self.root.join("trash"))
     }
@@ -248,10 +249,11 @@ impl Store {
         self.root.join("spaces").join(name.as_str())
     }
 
-    fn temporary_path(&self, name: &SpaceName) -> PathBuf {
-        self.root
+    fn temporary_path(&self, name: &SpaceName) -> Result<PathBuf> {
+        Ok(self
+            .root
             .join("spaces")
-            .join(format!(".creating-{name}-{}", unique_suffix()))
+            .join(format!(".creating-{name}-{}", unique_suffix()?)))
     }
 }
 
@@ -311,9 +313,54 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn create_private_dir(path: &Path) -> Result<()> {
-    fs::create_dir_all(path).map_err(|error| QuartersError::io("create private directory", path, error))?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| QuartersError::io("set private directory permissions", path, error))
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => return validate_private_dir(path, &metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(QuartersError::io("inspect private directory", path, error)),
+    }
+    let mut builder = DirBuilder::new();
+    builder.recursive(true).mode(0o700);
+    builder
+        .create(path)
+        .map_err(|error| QuartersError::io("create private directory", path, error))?;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("inspect created private directory", path, error))?;
+    validate_private_dir(path, &metadata)
+}
+
+fn ensure_store_root(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => validate_store_root(path, &metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => create_private_dir(path),
+        Err(error) => Err(QuartersError::io("inspect Quarters root", path, error)),
+    }
+}
+
+fn validate_store_root(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    let protected_from_other_writers = metadata.mode() & 0o022 == 0;
+    if metadata.file_type().is_dir() && metadata.uid() == Uid::current().as_raw() && protected_from_other_writers {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        format!(
+            "Quarters root must be an owned directory not writable by other users: {}",
+            path.display()
+        ),
+    )
+    .with_hint("choose a dedicated protected root; existing permissions are never changed automatically"))
+}
+
+fn validate_private_dir(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    let private_mode = metadata.mode() & 0o777 == 0o700;
+    if metadata.file_type().is_dir() && metadata.uid() == Uid::current().as_raw() && private_mode {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        format!("private path must be an owned mode-0700 directory: {}", path.display()),
+    )
+    .with_hint("choose a dedicated private Quarters root; existing permissions are never changed automatically"))
 }
 
 fn validate_shell(shell: &Path) -> Result<()> {
@@ -335,8 +382,8 @@ fn epoch_millis() -> Result<u128> {
         })
 }
 
-fn unique_suffix() -> String {
-    format!("{}-{}", std::process::id(), epoch_millis().unwrap_or_default())
+fn unique_suffix() -> Result<String> {
+    Ok(format!("{}-{}", std::process::id(), epoch_millis()?))
 }
 
 #[cfg(test)]
@@ -344,6 +391,7 @@ fn unique_suffix() -> String {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     fn test_store() -> (TempDir, Store) {
@@ -375,5 +423,38 @@ mod tests {
         );
         drop(lease);
         store.remove(&space).expect("remove inactive space");
+    }
+
+    #[test]
+    fn existing_root_is_never_chmodded() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path().join("existing-root");
+        fs::create_dir(&root).expect("create root");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).expect("set broad mode");
+        let store = Store::new(root.clone()).expect("valid absolute root");
+
+        store
+            .create(SpaceName::parse("work").expect("valid name"), PathBuf::from("/bin/sh"))
+            .expect("protected existing root is usable");
+
+        let mode = fs::symlink_metadata(root).expect("inspect root").mode() & 0o777;
+        assert_eq!(mode, 0o755, "Quarters must not chmod an existing root");
+    }
+
+    #[test]
+    fn existing_group_writable_root_fails_closed_without_chmod() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path().join("shared-root");
+        fs::create_dir(&root).expect("create root");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).expect("set shared mode");
+        let store = Store::new(root.clone()).expect("valid absolute root");
+
+        let error = store
+            .create(SpaceName::parse("work").expect("valid name"), PathBuf::from("/bin/sh"))
+            .expect_err("other-writable root must fail closed");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptState);
+        let mode = fs::symlink_metadata(root).expect("inspect root").mode() & 0o777;
+        assert_eq!(mode, 0o770, "Quarters must not chmod a rejected root");
     }
 }

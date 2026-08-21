@@ -37,7 +37,7 @@ fn help_and_version_are_successful_control_flow() -> Result<(), Box<dyn Error>> 
     assert!(String::from_utf8(help.stdout)?.contains("Usage: quarters"));
 
     let version = run(quarters(temporary.path()).arg("--version"))?;
-    assert!(String::from_utf8(version.stdout)?.starts_with("quarters 0.1.0-alpha.1"));
+    assert!(String::from_utf8(version.stdout)?.starts_with("quarters 0.1.0-alpha.2"));
     Ok(())
 }
 

@@ -46,6 +46,8 @@ jobs:
           sudo apt-get install --yes musl-tools
       - name: Build native binary
         run: cargo build --locked --release --target '${{ matrix.target }}' --package quarters
+      - name: Test the shipped target
+        run: cargo test --locked --workspace --all-targets --target '${{ matrix.target }}'
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -59,6 +61,7 @@ jobs:
         run: |
           install -m 0755 "target/${NATIVE_TARGET}/release/quarters" "${NATIVE_PACKAGE}/bin/quarters"
           cp packaging/npm/platforms/README.md "${NATIVE_PACKAGE}/README.md"
+          cp LICENSE NOTICE "${NATIVE_PACKAGE}/"
           mkdir npm-dist
           npm pack "${NATIVE_PACKAGE}" --pack-destination npm-dist
       - name: Upload native package
@@ -90,8 +93,11 @@ jobs:
         working-directory: packaging/npm/quarters-cli
       - name: Pack launcher
         run: |
-          mkdir npm-dist
-          npm pack packaging/npm/quarters-cli --pack-destination npm-dist
+          mkdir -p npm-stage/dist/src npm-dist
+          cp packaging/npm/quarters-cli/package.json packaging/npm/quarters-cli/README.md npm-stage/
+          cp packaging/npm/quarters-cli/dist/src/*.js npm-stage/dist/src/
+          cp LICENSE NOTICE npm-stage/
+          npm pack --ignore-scripts npm-stage --pack-destination npm-dist
       - name: Upload launcher package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -123,10 +129,15 @@ jobs:
         with:
           merge-multiple: true
           path: npm-dist
+      - name: Validate every publication without changing the registry
+        run: |
+          for archive in npm-dist/*.tgz; do
+            npm publish "$archive" --access public --dry-run --tag alpha
+          done
       - name: Publish native packages
         run: |
-          npm publish npm-dist/quarters-cli-darwin-arm64-*.tgz --access public
-          npm publish npm-dist/quarters-cli-darwin-x64-*.tgz --access public
-          npm publish npm-dist/quarters-cli-linux-x64-*.tgz --access public
+          npm publish npm-dist/quarters-cli-darwin-arm64-*.tgz --access public --tag alpha
+          npm publish npm-dist/quarters-cli-darwin-x64-*.tgz --access public --tag alpha
+          npm publish npm-dist/quarters-cli-linux-x64-*.tgz --access public --tag alpha
       - name: Publish launcher package
-        run: npm publish npm-dist/quarters-cli-[0-9]*.tgz --access public
+        run: npm publish npm-dist/quarters-cli-[0-9]*.tgz --access public --tag alpha

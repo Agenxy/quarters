@@ -1,6 +1,6 @@
 {
   "name": "quarters-cli",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Persistent alternate user-state profiles for native processes",
   "license": "Apache-2.0",
   "type": "module",
@@ -9,7 +9,9 @@
   },
   "files": [
     "dist/src/*.js",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.14.0"
@@ -31,9 +33,9 @@
     "userspace"
   ],
   "optionalDependencies": {
-    "quarters-cli-darwin-arm64": "0.1.0-alpha.1",
-    "quarters-cli-darwin-x64": "0.1.0-alpha.1",
-    "quarters-cli-linux-x64": "0.1.0-alpha.1"
+    "quarters-cli-darwin-arm64": "0.1.0-alpha.2",
+    "quarters-cli-darwin-x64": "0.1.0-alpha.2",
+    "quarters-cli-linux-x64": "0.1.0-alpha.2"
   },
   "devDependencies": {
     "@types/node": "26.2.0",

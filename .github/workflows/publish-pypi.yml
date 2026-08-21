@@ -5,6 +5,12 @@ on:
     types:
       - published
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish already-versioned distributions after building them
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -70,6 +76,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
+    if: github.event_name == 'release' || inputs.publish
     needs:
       - source
       - wheels

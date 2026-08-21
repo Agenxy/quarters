@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 proc-macro2 = { workspace = true, features = ["span-locations"] }
+serde_json.workspace = true
 syn.workspace = true
 
 [lints]
