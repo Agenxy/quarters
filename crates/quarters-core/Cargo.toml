@@ -1,0 +1,24 @@
+[package]
+name = "quarters-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Portable state-profile core for Quarters"
+readme = "../../README.md"
+keywords = ["environment", "profile", "shell", "userspace"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+fs4.workspace = true
+nix = { workspace = true, features = ["fs", "mount", "sched", "signal", "user"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "quarters-quality"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Repository policy and structural ceilings for Quarters"
+publish = false
+
+[dependencies]
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+syn.workspace = true
+
+[lints]
+workspace = true

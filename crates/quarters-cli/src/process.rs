@@ -1,0 +1,195 @@
+//! Native child-process launch and host escape behavior.
+
+use quarters_core::platform;
+use quarters_core::{EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, Result, Space, Store};
+use std::ffi::{OsStr, OsString};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus};
+
+pub(crate) struct ProfileLaunch<'a> {
+    pub(crate) store: &'a Store,
+    pub(crate) space: &'a Space,
+    pub(crate) host: &'a HostEnvironment,
+    pub(crate) home_view: bool,
+    pub(crate) inherited_names: &'a [String],
+}
+
+impl ProfileLaunch<'_> {
+    pub(crate) fn environment(&self) -> Result<EnvironmentPlan> {
+        let effective_home = self.effective_home()?;
+        EnvironmentPlan::for_space(self.space, self.host, &effective_home, self.inherited_names)
+    }
+
+    pub(crate) fn run(&self, raw_command: &[OsString]) -> Result<i32> {
+        let (program, arguments) = split_command(raw_command)?;
+        let environment = self.environment()?;
+        let _lease = self.store.lease(self.space)?;
+        let status = if self.home_view {
+            self.run_home_view(program, arguments, &environment)?
+        } else {
+            run_direct(program, arguments, &environment)?
+        };
+        Ok(status_code(status))
+    }
+
+    fn effective_home(&self) -> Result<PathBuf> {
+        if !self.home_view {
+            return Ok(self.space.home());
+        }
+        let capabilities = platform::capabilities();
+        if !capabilities.home_view.available {
+            return Err(QuartersError::new(
+                ErrorKind::Unsupported,
+                format!(
+                    "--home-view is {} on this host: {}",
+                    capabilities.home_view.status, capabilities.home_view.detail
+                ),
+            )
+            .with_hint("omit --home-view for portable state redirection"));
+        }
+        self.host_home()
+    }
+
+    fn run_home_view(
+        &self,
+        program: &OsStr,
+        arguments: &[OsString],
+        environment: &EnvironmentPlan,
+    ) -> Result<ExitStatus> {
+        let current_executable = std::env::current_exe().map_err(|error| {
+            QuartersError::new(ErrorKind::System, "could not locate the Quarters executable").with_source(error)
+        })?;
+        install_runtime_binary(&current_executable, environment)?;
+        let host_home = self.host_home()?;
+        let mut command = Command::new(current_executable);
+        command
+            .arg("__linux-launch")
+            .arg("--space-home")
+            .arg(self.space.home())
+            .arg("--host-home")
+            .arg(host_home)
+            .arg("--")
+            .arg(program)
+            .args(arguments);
+        environment.apply(&mut command);
+        command
+            .status()
+            .map_err(|error| process_error("start Linux home-view launcher", program, error))
+    }
+
+    fn host_home(&self) -> Result<PathBuf> {
+        self.host
+            .get("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| QuartersError::new(ErrorKind::InvalidInput, "host HOME is unset or not absolute"))
+    }
+}
+
+pub(crate) fn run_shell(launch: &ProfileLaunch<'_>, shell: &Path, login: bool) -> Result<i32> {
+    if !shell.is_absolute() || !shell.is_file() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            format!("shell must be an existing absolute file: {}", shell.display()),
+        ));
+    }
+    let mut command = vec![shell.as_os_str().to_owned()];
+    if login {
+        command.push(OsString::from("-l"));
+    }
+    launch.run(&command)
+}
+
+pub(crate) fn run_host(raw_command: &[OsString]) -> Result<i32> {
+    let (program, arguments) = split_command(raw_command)?;
+    if std::env::var_os("QUARTERS_SPACE").is_none() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "'quarters host' must be run from inside a space",
+        ));
+    }
+    if let Some(mode) = std::env::var_os("QUARTERS_NO_HOST_ESCAPE") {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            format!("host escape is disabled in {} mode", mode.to_string_lossy()),
+        )
+        .with_hint("exit the space and run the command from the host shell"));
+    }
+    let mut command = Command::new(program);
+    command.args(arguments);
+    for (name, value) in quarters_core::host_command_environment() {
+        match value {
+            Some(value) => {
+                command.env(name, value);
+            }
+            None => {
+                command.env_remove(name);
+            }
+        }
+    }
+    let status = command
+        .status()
+        .map_err(|error| process_error("start host command", program, error))?;
+    Ok(status_code(status))
+}
+
+pub(crate) fn linux_launch(space_home: &Path, host_home: &Path, raw_command: &[OsString]) -> Result<i32> {
+    let (program, arguments) = split_command(raw_command)?;
+    platform::enter_home_view(space_home, host_home)?;
+    let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(arguments));
+    Err(process_error("replace the namespace launcher", program, error))
+}
+
+fn run_direct(program: &OsStr, arguments: &[OsString], environment: &EnvironmentPlan) -> Result<ExitStatus> {
+    let mut command = Command::new(program);
+    command.args(arguments);
+    environment.apply(&mut command);
+    command
+        .status()
+        .map_err(|error| process_error("start profile command", program, error))
+}
+
+fn install_runtime_binary(source: &Path, environment: &EnvironmentPlan) -> Result<()> {
+    let runtime = environment.value("XDG_RUNTIME_DIR").ok_or_else(|| {
+        QuartersError::new(
+            ErrorKind::CorruptState,
+            "home-view environment has no runtime directory",
+        )
+    })?;
+    let destination = PathBuf::from(runtime).join("bin/quarters");
+    let temporary = destination.with_extension(format!("tmp-{}", std::process::id()));
+    fs::copy(source, &temporary)
+        .map_err(|error| QuartersError::io("stage the home-view launcher", &temporary, error))?;
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700))
+        .map_err(|error| QuartersError::io("protect the home-view launcher", &temporary, error))?;
+    fs::rename(&temporary, &destination)
+        .map_err(|error| QuartersError::io("publish the home-view launcher", &destination, error))
+}
+
+fn split_command(raw_command: &[OsString]) -> Result<(&OsStr, &[OsString])> {
+    raw_command
+        .split_first()
+        .map(|(program, arguments)| (program.as_os_str(), arguments))
+        .ok_or_else(|| {
+            QuartersError::new(ErrorKind::InvalidInput, "a command is required")
+                .with_hint("put '--' before command options")
+        })
+}
+
+fn status_code(status: ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .unwrap_or_else(|| status.signal().map_or(1, |signal| 128 + signal))
+}
+
+fn process_error(operation: &str, program: &OsStr, source: std::io::Error) -> QuartersError {
+    QuartersError::new(
+        ErrorKind::System,
+        format!("could not {operation}: {}", program.to_string_lossy()),
+    )
+    .with_hint("check that the executable exists and is permitted by the host account")
+    .with_source(source)
+}

@@ -1,0 +1,29 @@
+[package]
+name = "quarters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Persistent alternate user-state profiles for native processes"
+readme = "../../README.md"
+keywords = ["cli", "environment", "profile", "shell", "userspace"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "quarters"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+quarters-core = { version = "=0.1.0-alpha.1", path = "../quarters-core" }
+nix = { workspace = true, features = ["signal", "user"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
