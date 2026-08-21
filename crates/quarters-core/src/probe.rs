@@ -24,8 +24,6 @@ pub struct ToolProbe {
     pub tool: String,
     /// Whether an executable was found on this host.
     pub installed: bool,
-    /// Resolved executable path when installed.
-    pub executable: Option<PathBuf>,
     /// Compatibility class.
     pub tier: CompatibilityTier,
     /// Mechanism Quarters configures.
@@ -111,7 +109,6 @@ fn probe(tool: &str, tier: CompatibilityTier, mechanism: &str, limitation: Optio
     ToolProbe {
         tool: tool.to_owned(),
         installed: executable.is_some(),
-        executable,
         tier,
         mechanism: mechanism.to_owned(),
         limitation: limitation.map(str::to_owned),

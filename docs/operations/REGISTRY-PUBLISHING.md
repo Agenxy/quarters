@@ -23,11 +23,11 @@ configuration is complete.
 There is intentionally no long-lived-token fallback.
 
 crates.io releases use a newly created, short-lived token restricted to
-publishing updates of `quarters-core` and `quarters`. Dry-run both crates,
-publish the library before the CLI, install the exact version in a clean Cargo
-root, and revoke the token immediately. The token is passed only through the
-publishing process environment and is never saved in the repository or Cargo
-credentials file.
+publishing updates of `quarters-core`, `quarters-mcp` and `quarters`. Dry-run
+all three crates, publish the core first, the MCP adapter second and the CLI
+last, install the exact CLI version in a clean Cargo root, and revoke the token
+immediately. The token is passed only through the publishing process
+environment and is never saved in the repository or Cargo credentials file.
 
 Homebrew is maintained in the separate public
 [`Agenxy/homebrew-tap`](https://github.com/Agenxy/homebrew-tap) repository.

@@ -133,8 +133,8 @@ jobs:
           done
       - name: Publish native packages
         run: |
-          npm publish npm-dist/quarters-cli-darwin-arm64-*.tgz --access public --tag alpha
-          npm publish npm-dist/quarters-cli-darwin-x64-*.tgz --access public --tag alpha
-          npm publish npm-dist/quarters-cli-linux-x64-*.tgz --access public --tag alpha
+          npm publish npm-dist/quarters-cli-darwin-arm64-*.tgz --access public --tag alpha --provenance
+          npm publish npm-dist/quarters-cli-darwin-x64-*.tgz --access public --tag alpha --provenance
+          npm publish npm-dist/quarters-cli-linux-x64-*.tgz --access public --tag alpha --provenance
       - name: Publish launcher package
-        run: npm publish npm-dist/quarters-cli-[0-9]*.tgz --access public --tag alpha
+        run: npm publish npm-dist/quarters-cli-[0-9]*.tgz --access public --tag alpha --provenance

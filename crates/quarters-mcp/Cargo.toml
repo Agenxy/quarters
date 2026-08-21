@@ -1,29 +1,30 @@
 [package]
-name = "quarters"
+name = "quarters-mcp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Persistent alternate user-state profiles for native processes"
+description = "Agent-native MCP adapter for Quarters"
 readme = "../../README.md"
-keywords = ["cli", "environment", "profile", "shell", "userspace"]
+keywords = ["mcp", "environment", "profile", "shell", "agents"]
 categories = ["command-line-utilities", "development-tools"]
 
-[[bin]]
-name = "quarters"
-path = "src/main.rs"
-
 [dependencies]
-clap = { workspace = true, features = ["derive"] }
-nix = { workspace = true, features = ["user"] }
+futures.workspace = true
 quarters-core = { version = "=0.1.0-alpha.3", path = "../quarters-core" }
-quarters-mcp = { version = "=0.1.0-alpha.3", path = "../quarters-mcp" }
-serde.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
+fs4.workspace = true
+jsonschema.workspace = true
+rmcp = { workspace = true, features = ["client"] }
 tempfile.workspace = true
 
 [lints]

@@ -2,3 +2,6 @@ Quarters
 Copyright 2026 Agenxy contributors
 
 Licensed under the Apache License, Version 2.0.
+
+The MCP lifecycle, transport-admission and compatibility-test structure was
+informed by Agenxy Remap, also Apache-2.0 licensed.

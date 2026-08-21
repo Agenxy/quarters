@@ -59,44 +59,104 @@ quarters current
 ```
 
 Install the current checkout with `make install`. The command is placed under
-`~/.local/bin` by default. Install the exact public alpha through any published
-channel:
+`~/.local/bin` by default. The checkout is the unreleased alpha.3 development
+line. The latest public release is alpha.2, currently available through these
+verified channels:
 
 ```sh
 brew install agenxy/tap/quarters
 cargo install --locked --version 0.1.0-alpha.2 quarters
-uv tool install 'quarters==0.1.0a2'
 npm install --global quarters-cli@alpha
 ```
 
-The PyPI and npm packages select native builds for macOS arm64, macOS x64 and
-Linux x64. Linux arm64 is not yet prebuilt and falls back to the PyPI source
-distribution, which requires Rust. npm rejects unsupported targets directly.
+The npm package selects native builds for macOS arm64, macOS x64 and Linux x64.
+Linux arm64 is not yet published through npm, which rejects that target
+directly. PyPI publication is not yet available and is not advertised as an
+install path.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `create NAME` | Atomically create a private persistent space |
-| `list` | List spaces and their homes |
+| `list` | List healthy and unhealthy space entries without hiding siblings |
+| `status [NAME]` | Observe whether Quarters' cooperative lease is free or held |
 | `current` | Print the current space or `host` |
 | `env NAME` | Prepare and show the exact computed environment; explicit inherited values are redacted |
 | `enter NAME` | Open the space's interactive shell |
 | `exec NAME -- COMMAND` | Run one native command |
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
-| `doctor [NAME]` | Inspect platform and installed-tool compatibility |
+| `doctor [NAME]` | Inspect platform/tools; named form prepares and validates the baseline environment |
 | `rm NAME --confirm NAME` | Remove a space after exact-name confirmation and an inactive supervisor lease |
+| `recover --confirm stale-state` | Reclaim validated internal state left by an interrupted create or remove |
+| `mcp` | Serve the bounded local MCP adapter over standard input/output |
 
 Management and inspection commands accept `--json`. Pass-through commands do
 not because child standard output must remain unchanged.
 
-`env` prepares the private runtime directories that the displayed environment
-references. It does not start a child or inspect any state stored in the space.
+`env` and `doctor NAME` prepare the private runtime directories referenced by
+the computed environment. Neither starts a child or reads user content stored
+inside the space home.
 
-Removal is blocked while the supervising `quarters` process for an entry is
-running. A detached process, background job or server can outlive that
-supervisor and is not discoverable portably. Exit those processes before
-removing their space.
+`status` reports the cooperative lease used by Quarters supervisors and
+management operations. It does not guess from PIDs or scan processes. A
+detached process, background job or server can outlive the lease and is not
+discoverable portably, so its state is reported as unknown. Removal is blocked
+while the lease is held; stop detached processes before removing their space.
+An unhealthy home or manifest remains visible to `list` and `status` and can be
+removed after exact-name confirmation, but Quarters refuses removal when the
+space root or activity lock itself cannot be validated.
+Quarters deliberately does not rebuild or bypass a damaged published activity
+lock: a supervisor may still hold the old inode, so automated deletion could
+misclassify active state. Repairing such corruption remains a manual
+filesystem-recovery operation.
+`current` is a convenience report, never proof of identity or confinement. It
+matches the space marker to a healthy store entry in baseline mode. Linux
+home-view cannot reopen the store hidden by its mount, so there it reports the
+validated marker established by the Quarters launcher.
+If the stored entry name itself is invalid, copy its exact value from
+the filesystem only after inspecting it safely; JSON and human diagnostics
+escape and bound untrusted names rather than replaying terminal controls. `rm`
+accepts one literal visible directory-entry name while rejecting empty names
+and path separators. Dot-prefixed entries are internal recovery state and are
+never removal targets. A losing concurrent creation is cleaned automatically.
+`doctor` reports any interrupted creation or retirement residue by count;
+`recover --confirm stale-state` removes only those reserved, private-directory
+prefixes while holding the same bounded management lock as creation/removal.
+If recovery metadata is corrupt, `doctor` keeps reporting platform and tool
+capabilities while marking only recovery inspection unavailable.
+
+## MCP for local agents
+
+`quarters mcp` exposes the same validated store through a local, newline-framed
+stdio server. It implements MCP `2026-07-28` stateless discovery and the latest
+2025 revision, `2025-11-25`, as separate lifecycle families. It does not open a
+network listener.
+
+```json
+{
+  "mcpServers": {
+    "quarters": {
+      "command": "/absolute/path/to/quarters",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The deliberately small tool surface is `quarters_status`, `quarters_doctor`
+and `quarters_create`. There is no MCP tool for entering a shell, executing a
+command, inheriting environment variables, selecting an arbitrary root or
+removing data. Agents can read `quarters://help`, `quarters://security` and the
+private, short-lived `quarters://status` resource. Read the security resource
+before permitting mutations.
+
+The transport caps each frame at one MiB, caps active requests, rejects reused
+legacy or duplicate live request IDs, bounds store listings and keeps blocking
+filesystem work off the protocol executor. Unhealthy directory names are
+hex-encoded in agent responses so stored text cannot become model directives.
+See the [MCP guide](docs/mcp/README.md) and
+[verification contract](docs/mcp/VERIFICATION.md).
 
 ## What moves into a space
 
@@ -115,6 +175,14 @@ Quarters configures:
 
 The child starts from a safe environment allowlist. Use `--inherit NAME` to
 pass any additional variable deliberately. Quarters never prints its value.
+Profile-owned variables such as `HOME`, `PATH`, `SSH_AUTH_SOCK`, XDG paths and
+`QUARTERS_*` cannot be inherited because Quarters computes them after the
+allowlist boundary.
+
+A custom `--root` is an operator-selected trust anchor. Put it beneath a
+directory that is owned by the current user and not writable by another user;
+Quarters validates the selected root and its control files, but does not claim
+authority over every ancestor directory.
 
 ## What does not move
 
@@ -146,6 +214,8 @@ transaction and quiescence contract is recorded in
 - [Getting started](docs/tutorials/GETTING-STARTED.md)
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Platform decision](docs/architecture/ADR-0001-PORTABLE-PROFILE-CORE.md)
+- [Agent-native MCP decision](docs/architecture/ADR-0002-AGENT-NATIVE-MCP.md)
+- [MCP guide](docs/mcp/README.md)
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Compatibility matrix](docs/compatibility/MATRIX.md)
 - [Security policy](SECURITY.md)

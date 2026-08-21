@@ -6,9 +6,9 @@ Quarters virtualizes user-owned state for a native process tree. It does not
 virtualize the host identity or machine.
 
 ```text
-CLI
+CLI / local MCP stdio
  |
- +-- validated command and stable output
+ +-- validated commands, typed tools and stable output
  |
  +-- portable core
  |    +-- private atomic store
@@ -23,12 +23,18 @@ CLI
       +-- Linux opt-in user/mount home view
 ```
 
+The CLI and MCP adapter are sibling presentation layers. Both use the same
+`quarters-core` store, environment planner and platform inventory. The MCP
+adapter cannot spawn profile processes and does not reimplement filesystem
+authority.
+
 ## Storage
 
 The default root is `~/.quarters`:
 
 ```text
 .quarters/
+  .observe
   spaces/
     work/
       .quarters.json
@@ -46,6 +52,19 @@ The default root is `~/.quarters`:
 Creation builds a complete directory under `.creating-<name>-<unique>` on the
 same filesystem, syncs private files and publishes it with `rename()`. A schema
 marker and matching directory name are required when opening a space.
+Creation, recovery, lease acquisition and removal share the bounded root
+management lock. Rename losers
+clean their skeleton immediately; interrupted `.creating-*` state and
+`.retired-*` trash are counted by `doctor` and reclaimed only by the confirmed
+`recover` command after private-directory validation.
+
+Root-lock deadlines reflect the kind of work waiting: read-only observation
+waits up to 500 ms and reports activity as unknown when another operation is
+busy; management operations wait up to five seconds before failing closed; a
+space supervisor waits up to one second for its shared activity lease. All use
+bounded exponential retry with jitter, so a slow host cannot turn a transient
+management operation into an indefinite hang or make ordinary concurrent
+creation spuriously fail at the observation deadline.
 
 Removal takes an exclusive nonblocking lock, atomically renames the space under
 `trash`, then removes that exact retired directory. A Quarters supervisor holds
@@ -53,6 +72,22 @@ a shared lease while its direct entry is running, so removal fails during that
 period. A detached descendant, tmux server or other process that outlives its
 supervisor is outside this portable lease model and must be stopped by the user
 before removal.
+
+`status` observes whether this cooperative lease is free or held. Supervisor
+lease acquisition, status probes and the retirement phase of removal briefly
+serialize through the root `.observe` lock. This prevents a probe from
+mistaking another probe for a supervisor and prevents a waiting launch from
+starting against a space that removal just retired. The observation is not a
+later mutation precondition, and detached-process state remains unknown. Stored
+root, home, manifest and lock anchors are validated without following their
+final symlink and must retain their declared owner, type and private mode.
+Aggregate status holds one observation guard for the entire bounded listing,
+so contention has one deadline rather than one deadline per space.
+
+Directory inspection treats every published entry independently. A damaged
+home or manifest is reported as unhealthy without hiding valid siblings.
+Removal deliberately validates only the invariants it needs: the exact named
+private root and cooperative lock. A damaged root or lock remains fail-closed.
 
 ## Environment authority
 
@@ -82,6 +117,46 @@ forwards the child's terminal naturally through inherited file descriptors.
 `host` is an explicit baseline escape. It restores the captured host `HOME`,
 `PATH`, `TMPDIR` and runtime path, clears profile variables and runs the target.
 It does not restore variables that were omitted by the allowlist.
+
+## Agent protocol boundary
+
+`quarters mcp` is a local stdio adapter built on the official Rust SDK. It
+supports exactly `2026-07-28` and `2025-11-25`. A connection commits to one
+lifecycle family: 2026 uses stateless `server/discover` and per-request
+metadata; 2025 uses `initialize` and the initialized notification. Cross-family
+methods and version metadata fail closed.
+
+Transport admission owns request capacity from frame acceptance until response
+write completion. It rejects oversized frames, overlong or duplicate request
+IDs, bounds legacy-session ID retention, supports cancellation and times out
+all writes and transport shutdown within two seconds when output is not
+draining. Store operations execute through a
+two-slot blocking-work gate. Status-all refuses stores larger than 128 visible
+entries instead of returning a misleading partial view.
+
+Transport-level errors are handed to a single-slot writer actor. Once an error
+is decoded, cancellation of the SDK receive future cannot discard it; the actor
+either writes the complete bounded frame within two seconds or marks the transport
+failed. Valid JSON batches and invalid JSON-RPC IDs receive a fixed Invalid
+Request response with a null ID. Pre-lifecycle notifications are ignored and
+cannot select a protocol family.
+
+Cancellation stops response delivery but never interrupts a filesystem
+mutation mid-transaction. A cancelled create is allowed to finish atomically;
+a retry may therefore report that the space already exists.
+
+The MCP capability surface is intentionally narrower than the CLI. It can
+inspect status, inspect capabilities and create a validated space. It cannot
+run commands, open shells, inherit host environment, request home views, change
+the bound root or delete data. Static resources are public-cacheable only under
+2026; status is private with a 500 ms TTL. Legacy responses omit 2026 cache and
+`resultType` fields.
+
+Stored entry names and failure text are untrusted. Healthy names must pass the
+portable grammar. Unhealthy names are represented as bounded hexadecimal and
+their detailed filesystem diagnostics are replaced with a fixed validation
+message on the agent surface. Terminal CLI output retains escaped, actionable
+names for human recovery.
 
 ## Platform backends
 
@@ -122,6 +197,12 @@ This mode is opt-in for three reasons:
 
 The internal child prevents namespace calls from changing the invoking shell
 or the supervising Quarters process. Requested setup fails closed.
+
+Inside that mounted view, the authoritative store path is deliberately hidden.
+The non-authoritative `current` convenience command therefore reports the
+portable, grammar-validated space marker established at launch instead of
+reopening the hidden store. Other management commands remain disabled, and no
+security decision may use `current` as proof of process identity.
 
 Landlock is future work. The build does not equate namespace path changes with
 filesystem confinement.

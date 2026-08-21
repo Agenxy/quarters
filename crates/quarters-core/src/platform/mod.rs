@@ -12,8 +12,8 @@ use nix::unistd::Uid;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::fs::{self, DirBuilder};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 /// Host feature inventory.
@@ -61,7 +61,7 @@ pub(crate) fn runtime_directory(space: &Space, host: &HostEnvironment) -> Result
     let uid = Uid::current().as_raw();
     let fingerprint = path_fingerprint(space.root());
     let namespace_root = base.join(format!("quarters-{uid}"));
-    let runtime = namespace_root.join(format!("{}-{fingerprint:08x}", space.manifest().name));
+    let runtime = namespace_root.join(format!("{}-{fingerprint:016x}", space.manifest().name));
     for directory in [
         &namespace_root,
         &runtime,
@@ -75,28 +75,49 @@ pub(crate) fn runtime_directory(space: &Space, host: &HostEnvironment) -> Result
 }
 
 fn ensure_owned_private_directory(path: &Path, uid: u32) -> Result<()> {
-    fs::create_dir_all(path).map_err(|error| QuartersError::io("create runtime directory", path, error))?;
-    let metadata =
-        fs::symlink_metadata(path).map_err(|error| QuartersError::io("inspect runtime directory", path, error))?;
-    if !metadata.file_type().is_dir() || metadata.uid() != uid {
-        return Err(QuartersError::new(
-            ErrorKind::CorruptState,
-            format!(
-                "runtime path is not a directory owned by the current user: {}",
-                path.display()
-            ),
-        )
-        .with_hint("inspect the path without following symlinks, then remove it only if it is safe"));
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => return validate_runtime_directory(path, uid, &metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(QuartersError::io("inspect runtime directory", path, error)),
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| QuartersError::io("set runtime directory permissions", path, error))
+    let mut builder = DirBuilder::new();
+    builder.mode(0o700);
+    match builder.create(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(QuartersError::io("create runtime directory", path, error)),
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("inspect created runtime directory", path, error))?;
+    validate_runtime_directory(path, uid, &metadata)
 }
 
-fn path_fingerprint(path: &Path) -> u32 {
-    let mut hash = 2_166_136_261_u32;
+fn validate_runtime_directory(path: &Path, uid: u32, metadata: &fs::Metadata) -> Result<()> {
+    let private = metadata.mode() & 0o777 == 0o700;
+    if !metadata.file_type().is_dir() || metadata.uid() != uid || !private {
+        let issue = if metadata.file_type().is_symlink() {
+            "it is a symbolic link"
+        } else if !metadata.file_type().is_dir() {
+            "it is not a directory"
+        } else if metadata.uid() != uid {
+            "it is owned by another user"
+        } else {
+            "its mode is not 0700"
+        };
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            format!("invalid private runtime directory {}: {issue}", path.display()),
+        )
+        .with_hint("inspect the path without following links; Quarters never repairs existing runtime permissions"));
+    }
+    Ok(())
+}
+
+fn path_fingerprint(path: &Path) -> u64 {
+    let mut hash = 14_695_981_039_346_656_037_u64;
     for byte in path.as_os_str().as_encoded_bytes() {
-        hash ^= u32::from(*byte);
-        hash = hash.wrapping_mul(16_777_619);
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
     }
     hash
 }
@@ -123,4 +144,32 @@ fn unsupported_home_view() -> QuartersError {
         "a bind-mounted passwd-home view is unavailable on this platform",
     )
     .with_hint("omit --home-view; HOME and user-state redirection remain available")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    use nix::unistd::Uid;
+
+    use super::ensure_owned_private_directory;
+
+    #[test]
+    fn existing_runtime_permissions_are_never_repaired() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let broad = directory.path().join("broad");
+        std::fs::create_dir(&broad)?;
+        std::fs::set_permissions(&broad, std::fs::Permissions::from_mode(0o777))?;
+        assert!(ensure_owned_private_directory(&broad, Uid::current().as_raw()).is_err());
+        assert_eq!(std::fs::symlink_metadata(&broad)?.permissions().mode() & 0o777, 0o777);
+
+        let target = directory.path().join("target");
+        std::fs::create_dir(&target)?;
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))?;
+        let link = directory.path().join("link");
+        symlink(&target, &link)?;
+        assert!(ensure_owned_private_directory(&link, Uid::current().as_raw()).is_err());
+        assert_eq!(std::fs::symlink_metadata(&target)?.permissions().mode() & 0o777, 0o755);
+        Ok(())
+    }
 }

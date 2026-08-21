@@ -87,7 +87,7 @@ impl EnvironmentPlan {
         let mut values = host.safe_values();
         let mut explicit_inheritance = BTreeSet::new();
         for name in inherited_names {
-            validate_variable_name(name)?;
+            validate_inherited_variable(name)?;
             let value = host.get(name).ok_or_else(|| {
                 QuartersError::new(
                     ErrorKind::InvalidInput,
@@ -285,6 +285,22 @@ fn validate_variable_name(name: &str) -> Result<()> {
     ))
 }
 
+fn validate_inherited_variable(name: &str) -> Result<()> {
+    validate_variable_name(name)?;
+    let profile_owned =
+        name == "HOME" || name == "PATH" || name.starts_with("QUARTERS_") || REDIRECTED_VARIABLES.contains(&name);
+    if !profile_owned {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::InvalidInput,
+        format!("'{name}' is owned by the space profile and cannot be inherited"),
+    )
+    .with_hint(format!(
+        "remove '--inherit {name}'; Quarters always computes this variable"
+    )))
+}
+
 fn preserve_host_value(
     values: &mut BTreeMap<OsString, OsString>,
     host: &HostEnvironment,
@@ -310,7 +326,7 @@ fn store_root(space: &Space) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_to_inherit, validate_variable_name};
+    use super::{safe_to_inherit, validate_inherited_variable, validate_variable_name};
     use std::ffi::OsString;
 
     #[test]
@@ -337,5 +353,16 @@ mod tests {
         for name in ["", "2TOKEN", "TOKEN-NAME", "TOKEN=VALUE", "TOKEN.NAME"] {
             assert!(validate_variable_name(name).is_err(), "expected {name} to be invalid");
         }
+    }
+
+    #[test]
+    fn profile_owned_variables_cannot_be_explicitly_inherited() {
+        for name in ["HOME", "PATH", "SSH_AUTH_SOCK", "XDG_CONFIG_HOME", "QUARTERS_ROOT"] {
+            assert!(
+                validate_inherited_variable(name).is_err(),
+                "expected {name} to be profile-owned"
+            );
+        }
+        assert!(validate_inherited_variable("EXPLICIT_SECRET").is_ok());
     }
 }
