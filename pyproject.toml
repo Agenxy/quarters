@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin==1.14.1"]
+build-backend = "maturin"
+
+[project]
+name = "quarters"
+dynamic = ["version"]
+description = "Persistent alternate user-state profiles for native processes"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Agenxy contributors" }]
+keywords = ["cli", "environment", "profile", "shell", "userspace"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Shells",
+]
+
+[project.urls]
+Homepage = "https://github.com/Agenxy/quarters"
+Repository = "https://github.com/Agenxy/quarters"
+Issues = "https://github.com/Agenxy/quarters/issues"
+Changelog = "https://github.com/Agenxy/quarters/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+manifest-path = "crates/quarters-cli/Cargo.toml"
+bindings = "bin"
+strip = true
