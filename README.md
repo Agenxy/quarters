@@ -1,3 +1,5 @@
+<img src="docs/icon.svg" width="72" height="72" alt="">
+
 # Quarters
 
 Quarters gives native shells and commands another persistent home while they
