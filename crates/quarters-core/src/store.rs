@@ -2,6 +2,7 @@
 
 mod create;
 mod layout;
+pub(crate) mod lifecycle;
 
 pub(crate) use layout::StoreLayout;
 
@@ -266,36 +267,12 @@ impl Store {
         let Some(spaces_root) = self.existing_spaces_root()? else {
             return Err(space_not_found(name));
         };
-        let _observation = self.management_guard()?;
-        let space_path = spaces_root.join(name);
-        let metadata = match fs::symlink_metadata(&space_path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(space_not_found(name)),
-            Err(error) => return Err(QuartersError::io("inspect removal target", &space_path, error)),
+        let retired = {
+            let _observation = self.management_guard()?;
+            retire_space(self, &spaces_root, name)?
         };
-        validate_private_dir(&space_path, &metadata)?;
-        let lock_path = space_path.join(".active");
-        let file = open_private_lock(&lock_path)?;
-        <File as FileExt>::try_lock(&file).map_err(|error| match error {
-            fs4::TryLockError::WouldBlock => QuartersError::new(
-                ErrorKind::SpaceActive,
-                format!("space '{name}' has a held cooperative lease"),
-            )
-            .with_hint(format!(
-                "run 'quarters status {name}', exit supervised and detached processes, then retry"
-            )),
-            fs4::TryLockError::Error(error) => QuartersError::io("lock space for removal", &lock_path, error),
-        })?;
-        let trash_root = self.layout().trash_root().to_path_buf();
-        create_private_dir(&trash_root)?;
-        let retired = trash_root.join(format!(".retired-{}", unique_suffix()?));
-        fs::rename(&space_path, &retired).map_err(|error| QuartersError::io("retire space", &space_path, error))?;
-        let recovery_hint =
-            "the space was retired from use; run 'quarters doctor' and recover only validated stale state";
-        sync_parent_directory(&space_path).map_err(|error| error.with_hint(recovery_hint))?;
-        sync_parent_directory(&retired).map_err(|error| error.with_hint(recovery_hint))?;
-        fs::remove_dir_all(&retired)
-            .map_err(|error| QuartersError::io("delete retired space", &retired, error).with_hint(recovery_hint))?;
+        let recovery_hint = "the space was retired from use; run 'quarters doctor' and recover validated stale state";
+        lifecycle::remove_tree_restoring_owner_access(&retired).map_err(|error| error.with_hint(recovery_hint))?;
         sync_parent_directory(&retired).map_err(|error| {
             error.with_hint(format!(
                 "space '{name}' was removed, but directory durability could not be confirmed; inspect status before retrying"
@@ -352,6 +329,36 @@ impl Store {
             },
         }
     }
+}
+
+fn retire_space(store: &Store, spaces_root: &Path, name: &str) -> Result<PathBuf> {
+    let space_path = spaces_root.join(name);
+    let metadata = match fs::symlink_metadata(&space_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(space_not_found(name)),
+        Err(error) => return Err(QuartersError::io("inspect removal target", &space_path, error)),
+    };
+    validate_private_dir(&space_path, &metadata)?;
+    let lock_path = space_path.join(".active");
+    let file = open_private_lock(&lock_path)?;
+    <File as FileExt>::try_lock(&file).map_err(|error| match error {
+        fs4::TryLockError::WouldBlock => QuartersError::new(
+            ErrorKind::SpaceActive,
+            format!("space '{name}' has a held cooperative lease"),
+        )
+        .with_hint(format!(
+            "run 'quarters status {name}', exit supervised and detached processes, then retry"
+        )),
+        fs4::TryLockError::Error(error) => QuartersError::io("lock space for removal", &lock_path, error),
+    })?;
+    let trash_root = store.layout().trash_root().to_path_buf();
+    create_private_dir(&trash_root)?;
+    let retired = trash_root.join(format!(".retired-{}", unique_suffix()?));
+    fs::rename(&space_path, &retired).map_err(|error| QuartersError::io("retire space", &space_path, error))?;
+    let recovery_hint = "the space was retired from use; run 'quarters doctor' and recover validated stale state";
+    sync_parent_directory(&space_path).map_err(|error| error.with_hint(recovery_hint))?;
+    sync_parent_directory(&retired).map_err(|error| error.with_hint(recovery_hint))?;
+    Ok(retired)
 }
 
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -488,7 +495,7 @@ fn create_private_dir(path: &Path) -> Result<()> {
     validate_private_dir(path, &metadata)
 }
 
-fn sync_directory(path: &Path) -> Result<()> {
+pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| QuartersError::io("inspect directory before syncing", path, error))?;
     validate_private_dir(path, &metadata)?;
@@ -536,7 +543,7 @@ fn space_not_found(name: &str) -> QuartersError {
         .with_hint("run 'quarters list' to see available spaces")
 }
 
-fn unique_suffix() -> Result<String> {
+pub(crate) fn unique_suffix() -> Result<String> {
     let counter = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
     Ok(format!("{}-{}-{counter}", std::process::id(), epoch_millis()?))
 }

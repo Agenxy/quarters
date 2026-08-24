@@ -34,7 +34,31 @@ This adds private personal directories such as `Desktop`, `Documents` and
 `Downloads`; macOS also gets conventional `Applications` and selected
 `Library` paths. It is still the same OS account and filesystem authority.
 
-## 3. Add an optional short command
+## 3. Clone a space safely
+
+Preview the included state and exclusions without creating anything:
+
+```sh
+target/release/quarters clone studio experiment --preview
+```
+
+When the policy and counts are expected, exactly repeat the source name:
+
+```sh
+target/release/quarters clone studio experiment --confirm-sensitive-state studio
+```
+
+This acknowledgement matters because arbitrary files may contain credentials,
+histories, tokens and agent state. Cache roots are recreated empty by default;
+use `--include-cache` only when their contents are deliberately needed. Runtime
+sockets, FIFOs, devices and foreign-owned entries are skipped and counted.
+
+Clone holds the cooperative source lease exclusively, but detached writers are
+still unknown. It is an atomic independent copy, not a live database snapshot or
+containment boundary. Embedded absolute paths are copied unchanged and may still
+point at the source.
+
+## 4. Add an optional short command
 
 Install Quarters first. When `~/.local/bin` is already on the host PATH:
 
@@ -50,7 +74,7 @@ check matters because a child cannot see aliases and functions defined only in
 its parent shell. Remove only the managed link with
 `quarters shortcut remove qts`. The shorter `q` name is opt-in.
 
-## 4. Prove state separation
+## 5. Prove state separation
 
 ```sh
 target/release/quarters exec clean -- sh -c 'printf "%s\n" "$HOME" "$QUARTERS_SPACE"'
@@ -61,7 +85,7 @@ git config --global user.name
 The last command runs on the host and should retain the host value. File
 permissions and access are still those of the same account.
 
-## 5. Enter the shell
+## 6. Enter the shell
 
 ```sh
 target/release/quarters enter clean
@@ -89,7 +113,7 @@ target/release/quarters enter clean --login
 
 Host system profiles can run in login mode.
 
-## 6. Pass a variable deliberately
+## 7. Pass a variable deliberately
 
 The baseline does not inherit arbitrary variables:
 
@@ -100,7 +124,7 @@ MY_SETTING=present target/release/quarters exec clean --inherit MY_SETTING -- en
 
 `env clean --inherit MY_SETTING` shows the value as redacted.
 
-## 7. Use host state explicitly
+## 8. Use host state explicitly
 
 Inside a baseline shell:
 
@@ -111,7 +135,7 @@ quarters host -- sh -c 'printf "%s\n" "$HOME"'
 This restores host path variables only. It does not restore blocked credential
 variables. Exit the space when you need the exact original host environment.
 
-## 8. Remove the space
+## 9. Remove the space
 
 Exit every process launched in the space, inspect the name, then run:
 
@@ -133,7 +157,7 @@ of those removal anchors is invalid.
 For an invalid stored name, obtain the exact value from `quarters --json list`.
 Removal accepts one literal entry name but never a path, `.` or `..`.
 
-## 9. Connect a local agent
+## 10. Connect a local agent
 
 Build or install Quarters, then configure the agent host to run the absolute
 binary path with the single `mcp` argument. Quarters communicates only over the
@@ -141,8 +165,8 @@ host-provided standard input/output pipes.
 
 Ask the agent to read `quarters://security` before using a mutating tool. It can
 inspect, run doctor and create a space. It cannot enter that space, execute a
-command, pass host credentials or remove anything. Use the human CLI for those
-operations after reviewing their authority implications.
+command, clone state, pass host credentials or remove anything. Use the human
+CLI for those operations after reviewing their authority implications.
 
 The create tool accepts an optional closed `layout` value of `profile` or
 `workspace` under both supported protocol revisions.

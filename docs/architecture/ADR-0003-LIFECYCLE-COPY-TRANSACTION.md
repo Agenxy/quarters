@@ -1,6 +1,6 @@
 # ADR 0003: One transaction primitive for lifecycle copies
 
-Status: proposed; required before clone, template, snapshot, export or rollback
+Status: accepted for bounded portable clone; broader lifecycle gates remain open
 
 ## Context
 
@@ -27,15 +27,18 @@ The engine has these phases:
    unknowable. A later managed-agent registry can strengthen this check; a free
    cooperative lease alone must never be described as a frozen filesystem.
 4. Walk beneath an already-open source root without following symlinks. Reject
-   paths that escape, multiply linked control files, devices, FIFOs and sockets.
+   escaping links and multiply linked control files. Omit and count devices,
+   FIFOs, sockets and foreign-owned user entries.
 5. Apply a declared inclusion policy. Runtime sockets, `.active`, temporary
    state and derived caches are excluded by default. Credentials are included
-   only when the selected operation explicitly says so.
-6. Copy into a private same-filesystem staging directory. Prefer clonefile on
-   Apple filesystems and reflink on Linux only after capability probing; retain
-   a bounded native copy fallback with identical semantics.
-7. Write operation provenance, a new destination stable ID and the appropriate
-   display name. Never copy source control anchors byte-for-byte.
+   only when the selected operation explicitly says so. Platform backends own
+   their exact home-relative derived-cache roots; the portable root is `.cache`.
+6. Copy into a private same-filesystem staging directory. The accepted first
+   backend is a bounded portable copy. clonefile/reflink acceleration remains
+   deferred until capability and semantic-equivalence gates pass.
+7. Write operation provenance, fresh controls and the appropriate display name.
+   Schema-2 workspace clones receive a new stable ID. Schema-1 profiles retain
+   their compatible no-ID contract until ADR 0006 supplies a migration.
 8. Sync files and directories, revalidate the completed tree, and publish with
    one rename while the management lock is held.
 9. Leave only a recognizable private staging prefix after interruption so the
@@ -49,7 +52,8 @@ never silently claimed as preserved.
 
 ## Operation semantics
 
-- `clone` creates a writable independent space with a new name and stable ID.
+- `clone` creates a writable independent space with a new name and, for schema
+  2, a new stable ID. `--preview` is the accepted dry-run surface.
 - `template` stores a named, immutable-by-interface creation source with
   provenance and a credential inclusion declaration.
 - `snapshot` creates an immutable-by-interface recovery point. Filesystem
@@ -71,8 +75,17 @@ never silently claimed as preserved.
 - rollback recovery is proven after forced failure
 - macOS and Linux filesystem fixtures, including unsupported metadata reports
 
-## Consequences
+## Accepted subset and deferred gates
 
-These workflows arrive later than a direct copy command, but share one audited
-security and recovery boundary. Until the gates pass, Quarters exposes no
-clone, freeze, snapshot, template, export or rollback command.
+The portable clone test suite covers adversarial link, hard-link, sparse,
+socket, FIFO, permission, limit, concurrency and injected-failure fixtures in
+the shared macOS/Linux implementation. It reports unsupported metadata rather
+than claiming preservation and exposes no MCP clone authority.
+Device nodes and foreign-UID entries require privilege or a second account and
+therefore have classification coverage but no unprivileged filesystem fixture.
+
+These gates remain explicitly unmet: clonefile/reflink equivalence, schema-1
+stable identity, managed-agent or detached-process quiescence, immutable
+templates/snapshots, authenticated export and rollback recovery after forced
+replacement failure. Quarters therefore exposes `clone` but still no freeze,
+snapshot, template, export or rollback command.

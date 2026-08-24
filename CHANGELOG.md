@@ -6,6 +6,12 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.3 — unreleased
 
+- Add previewed, transaction-safe `clone` for inactive spaces, with explicit
+  sensitive-state confirmation, descriptor-relative traversal, bounded resource
+  limits, counted cache/runtime exclusions, fresh controls and atomic publish.
+- Harden creation, removal and recovery cleanup for nested owner-read-only
+  directories; retire large deletion targets under the management lock and
+  delete them after releasing it.
 - Add schema-gated expanded workspaces with stable opaque IDs, private common
   user directories, platform-specific macOS conventions, additive CLI/MCP
   reporting and creation support across both MCP revisions. Existing/default

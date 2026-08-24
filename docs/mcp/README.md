@@ -71,3 +71,5 @@ inspect status before retrying the same name.
 
 MCP cannot compensate for Quarters' baseline authority model: processes still
 run as the real account, and same-account malware can invoke the CLI directly.
+Clone remains a human CLI operation because it can duplicate arbitrary
+credential-bearing state; MCP exposes no clone source, destination or policy.

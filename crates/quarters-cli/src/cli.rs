@@ -24,6 +24,8 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     /// Create a private, persistent space.
     Create(CreateArgs),
+    /// Clone persistent state into a new independent space.
+    Clone(CloneArgs),
     /// List each space entry, its health and its stored home.
     List,
     /// Report current and cooperative lease state for spaces.
@@ -67,6 +69,27 @@ pub(crate) struct CreateArgs {
     /// User-directory layout to create.
     #[arg(long, value_enum, default_value_t = CreateLayout::Profile)]
     pub(crate) layout: CreateLayout,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CloneArgs {
+    /// Existing source space.
+    pub(crate) source: String,
+
+    /// New destination space.
+    pub(crate) destination: String,
+
+    /// Validate and summarize without creating the destination.
+    #[arg(long, conflicts_with = "confirm_sensitive_state")]
+    pub(crate) preview: bool,
+
+    /// Exactly repeat SOURCE to acknowledge copied state may contain credentials.
+    #[arg(long, value_name = "SOURCE")]
+    pub(crate) confirm_sensitive_state: Option<String>,
+
+    /// Copy derived cache contents instead of recreating cache roots empty.
+    #[arg(long)]
+    pub(crate) include_cache: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

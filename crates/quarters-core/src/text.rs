@@ -29,6 +29,26 @@ pub fn escape_untrusted_text_bounded(value: &str, maximum: usize) -> String {
     escaped.chars().take(prefix).chain("...".chars()).collect()
 }
 
+/// Escape untrusted text and cap its rendered UTF-8 byte length.
+#[must_use]
+pub(crate) fn escape_untrusted_text_bounded_bytes(value: &str, maximum: usize) -> String {
+    let escaped = escape_untrusted_text(value);
+    if escaped.len() <= maximum {
+        return escaped;
+    }
+    let suffix = if maximum >= 3 { "..." } else { "" };
+    let budget = maximum.saturating_sub(suffix.len());
+    let mut bounded = String::with_capacity(maximum);
+    for character in escaped.chars() {
+        if bounded.len().saturating_add(character.len_utf8()) > budget {
+            break;
+        }
+        bounded.push(character);
+    }
+    bounded.push_str(suffix);
+    bounded
+}
+
 /// Encode arbitrary displayed text as bounded lowercase hexadecimal so an
 /// agent never interprets an unvalidated directory name as natural-language
 /// instructions.
@@ -80,7 +100,10 @@ fn unsafe_presentation_character(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded};
+    use super::{
+        encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded,
+        escape_untrusted_text_bounded_bytes,
+    };
 
     #[test]
     fn presentation_escaping_preserves_printable_unicode_and_quotes() {
@@ -97,6 +120,15 @@ mod tests {
         assert!(!escaped.contains('\u{1b}'));
         assert_eq!(escape_untrusted_text_bounded("abcdef", 0), "");
         assert_eq!(escape_untrusted_text_bounded("abcdef", 2), "ab");
+    }
+
+    #[test]
+    fn byte_bounded_escaping_stays_valid_utf8_and_within_budget() {
+        let escaped = escape_untrusted_text_bounded_bytes(&format!("{}\u{1b}", "é".repeat(20)), 17);
+        assert!(escaped.len() <= 17);
+        assert!(escaped.ends_with("..."));
+        assert!(!escaped.contains('\u{1b}'));
+        assert_eq!(escape_untrusted_text_bounded_bytes("é", 1), "");
     }
 
     #[test]

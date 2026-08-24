@@ -15,12 +15,15 @@ Applied in this development line:
 - an expanded `workspace` layout with visible personal directories,
   platform-specific macOS conventions and a stable opaque space ID
 - CLI and MCP creation/reporting for both profile and workspace layouts
+- previewed, bounded CLI clone with exact sensitive-state confirmation,
+  descriptor-relative traversal, aggregate exclusions and atomic publication
 
 Specified but deliberately not exposed until their transaction and adversarial
 gates pass:
 
 - hidden internal-store migration and runtime re-keying (ADR 0006)
-- clone, template, snapshot, freeze, export and rollback (ADR 0003)
+- template, snapshot, freeze, export and rollback beyond the accepted portable
+  clone subset (ADR 0003)
 - previewed host-state forking and inheritance policies (ADR 0004)
 - private and opt-in host agent lifecycle (ADR 0005)
 - native confinement and encrypted-at-rest capability research (ADR 0007)

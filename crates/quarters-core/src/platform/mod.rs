@@ -63,6 +63,12 @@ pub(crate) fn workspace_directories() -> &'static [&'static str] {
     platform_workspace_directories()
 }
 
+/// Platform-specific home-relative cache roots omitted by default lifecycle copies.
+#[must_use]
+pub(crate) fn derived_cache_directories() -> &'static [&'static str] {
+    platform_derived_cache_directories()
+}
+
 /// Create and return a short private per-space runtime directory.
 pub(crate) fn runtime_directory(space: &Space, host: &HostEnvironment) -> Result<PathBuf> {
     let base = platform_runtime_base(host);
@@ -142,13 +148,13 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 use linux::{
-    platform_capabilities, platform_enter_home_view, platform_extend_environment, platform_runtime_base,
-    platform_workspace_directories,
+    platform_capabilities, platform_derived_cache_directories, platform_enter_home_view, platform_extend_environment,
+    platform_runtime_base, platform_workspace_directories,
 };
 #[cfg(target_os = "macos")]
 use macos::{
-    platform_capabilities, platform_enter_home_view, platform_extend_environment, platform_runtime_base,
-    platform_workspace_directories,
+    platform_capabilities, platform_derived_cache_directories, platform_enter_home_view, platform_extend_environment,
+    platform_runtime_base, platform_workspace_directories,
 };
 
 #[cfg(target_os = "macos")]

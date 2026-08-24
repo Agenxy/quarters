@@ -49,6 +49,10 @@ pub(super) fn platform_workspace_directories() -> &'static [&'static str] {
     &[]
 }
 
+pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
+    &[]
+}
+
 pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
     validate_home_view_paths(space_home, host_home)?;
     ensure_no_extra_groups()?;

@@ -57,6 +57,10 @@ pub(super) fn platform_workspace_directories() -> &'static [&'static str] {
     ]
 }
 
+pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
+    &["Library/Caches"]
+}
+
 pub(super) fn platform_enter_home_view(_space_home: &Path, _host_home: &Path) -> Result<()> {
     Err(unsupported_home_view())
 }

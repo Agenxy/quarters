@@ -38,6 +38,7 @@ The default root is `~/.quarters`:
   spaces/
     work/
       .quarters.json
+      .quarters-provenance.json  # clone destinations only
       .active
       home/
         .config/
@@ -58,11 +59,13 @@ layout and requires both `"layout": "workspace"` and a random 128-bit opaque
 ID. New readers accept both; unsupported versions and inconsistent field sets
 fail closed before a space becomes healthy. The ID is future lifecycle
 identity, not an authentication secret.
-Creation, recovery, lease acquisition and removal share the bounded root
-management lock. Rename losers
+Creation, lifecycle publication, recovery, lease acquisition and removal share
+the bounded root management lock. Rename losers
 clean their skeleton immediately; interrupted `.creating-*` state and
 `.retired-*` trash are counted by `doctor` and reclaimed only by the confirmed
-`recover` command after private-directory validation.
+`recover` command after private-directory validation. Recovery and ordinary
+removal retire exact targets under the lock, then restore owner access only
+inside the retired private tree and delete it after releasing the lock.
 
 Root-lock deadlines reflect the kind of work waiting: read-only observation
 waits up to 500 ms and reports activity as unknown when another operation is
@@ -170,8 +173,8 @@ a retry may therefore report that the space already exists.
 
 The MCP capability surface is intentionally narrower than the CLI. It can
 inspect status, inspect capabilities and create a validated space. It cannot
-run commands, open shells, inherit host environment, request home views, change
-the bound root or delete data. Static resources are public-cacheable only under
+clone state, run commands, open shells, inherit host environment, request home
+views, change the bound root or delete data. Static resources are public-cacheable only under
 2026; status is private with a 500 ms TTL. Legacy responses omit 2026 cache and
 `resultType` fields.
 
@@ -240,18 +243,32 @@ security decision may use `current` as proof of process identity.
 Landlock is future work. The build does not equate namespace path changes with
 filesystem confinement.
 
-## Clone, snapshot, template and export contract
+## Lifecycle copy contract
 
-These workflows require a stronger transaction model than recursive copy:
+The alpha ships one bounded portable operation: `clone`. Preview and execution
+share a descriptor-relative walker rooted in already-open source and staging
+directories. It uses no-follow `openat`/`fstatat` operations, fixed entry/byte/
+depth/path limits, an exclusive cooperative source lease, private same-filesystem
+staging, fresh control files and one publication rename.
 
-- take an exclusive space lease
-- stop or prove quiescence of agents and daemons
-- omit runtime sockets and derived caches by declared policy
-- use platform clone/reflink support when available, with a correct copy
-  fallback
-- validate symlinks without following them outside the space
-- preserve mode and extended metadata deliberately
-- mark exports as private material and define a safe import format
+The default policy recreates derived cache roots empty. Sockets, FIFOs, devices
+and foreign-owned entries are omitted and counted. Regular hard links are copied
+independently. Safe relative symlinks retain their link text; absolute and
+lexically escaping links fail closed. User content is never listed in results.
+Cache roots match the declared home-relative component bytes exactly; the
+portable core does not infer case or Unicode aliases from filesystem behavior.
+The report counts preserved links into omitted cache roots. Links into omitted
+sockets, FIFOs, devices or foreign-owned entries may also dangle and are not
+separately counted.
+Arbitrary included state may contain credentials, so mutation requires an exact
+source-name confirmation and writes versioned provenance without source content.
 
-The alpha documents this contract and does not ship partial commands. The
-implementation decisions and acceptance gates are in ADRs 0003 through 0007.
+The backend preserves file bytes and ordinary permission bits, but not
+timestamps, ACLs, xattrs, filesystem flags, set-ID/sticky bits, sparse extents or
+hard-link topology. Embedded absolute paths are copied without rewriting. A free
+cooperative lease cannot discover detached writers, so clone is not a live
+snapshot or quiescence proof.
+
+Platform clonefile/reflink acceleration, schema-1 stable IDs and the stronger
+requirements for templates, snapshots, export and rollback remain deferred.
+ADR 0003 records the accepted subset and unmet gates.

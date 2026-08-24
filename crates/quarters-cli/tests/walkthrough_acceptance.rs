@@ -30,6 +30,101 @@ fn create(root: &Path, name: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[test]
+fn clone_preview_and_execution_have_one_stable_disclosure_shape() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "source")?;
+    std::fs::write(temporary.path().join("spaces/source/home/proof"), b"state")?;
+
+    let preview = run(quarters(temporary.path()).args(["--json", "clone", "source", "copy", "--preview"]))?;
+    let preview: Value = serde_json::from_slice(&preview.stdout)?;
+    assert_eq!(preview["command"], "clone");
+    assert_eq!(preview["result"]["mode"], "preview");
+    assert_eq!(preview["result"]["policy"]["includes_sensitive_state"], true);
+    assert_eq!(preview["result"]["detached_processes"], "unknown");
+    assert!(preview["result"]["exclusions"]["symlinks_into_omitted_cache_roots"].is_u64());
+    assert!(
+        preview["result"]["exclusions"]
+            .get("symlinks_dangling_after_exclusion")
+            .is_none()
+    );
+    assert!(preview["result"]["destination_space_id"].is_null());
+    assert!(!temporary.path().join("spaces/copy").exists());
+
+    let cloned = run(quarters(temporary.path()).args([
+        "--json",
+        "clone",
+        "source",
+        "copy",
+        "--confirm-sensitive-state",
+        "source",
+    ]))?;
+    let cloned: Value = serde_json::from_slice(&cloned.stdout)?;
+    assert_eq!(cloned["result"]["mode"], "execute");
+    assert_eq!(cloned["result"]["counts"], preview["result"]["counts"]);
+    assert_eq!(cloned["result"]["exclusions"], preview["result"]["exclusions"]);
+    assert_eq!(
+        std::fs::read(temporary.path().join("spaces/copy/home/proof"))?,
+        b"state"
+    );
+    Ok(())
+}
+
+#[test]
+fn clone_requires_exact_sensitive_state_confirmation() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "source")?;
+
+    for arguments in [
+        vec!["--json", "clone", "source", "copy"],
+        vec![
+            "--json",
+            "clone",
+            "source",
+            "copy",
+            "--confirm-sensitive-state",
+            "other",
+        ],
+    ] {
+        let output = quarters(temporary.path()).args(arguments).output()?;
+        assert_eq!(output.status.code(), Some(2));
+        let error: Value = serde_json::from_slice(&output.stderr)?;
+        assert_eq!(error["error"]["kind"], "invalid_input");
+        assert!(!temporary.path().join("spaces/copy").exists());
+    }
+
+    let conflict = quarters(temporary.path())
+        .args([
+            "--json",
+            "clone",
+            "source",
+            "copy",
+            "--preview",
+            "--confirm-sensitive-state",
+            "source",
+        ])
+        .output()?;
+    assert_eq!(conflict.status.code(), Some(2));
+    let error: Value = serde_json::from_slice(&conflict.stderr)?;
+    assert_eq!(error["error"]["kind"], "invalid_command");
+    Ok(())
+}
+
+#[test]
+fn clone_human_output_names_the_exact_symlink_count_scope() -> Result<(), Box<dyn Error>> {
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "source")?;
+    symlink(".cache/derived", temporary.path().join("spaces/source/home/cache-link"))?;
+    let preview = run(quarters(temporary.path()).args(["clone", "source", "copy", "--preview"]))?;
+    let output = String::from_utf8(preview.stdout)?;
+    assert!(output.contains("1 links into omitted cache roots"));
+    assert!(!output.contains("links may dangle after exclusions"));
+    Ok(())
+}
+
 fn write_executable(path: &Path, body: &[u8]) -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt;
 

@@ -1,5 +1,6 @@
 //! Atomic space creation transaction and initial user-state files.
 
+use super::lifecycle::remove_tree_restoring_owner_access;
 use super::{
     MANIFEST_FILE, Store, create_private_dir, entry_exists, epoch_millis, open_or_create_private_lock, sync_directory,
     sync_parent_directory, write_private_file,
@@ -50,29 +51,29 @@ impl Store {
         drop(setup_observation);
         let requested_name = name.as_str().to_owned();
         if let Err(error) = populate_space(&temporary, name, default_shell, layout) {
-            let _cleanup = fs::remove_dir_all(&temporary);
+            let _cleanup = remove_tree_restoring_owner_access(&temporary);
             return Err(error);
         }
         let _publish_observation = match self.management_guard() {
             Ok(observation) => observation,
             Err(error) => {
-                let _cleanup = fs::remove_dir_all(&temporary);
+                let _cleanup = remove_tree_restoring_owner_access(&temporary);
                 return Err(error);
             }
         };
         reject_publish_collision(&destination, &temporary, &requested_name)?;
         if let Err(error) = fs::remove_file(&creation_lock_path) {
             let failure = QuartersError::io("remove creation marker", &creation_lock_path, error);
-            let _cleanup = fs::remove_dir_all(&temporary);
+            let _cleanup = remove_tree_restoring_owner_access(&temporary);
             return Err(failure);
         }
         if let Err(error) = sync_directory(&temporary) {
-            let _cleanup = fs::remove_dir_all(&temporary);
+            let _cleanup = remove_tree_restoring_owner_access(&temporary);
             return Err(error);
         }
         if let Err(error) = fs::rename(&temporary, &destination) {
             let failure = QuartersError::io("publish space", &destination, error);
-            let _cleanup = fs::remove_dir_all(&temporary);
+            let _cleanup = remove_tree_restoring_owner_access(&temporary);
             return Err(failure);
         }
         if let Err(error) = sync_parent_directory(&destination) {
@@ -97,16 +98,16 @@ fn reject_unfinished_path(path: &Path) -> Result<()> {
     .with_hint("inspect and remove only that unfinished directory, then retry"))
 }
 
-fn acquire_creation_lock(temporary: &Path, lock_path: &Path) -> Result<File> {
+pub(super) fn acquire_creation_lock(temporary: &Path, lock_path: &Path) -> Result<File> {
     let creation_lock = match open_or_create_private_lock(lock_path) {
         Ok(file) => file,
         Err(error) => {
-            let _cleanup = fs::remove_dir_all(temporary);
+            let _cleanup = remove_tree_restoring_owner_access(temporary);
             return Err(error);
         }
     };
     if let Err(error) = <File as FileExt>::try_lock(&creation_lock) {
-        let _cleanup = fs::remove_dir_all(temporary);
+        let _cleanup = remove_tree_restoring_owner_access(temporary);
         return Err(match error {
             fs4::TryLockError::WouldBlock => {
                 QuartersError::new(ErrorKind::CorruptState, "a new creation lock was already held")
@@ -121,14 +122,14 @@ fn reject_publish_collision(destination: &Path, temporary: &Path, name: &str) ->
     match entry_exists(destination) {
         Ok(false) => Ok(()),
         Ok(true) => {
-            let _cleanup = fs::remove_dir_all(temporary);
+            let _cleanup = remove_tree_restoring_owner_access(temporary);
             Err(QuartersError::new(
                 ErrorKind::AlreadyExists,
                 format!("space '{name}' already exists"),
             ))
         }
         Err(error) => {
-            let _cleanup = fs::remove_dir_all(temporary);
+            let _cleanup = remove_tree_restoring_owner_access(temporary);
             Err(error)
         }
     }
@@ -222,7 +223,7 @@ fn create_git_config(home: &Path) -> Result<()> {
     )
 }
 
-fn write_manifest(root: &Path, manifest: &SpaceManifest) -> Result<()> {
+pub(super) fn write_manifest(root: &Path, manifest: &SpaceManifest) -> Result<()> {
     let path = root.join(MANIFEST_FILE);
     let mut bytes = serde_json::to_vec_pretty(manifest).map_err(|error| {
         QuartersError::new(ErrorKind::System, "could not serialize the space manifest").with_source(error)

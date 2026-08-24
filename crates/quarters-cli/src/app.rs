@@ -1,7 +1,8 @@
 //! Command dispatch.
 
 use crate::cli::{
-    Cli, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ProfileArgs, RecoverArgs, RemoveArgs, StatusArgs,
+    Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ProfileArgs, RecoverArgs, RemoveArgs,
+    StatusArgs,
 };
 use crate::{output, process};
 use quarters_core::{
@@ -28,6 +29,7 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
     let host = HostEnvironment::capture();
     match cli.command {
         Command::Create(arguments) => create(&store, &host, arguments, cli.json),
+        Command::Clone(arguments) => clone_space(&store, &arguments, cli.json),
         Command::List => list(&store, cli.json),
         Command::Status(arguments) => status(&store, &arguments, cli.json),
         Command::Current => current(&store, cli.json),
@@ -58,6 +60,27 @@ fn create(store: &Store, host: &HostEnvironment, arguments: CreateArgs, json: bo
     let shell = arguments.shell.unwrap_or_else(|| default_shell(host));
     let space = store.create_with_layout(name, shell, arguments.layout.into())?;
     output::print_created(&space, json)?;
+    Ok(0)
+}
+
+fn clone_space(store: &Store, arguments: &CloneArgs, json: bool) -> Result<i32> {
+    let source = SpaceName::parse(arguments.source.clone())?;
+    let destination = SpaceName::parse(arguments.destination.clone())?;
+    let report = if arguments.preview {
+        store.clone_plan(&source, &destination, arguments.include_cache)?
+    } else {
+        if arguments.confirm_sensitive_state.as_deref() != Some(source.as_str()) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm-sensitive-state must exactly repeat the source space name",
+            )
+            .with_hint(format!(
+                "run 'quarters clone {source} {destination} --preview', then execute with '--confirm-sensitive-state {source}'"
+            )));
+        }
+        store.clone_space(&source, destination, arguments.include_cache)?
+    };
+    output::print_clone(&report, json)?;
     Ok(0)
 }
 

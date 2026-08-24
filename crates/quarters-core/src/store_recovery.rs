@@ -9,12 +9,14 @@ use serde::Serialize;
 
 use fs4::FileExt;
 
-use crate::store::{StoreLayout, entry_exists, open_private_lock};
+use crate::store::lifecycle::remove_tree_restoring_owner_access;
+use crate::store::{StoreLayout, entry_exists, open_private_lock, sync_directory, unique_suffix};
 use crate::store_policy::{validate_private_dir, validate_store_root};
 use crate::{ErrorKind, QuartersError, Result, Store};
 
 const CREATING_PREFIX: &[u8] = b".creating-";
 const MAX_RECOVERY_ENTRIES: usize = 1_024;
+const RECLAIMING_PREFIX: &[u8] = b".reclaiming-";
 const RETIRED_PREFIX: &[u8] = b".retired-";
 pub(crate) const CREATION_LOCK_FILE: &str = ".creating.lock";
 
@@ -72,8 +74,27 @@ impl Store {
     /// validated private directory or the management lock is unavailable.
     pub fn recover(&self) -> Result<RecoverySummary> {
         self.ensure_layout()?;
-        let _observation = self.management_guard()?;
-        recover(&self.root, &self.layout())
+        let layout = self.layout();
+        let (summary, reclaiming) = {
+            let _observation = self.management_guard()?;
+            prepare_recovery(&self.root, &layout)?
+        };
+        let mut first_failure = None;
+        for path in &reclaiming {
+            if let Err(error) = remove_tree_restoring_owner_access(path)
+                && first_failure.is_none()
+            {
+                first_failure = Some(error);
+            }
+        }
+        let sync_result = sync_directory(layout.trash_root());
+        if let Some(error) = first_failure {
+            return Err(error.with_hint(
+                "recovery attempted every retired entry; inspect the remaining reclaiming state and retry",
+            ));
+        }
+        sync_result?;
+        Ok(summary)
     }
 }
 
@@ -83,37 +104,45 @@ fn inspect(root: &Path, layout: &StoreLayout) -> Result<RecoverySummary> {
     Ok(RecoverySummary {
         active_creations: active,
         unfinished_creations: unfinished.len(),
-        retired_entries: matching_entries(layout.trash_root(), RETIRED_PREFIX)?.len(),
+        retired_entries: matching_entries(layout.trash_root(), &[RETIRED_PREFIX, RECLAIMING_PREFIX])?.len(),
     })
 }
 
-fn recover(root: &Path, layout: &StoreLayout) -> Result<RecoverySummary> {
+fn prepare_recovery(root: &Path, layout: &StoreLayout) -> Result<(RecoverySummary, Vec<std::path::PathBuf>)> {
     validate_layout(root, layout)?;
     let (creations, active_creations) = classify_creations(layout.spaces_root())?;
-    let retired = matching_entries(layout.trash_root(), RETIRED_PREFIX)?;
+    let retired = matching_entries(layout.trash_root(), &[RETIRED_PREFIX, RECLAIMING_PREFIX])?;
     for path in &retired {
-        let metadata =
-            fs::symlink_metadata(path).map_err(|error| QuartersError::io("inspect recovery directory", path, error))?;
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(QuartersError::io("inspect recovery directory", path, error)),
+        };
         validate_private_dir(path, &metadata)?;
     }
-    for creation in &creations {
-        fs::remove_dir_all(&creation.path)
-            .map_err(|error| QuartersError::io("remove recovery directory", &creation.path, error))?;
+    let mut reclaiming = Vec::new();
+    for path in creations.iter().map(|candidate| &candidate.path).chain(&retired) {
+        let target = layout.trash_root().join(format!(".reclaiming-{}", unique_suffix()?));
+        match fs::rename(path, &target) {
+            Ok(()) => reclaiming.push(target),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(QuartersError::io("retire recovery directory", path, error)),
+        }
     }
-    for path in &retired {
-        fs::remove_dir_all(path).map_err(|error| QuartersError::io("remove recovery directory", path, error))?;
-    }
-    Ok(RecoverySummary {
+    sync_directory(layout.spaces_root())?;
+    sync_directory(layout.trash_root())?;
+    let summary = RecoverySummary {
         active_creations,
         unfinished_creations: creations.len(),
         retired_entries: retired.len(),
-    })
+    };
+    Ok((summary, reclaiming))
 }
 
 fn classify_creations(parent: &Path) -> Result<(Vec<CreationCandidate>, usize)> {
     let mut stale = Vec::new();
     let mut active = 0;
-    for path in matching_entries(parent, CREATING_PREFIX)? {
+    for path in matching_entries(parent, &[CREATING_PREFIX])? {
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -164,12 +193,12 @@ fn validate_layout(root: &Path, layout: &StoreLayout) -> Result<()> {
     Ok(())
 }
 
-fn matching_entries(parent: &Path, prefix: &[u8]) -> Result<Vec<std::path::PathBuf>> {
+fn matching_entries(parent: &Path, prefixes: &[&[u8]]) -> Result<Vec<std::path::PathBuf>> {
     let mut matches = Vec::new();
     let entries = fs::read_dir(parent).map_err(|error| QuartersError::io("read recovery parent", parent, error))?;
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read recovery entry", parent, error))?;
-        if !has_prefix(&entry.file_name(), prefix) {
+        if !prefixes.iter().any(|prefix| has_prefix(&entry.file_name(), prefix)) {
             continue;
         }
         if matches.len() >= MAX_RECOVERY_ENTRIES {
@@ -234,5 +263,47 @@ mod tests {
         let error = store.recover().expect_err("linked recovery entry must fail");
         assert_eq!(error.kind(), ErrorKind::CorruptState);
         assert!(external.is_dir());
+    }
+
+    #[test]
+    fn nested_read_only_directory_is_recoverable() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let store = Store::new(temporary.path().join("root")).expect("valid store");
+        store.recover().expect("initialize store");
+        let creation = store.root.join("spaces/.creating-read-only");
+        let nested = creation.join("nested");
+        fs::create_dir_all(&nested).expect("create stale tree");
+        fs::set_permissions(&creation, fs::Permissions::from_mode(0o700)).expect("protect staging root");
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o000)).expect("remove nested access");
+
+        let summary = store.recover().expect("recover read-only tree");
+        assert_eq!(summary.unfinished_creations, 1);
+        assert!(!creation.exists());
+        assert_eq!(
+            store.recovery_summary().expect("inspect recovery"),
+            RecoverySummary::default()
+        );
+    }
+
+    #[test]
+    fn recovery_attempts_later_entries_after_one_cleanup_failure() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let store = Store::new(temporary.path().join("root")).expect("valid store");
+        store.recover().expect("initialize store");
+        let deep = store.root.join("trash/.retired-deep");
+        fs::create_dir(&deep).expect("create deep retired root");
+        fs::set_permissions(&deep, fs::Permissions::from_mode(0o700)).expect("protect deep root");
+        let mut nested = deep;
+        for _ in 0..=256 {
+            nested.push("d");
+            fs::create_dir(&nested).expect("create deep retired directory");
+        }
+        let ordinary = store.root.join("trash/.retired-ordinary");
+        fs::create_dir(&ordinary).expect("create ordinary retired root");
+        fs::set_permissions(&ordinary, fs::Permissions::from_mode(0o700)).expect("protect ordinary root");
+
+        let error = store.recover().expect_err("one over-deep cleanup must fail");
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+        assert_eq!(store.recovery_summary().expect("inspect residue").retired_entries, 1);
     }
 }

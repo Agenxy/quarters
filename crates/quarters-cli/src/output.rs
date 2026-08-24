@@ -2,7 +2,9 @@
 
 use crate::shortcut::{ShortcutAction, ShortcutReport};
 use clap::error::Error as ClapError;
-use quarters_core::{Capabilities, LeaseState, QuartersError, RecoverySummary, Space, SpaceInspection, ToolProbe};
+use quarters_core::{
+    Capabilities, CloneMode, CloneReport, LeaseState, QuartersError, RecoverySummary, Space, SpaceInspection, ToolProbe,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -38,6 +40,45 @@ pub(crate) fn print_created(space: &Space, json_output: bool) -> quarters_core::
         println!("  ID     {space_id}");
     }
     println!("  Model  host account, separate user-owned state");
+    Ok(())
+}
+
+pub(crate) fn print_clone(report: &CloneReport, json_output: bool) -> quarters_core::Result<()> {
+    if json_output {
+        return print_success("clone", report, true);
+    }
+    let action = match report.mode {
+        CloneMode::Preview => "Clone preview",
+        CloneMode::Execute => "Cloned",
+    };
+    println!("{action} {} -> {}", report.source, report.destination);
+    println!("  Layout       {}", report.layout);
+    println!(
+        "  Included     {} files, {} directories, {} links, {} logical bytes",
+        report.counts.files, report.counts.directories, report.counts.symlinks, report.counts.logical_bytes,
+    );
+    println!(
+        "  Excluded     {} cache roots, {} sockets, {} FIFOs, {} devices, {} foreign-owned entries",
+        report.exclusions.cache_roots,
+        report.exclusions.sockets,
+        report.exclusions.fifos,
+        report.exclusions.devices,
+        report.exclusions.foreign_owned,
+    );
+    println!(
+        "  Topology     {} hard-linked files copied independently, {} links into omitted cache roots",
+        report.exclusions.hard_linked_files_copied_independently, report.exclusions.symlinks_into_omitted_cache_roots,
+    );
+    if let Some(space_id) = &report.destination_space_id {
+        println!("  New ID       {space_id}");
+    }
+    println!("  Sensitive    included; arbitrary state may contain credentials");
+    println!("  Activity     detached processes unknown");
+    println!("  Paths        embedded absolute paths were not rewritten");
+    println!("  Boundary     host account authority is unchanged; this is not containment");
+    if report.mode == CloneMode::Preview {
+        println!("  Next         repeat the source with --confirm-sensitive-state to execute");
+    }
     Ok(())
 }
 

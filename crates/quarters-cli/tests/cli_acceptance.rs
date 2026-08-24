@@ -201,6 +201,11 @@ fn help_and_version_are_successful_control_flow() -> Result<(), Box<dyn Error>> 
     let help = run(quarters(temporary.path()).arg("--help"))?;
     assert!(String::from_utf8(help.stdout)?.contains("Usage: quarters"));
 
+    let clone_help = run(quarters(temporary.path()).args(["clone", "--help"]))?;
+    let clone_help = String::from_utf8(clone_help.stdout)?;
+    assert!(clone_help.contains("--preview"));
+    assert!(clone_help.contains("--confirm-sensitive-state"));
+
     let version = run(quarters(temporary.path()).arg("--version"))?;
     assert!(String::from_utf8(version.stdout)?.starts_with("quarters 0.1.0-alpha.3"));
     Ok(())
