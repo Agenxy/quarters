@@ -1,0 +1,78 @@
+# ADR 0003: One transaction primitive for lifecycle copies
+
+Status: proposed; required before clone, template, snapshot, export or rollback
+
+## Context
+
+A space home can contain databases with write-ahead logs, hard links, extended
+attributes, sparse files, FIFOs, sockets and symlinks. A free Quarters lease
+only proves that no current supervisor holds the cooperative lock; detached
+processes can still write. Recursive copy therefore cannot provide an honest
+snapshot or rollback boundary.
+
+Clone, named stationery, snapshots, backups, exports and rollback need the same
+rules. Independent implementations would drift on exclusions, links,
+quiescence and crash recovery.
+
+## Decision
+
+Build one internal lifecycle transaction engine before exposing any of those
+commands.
+
+The engine has these phases:
+
+1. Resolve and validate the source and destination through the store layout.
+2. Acquire the store management lock and an exclusive source activity lock.
+3. Require a lifecycle policy and record that detached-process state remains
+   unknowable. A later managed-agent registry can strengthen this check; a free
+   cooperative lease alone must never be described as a frozen filesystem.
+4. Walk beneath an already-open source root without following symlinks. Reject
+   paths that escape, multiply linked control files, devices, FIFOs and sockets.
+5. Apply a declared inclusion policy. Runtime sockets, `.active`, temporary
+   state and derived caches are excluded by default. Credentials are included
+   only when the selected operation explicitly says so.
+6. Copy into a private same-filesystem staging directory. Prefer clonefile on
+   Apple filesystems and reflink on Linux only after capability probing; retain
+   a bounded native copy fallback with identical semantics.
+7. Write operation provenance, a new destination stable ID and the appropriate
+   display name. Never copy source control anchors byte-for-byte.
+8. Sync files and directories, revalidate the completed tree, and publish with
+   one rename while the management lock is held.
+9. Leave only a recognizable private staging prefix after interruption so the
+   existing recovery model can classify and reclaim it.
+
+Every operation has explicit byte, entry, depth and path-length limits. Limit
+failure publishes nothing. File modes, timestamps and selected extended
+attributes have a documented portability policy; ownership remains the current
+UID/GID. ACLs and platform metadata that cannot be represented are reported,
+never silently claimed as preserved.
+
+## Operation semantics
+
+- `clone` creates a writable independent space with a new name and stable ID.
+- `template` stores a named, immutable-by-interface creation source with
+  provenance and a credential inclusion declaration.
+- `snapshot` creates an immutable-by-interface recovery point. Filesystem
+  immutability flags are optional hardening, not the correctness anchor.
+- `export` writes a versioned, authenticated manifest plus bounded content. It
+  defaults to excluding credentials and must never include runtime sockets.
+- `rollback` first creates and verifies an automatic recovery snapshot, then
+  replaces the target through the same publish transaction. In-place recursive
+  overwrite is forbidden.
+
+## Acceptance gates
+
+- crash injection at every phase leaves either the old published state or one
+  complete new state
+- adversarial symlink, hard-link, sparse-file, socket and permission fixtures
+- concurrent create/remove/launch and lifecycle-operation stress tests
+- clone/reflink and portable-copy outputs are semantically equivalent
+- cache and credential policies are visible in dry-run JSON before mutation
+- rollback recovery is proven after forced failure
+- macOS and Linux filesystem fixtures, including unsupported metadata reports
+
+## Consequences
+
+These workflows arrive later than a direct copy command, but share one audited
+security and recovery boundary. Until the gates pass, Quarters exposes no
+clone, freeze, snapshot, template, export or rollback command.

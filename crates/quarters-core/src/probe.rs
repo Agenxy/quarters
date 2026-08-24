@@ -1,6 +1,7 @@
 //! Local compatibility inventory.
 
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -48,7 +49,7 @@ pub fn tool_probes() -> Vec<ToolProbe> {
             "ssh",
             CompatibilityTier::C,
             "explicit ssh -F <space>/home/.ssh/config",
-            Some("passwd home is unchanged"),
+            Some("passwd home is unchanged; SSH_AUTH_SOCK is unset until private-agent management exists"),
         ),
         probe("gh", CompatibilityTier::B, "GH_CONFIG_DIR", None),
         probe(
@@ -116,10 +117,30 @@ fn probe(tool: &str, tier: CompatibilityTier, mechanism: &str, limitation: Optio
 }
 
 fn find_executable(name: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
+    executable_matches(name).into_iter().next()
+}
+
+/// Return every executable command match on `PATH` in shell resolution order.
+#[must_use]
+pub fn executable_matches(name: &str) -> Vec<PathBuf> {
+    let Some(path) = env::var_os("PATH") else {
+        return Vec::new();
+    };
+    let current = env::current_dir().ok();
+    let mut seen = BTreeSet::new();
     env::split_paths(&path)
+        .filter_map(|directory| absolute_directory(directory, current.as_deref()))
         .map(|directory| directory.join(name))
-        .find(|candidate| is_executable(candidate))
+        .filter(|candidate| is_executable(candidate))
+        .filter(|candidate| seen.insert(candidate.clone()))
+        .collect()
+}
+
+fn absolute_directory(directory: PathBuf, current: Option<&Path>) -> Option<PathBuf> {
+    if directory.is_absolute() {
+        return Some(directory);
+    }
+    current.map(|current| current.join(directory))
 }
 
 fn is_executable(path: &Path) -> bool {

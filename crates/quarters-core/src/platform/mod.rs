@@ -23,6 +23,8 @@ pub struct Capabilities {
     pub platform: String,
     /// Portable HOME and XDG redirection.
     pub environment_profile: bool,
+    /// Expanded home-directory conventions and their compatibility boundary.
+    pub workspace_profile: CapabilityStatus,
     /// Best-effort CoreFoundation home redirection on macOS.
     pub core_foundation_home: bool,
     /// Opt-in bind-mounted passwd-home view.
@@ -53,6 +55,12 @@ pub fn capabilities() -> Capabilities {
 /// Add platform-specific environment compatibility values.
 pub(crate) fn extend_environment(values: &mut BTreeMap<OsString, OsString>, home: &Path) {
     platform_extend_environment(values, home);
+}
+
+/// Platform-specific relative directories for expanded workspace spaces.
+#[must_use]
+pub(crate) fn workspace_directories() -> &'static [&'static str] {
+    platform_workspace_directories()
 }
 
 /// Create and return a short private per-space runtime directory.
@@ -133,9 +141,15 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-use linux::{platform_capabilities, platform_enter_home_view, platform_extend_environment, platform_runtime_base};
+use linux::{
+    platform_capabilities, platform_enter_home_view, platform_extend_environment, platform_runtime_base,
+    platform_workspace_directories,
+};
 #[cfg(target_os = "macos")]
-use macos::{platform_capabilities, platform_enter_home_view, platform_extend_environment, platform_runtime_base};
+use macos::{
+    platform_capabilities, platform_enter_home_view, platform_extend_environment, platform_runtime_base,
+    platform_workspace_directories,
+};
 
 #[cfg(target_os = "macos")]
 fn unsupported_home_view() -> QuartersError {

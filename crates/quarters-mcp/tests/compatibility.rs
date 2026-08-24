@@ -371,14 +371,33 @@ async fn exercise_modern(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
         unknown_resource_code(&client).await?,
         rmcp::model::ErrorCode::INVALID_PARAMS
     );
-    let created = call(&client, "quarters_create", json!({"name": "modern"})).await?;
+    let created = call(
+        &client,
+        "quarters_create",
+        json!({"name": "modern", "layout": "workspace"}),
+    )
+    .await?;
     assert!(created.result_type.is_some());
     assert_eq!(structured(&created)?["data"]["space"]["name"], "modern");
+    assert_eq!(structured(&created)?["data"]["space"]["layout"], "workspace");
+    assert_eq!(
+        structured(&created)?["data"]["space"]["space_id"]
+            .as_str()
+            .map(str::len),
+        Some(32)
+    );
     let create_schema = output_schema(&tools, "quarters_create")?;
     validate_output(&create_schema, structured(&created)?)?;
     let failed = call(&client, "quarters_create", json!({"name": "../invalid"})).await?;
     assert_eq!(failed.is_error, Some(true));
     validate_output(&create_schema, structured(&failed)?)?;
+    let invalid_layout = call(
+        &client,
+        "quarters_create",
+        json!({"name": "invalid-layout", "layout": "container"}),
+    )
+    .await?;
+    assert_eq!(invalid_layout.is_error, Some(true));
     let mut incomplete = structured(&created)?.clone();
     incomplete
         .as_object_mut()
@@ -412,8 +431,21 @@ async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
     let status = call(&client, "quarters_status", json!({})).await?;
     assert!(status.result_type.is_none());
     assert_eq!(structured(&status)?["data"]["spaces"][0]["name"], "modern");
-    let created = call(&client, "quarters_create", json!({"name": "legacy"})).await?;
+    let created = call(
+        &client,
+        "quarters_create",
+        json!({"name": "legacy", "layout": "workspace"}),
+    )
+    .await?;
     assert_eq!(structured(&created)?["data"]["space"]["name"], "legacy");
+    assert_eq!(structured(&created)?["data"]["space"]["layout"], "workspace");
+    let invalid_layout = call(
+        &client,
+        "quarters_create",
+        json!({"name": "legacy-invalid", "layout": "container"}),
+    )
+    .await?;
+    assert_eq!(invalid_layout.is_error, Some(true));
     client.cancel().await?;
     server_task.await??;
     Ok(())
@@ -433,7 +465,9 @@ fn assert_catalog(tools: &rmcp::model::ListToolsResult, modern: bool) -> Result<
         assert!(!validator.is_valid(&json!({"unexpected": true})));
         if tool.name == "quarters_create" {
             assert!(validator.is_valid(&json!({"name": "agent_1"})));
+            assert!(validator.is_valid(&json!({"name": "agent_1", "layout": "workspace"})));
             assert!(!validator.is_valid(&json!({"name": "../escape"})));
+            assert!(!validator.is_valid(&json!({"name": "agent_1", "layout": "container"})));
         }
     }
     Ok(())

@@ -57,6 +57,10 @@ pub(crate) struct SpaceView {
     pub(crate) created_unix_ms: Option<u64>,
     /// Stored default shell, when healthy.
     pub(crate) default_shell: Option<String>,
+    /// Effective user-directory layout, when healthy.
+    pub(crate) layout: Option<String>,
+    /// Stable opaque identity for schema-2 spaces, when healthy.
+    pub(crate) space_id: Option<String>,
     /// Cooperative Quarters lease state, when healthy.
     pub(crate) lease_state: Option<String>,
     /// Whether this server process identifies itself as inside the space.

@@ -32,6 +32,7 @@ policy.
 |---|---|
 | Path traversal through a name | Strict 1-32 character validated name type |
 | Partial creation | Same-filesystem temporary directory and atomic rename |
+| Manifest downgrade or field confusion | Permissive version probe followed by strict closed schema and version/layout/ID invariants |
 | Abandoned internal state | Bounded doctor counts plus confirmed recovery under the store management lock |
 | Wrong removal target | Manifest/name validation, exact confirmation, rename then delete |
 | Removal during a supervised entry | Shared lease held for the lifetime of the Quarters supervisor |
@@ -44,8 +45,11 @@ policy.
 | Unsafe removal of damaged state | Removal requires the exact validated private root and activity lock, not a readable home or manifest |
 | Credential environment leakage | `env_clear()` plus safe allowlist; explicit values are redacted |
 | Profile override through explicit inheritance | `--inherit` rejects every Quarters-owned state variable |
+| Prompt-code injection | Prompt-expanded values come only from the validated ASCII name; roots and stored text never reach prompt expansion |
+| Startup integration resolves altered code | Generated rc files resolve `quarters` through the active space PATH; the space-local bin directory is user-writable and therefore inside the same-UID trust boundary |
+| Shortcut replacement or deletion | Protected PATH directory, non-overwriting symlink creation and removal only of links with the closed Quarters-launcher target shape |
 | Host Git helper reuse | Generated config clears inherited credential helpers |
-| Shared SSH agent | Per-space short `SSH_AUTH_SOCK`; host socket is not inherited |
+| Shared SSH agent | Host socket is not inherited; `SSH_AUTH_SOCK` remains unset until reviewed private-agent management exists |
 | Runtime socket collision | Mode-0700 short runtime directory per UID and space |
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
@@ -71,6 +75,7 @@ policy.
 - discovering detached descendants or same-user servers after their Quarters supervisor exits
 - secure deletion from snapshots, backups or recovery media
 - crash-consistent live snapshot or export
+- treating workspace directories or a stable space ID as containment or authorization
 - remote MCP, OAuth, agent-triggered command execution or agent-triggered deletion
 
 ## Host and sudo escape

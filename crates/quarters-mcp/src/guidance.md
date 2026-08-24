@@ -8,7 +8,9 @@ detached same-user process still uses the space. Read `quarters://security`
 before mutation.
 
 `quarters_create` creates a new private folder-backed space and fails when that
-name already exists. It never starts a shell or command. `quarters_doctor` reads
+name already exists. Omit `layout` for a minimal profile or choose `workspace`
+for conventional personal directories; neither mode is containment. It never
+starts a shell or command. `quarters_doctor` reads
 platform and tool compatibility; when given a space name, it also constructs
 the environment and may create private runtime directories.
 

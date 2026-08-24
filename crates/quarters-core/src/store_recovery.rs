@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use fs4::FileExt;
 
-use crate::store::{entry_exists, open_private_lock};
+use crate::store::{StoreLayout, entry_exists, open_private_lock};
 use crate::store_policy::{validate_private_dir, validate_store_root};
 use crate::{ErrorKind, QuartersError, Result, Store};
 
@@ -50,14 +50,15 @@ impl Store {
             Err(error) => return Err(QuartersError::io("inspect Quarters root", &self.root, error)),
         };
         validate_store_root(&self.root, &root_metadata)?;
-        let spaces_present = entry_exists(&self.root.join("spaces"))?;
-        let trash_present = entry_exists(&self.root.join("trash"))?;
+        let layout = self.layout();
+        let spaces_present = entry_exists(layout.spaces_root())?;
+        let trash_present = entry_exists(layout.trash_root())?;
         if !spaces_present && !trash_present {
             return Ok(RecoverySummary::default());
         }
-        validate_layout(&self.root)?;
+        validate_layout(&self.root, &layout)?;
         let _observation = self.observation_guard()?;
-        inspect(&self.root)
+        inspect(&self.root, &layout)
     }
 
     /// Remove abandoned internal creation and retirement state.
@@ -72,24 +73,24 @@ impl Store {
     pub fn recover(&self) -> Result<RecoverySummary> {
         self.ensure_layout()?;
         let _observation = self.management_guard()?;
-        recover(&self.root)
+        recover(&self.root, &self.layout())
     }
 }
 
-pub(crate) fn inspect(root: &Path) -> Result<RecoverySummary> {
-    validate_layout(root)?;
-    let (unfinished, active) = classify_creations(&root.join("spaces"))?;
+fn inspect(root: &Path, layout: &StoreLayout) -> Result<RecoverySummary> {
+    validate_layout(root, layout)?;
+    let (unfinished, active) = classify_creations(layout.spaces_root())?;
     Ok(RecoverySummary {
         active_creations: active,
         unfinished_creations: unfinished.len(),
-        retired_entries: matching_entries(&root.join("trash"), RETIRED_PREFIX)?.len(),
+        retired_entries: matching_entries(layout.trash_root(), RETIRED_PREFIX)?.len(),
     })
 }
 
-pub(crate) fn recover(root: &Path) -> Result<RecoverySummary> {
-    validate_layout(root)?;
-    let (creations, active_creations) = classify_creations(&root.join("spaces"))?;
-    let retired = matching_entries(&root.join("trash"), RETIRED_PREFIX)?;
+fn recover(root: &Path, layout: &StoreLayout) -> Result<RecoverySummary> {
+    validate_layout(root, layout)?;
+    let (creations, active_creations) = classify_creations(layout.spaces_root())?;
+    let retired = matching_entries(layout.trash_root(), RETIRED_PREFIX)?;
     for path in &retired {
         let metadata =
             fs::symlink_metadata(path).map_err(|error| QuartersError::io("inspect recovery directory", path, error))?;
@@ -151,14 +152,14 @@ fn classify_creations(parent: &Path) -> Result<(Vec<CreationCandidate>, usize)> 
     Ok((stale, active))
 }
 
-fn validate_layout(root: &Path) -> Result<()> {
+fn validate_layout(root: &Path, layout: &StoreLayout) -> Result<()> {
     let metadata =
         fs::symlink_metadata(root).map_err(|error| QuartersError::io("inspect Quarters root", root, error))?;
     validate_store_root(root, &metadata)?;
-    for path in [root.join("spaces"), root.join("trash")] {
+    for path in [layout.spaces_root(), layout.trash_root()] {
         let metadata =
-            fs::symlink_metadata(&path).map_err(|error| QuartersError::io("inspect recovery parent", &path, error))?;
-        validate_private_dir(&path, &metadata)?;
+            fs::symlink_metadata(path).map_err(|error| QuartersError::io("inspect recovery parent", path, error))?;
+        validate_private_dir(path, &metadata)?;
     }
     Ok(())
 }

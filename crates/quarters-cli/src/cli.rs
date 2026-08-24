@@ -1,6 +1,6 @@
 //! Command-line grammar.
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -44,6 +44,10 @@ pub(crate) enum Command {
     Rm(RemoveArgs),
     /// Reclaim abandoned internal creation and deletion state.
     Recover(RecoverArgs),
+    /// Print composable shell prompt integration code.
+    ShellInit(ShellInitArgs),
+    /// Inspect or manage a short command that resolves to Quarters.
+    Shortcut(ShortcutArgs),
     /// Serve the local agent interface over bounded MCP stdio.
     Mcp,
     /// Internal Linux launcher used to isolate namespace setup to a child.
@@ -59,6 +63,27 @@ pub(crate) struct CreateArgs {
     /// Default absolute shell path. Uses the host SHELL or /bin/sh.
     #[arg(long, value_name = "PATH")]
     pub(crate) shell: Option<PathBuf>,
+
+    /// User-directory layout to create.
+    #[arg(long, value_enum, default_value_t = CreateLayout::Profile)]
+    pub(crate) layout: CreateLayout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CreateLayout {
+    /// Minimal shell and CLI state profile.
+    Profile,
+    /// Expanded home with common personal and platform directories.
+    Workspace,
+}
+
+impl From<CreateLayout> for quarters_core::SpaceLayout {
+    fn from(value: CreateLayout) -> Self {
+        match value {
+            CreateLayout::Profile => Self::Profile,
+            CreateLayout::Workspace => Self::Workspace,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -133,6 +158,48 @@ pub(crate) struct RecoverArgs {
     /// Must be exactly "stale-state" before reserved paths are removed.
     #[arg(long, value_name = "stale-state")]
     pub(crate) confirm: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ShellKind {
+    /// Z shell integration.
+    Zsh,
+    /// Bash integration.
+    Bash,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ShellInitArgs {
+    /// Shell whose integration code should be printed.
+    #[arg(value_enum)]
+    pub(crate) shell: ShellKind,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ShortcutArgs {
+    #[command(subcommand)]
+    pub(crate) command: ShortcutCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ShortcutCommand {
+    /// Inspect command resolution without changing it.
+    Status(ShortcutTargetArgs),
+    /// Install a non-overwriting managed shortcut.
+    Install(ShortcutTargetArgs),
+    /// Remove only a verified Quarters-managed shortcut.
+    Remove(ShortcutTargetArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ShortcutTargetArgs {
+    /// Short command name. `qts` is recommended; `q` is also available.
+    #[arg(default_value = "qts")]
+    pub(crate) name: String,
+
+    /// Existing absolute PATH directory for the managed link.
+    #[arg(long = "dir", value_name = "PATH")]
+    pub(crate) directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

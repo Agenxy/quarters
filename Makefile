@@ -49,3 +49,4 @@ docs:
 
 install:
 	cargo install --locked --path crates/quarters-cli --root '$(QUARTERS_INSTALL_ROOT)'
+	@printf '%s\n' "Installed quarters. Optional shorthand: $(QUARTERS_INSTALL_ROOT)/bin/quarters shortcut install qts --dir $(QUARTERS_INSTALL_ROOT)/bin"

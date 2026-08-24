@@ -950,6 +950,7 @@ name = "quarters-core"
 version = "0.1.0-alpha.3"
 dependencies = [
  "fs4",
+ "getrandom 0.4.3",
  "nix",
  "serde",
  "serde_json",

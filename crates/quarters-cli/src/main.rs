@@ -4,6 +4,8 @@ mod app;
 mod cli;
 mod output;
 mod process;
+mod shell_init;
+mod shortcut;
 
 use clap::Parser;
 use cli::Cli;

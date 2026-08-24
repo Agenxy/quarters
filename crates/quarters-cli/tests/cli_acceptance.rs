@@ -90,13 +90,17 @@ fn mcp_stdio_serves_the_stateless_2026_path_end_to_end() -> Result<(), Box<dyn E
             "method": "tools/call",
             "params": {
                 "name": "quarters_create",
-                "arguments": {"name": "agent"},
+                "arguments": {"name": "agent", "layout": "workspace"},
                 "_meta": metadata
             }
         }),
     )?;
     let created = read_frame(&mut output)?;
     assert_eq!(created["result"]["structuredContent"]["data"]["space"]["name"], "agent");
+    assert_eq!(
+        created["result"]["structuredContent"]["data"]["space"]["layout"],
+        "workspace"
+    );
     drop(input);
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
@@ -152,13 +156,20 @@ fn mcp_stdio_serves_the_initialized_2025_path_end_to_end() -> Result<(), Box<dyn
             "jsonrpc": "2.0",
             "id": 3,
             "method": "tools/call",
-            "params": {"name": "quarters_create", "arguments": {"name": "legacy-agent"}}
+            "params": {
+                "name": "quarters_create",
+                "arguments": {"name": "legacy-agent", "layout": "workspace"}
+            }
         }),
     )?;
     let created = read_frame(&mut output)?;
     assert_eq!(
         created["result"]["structuredContent"]["data"]["space"]["name"],
         "legacy-agent"
+    );
+    assert_eq!(
+        created["result"]["structuredContent"]["data"]["space"]["layout"],
+        "workspace"
     );
     assert!(created["result"].get("resultType").is_none());
     drop(input);
@@ -350,8 +361,8 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
         .find(|line| line.starts_with("broken"))
         .ok_or("missing unhealthy current row")?;
     assert_eq!(
-        row.split_whitespace().take(4).collect::<Vec<_>>(),
-        ["broken", "unhealthy", "unknown", "no"]
+        row.split_whitespace().take(5).collect::<Vec<_>>(),
+        ["broken", "unhealthy", "unknown", "unknown", "no"]
     );
 
     run(quarters(temporary.path()).args(["rm", "broken", "--confirm", "broken"]))?;
@@ -472,8 +483,12 @@ fn status_reports_supervised_activity_and_current_space() -> Result<(), Box<dyn 
         .lines()
         .find(|line| line.starts_with("work"))
         .ok_or("missing status row")?;
-    assert_eq!(row.find("healthy"), Some(33));
-    assert_eq!(row.find("free"), Some(44));
+    assert_eq!(
+        row.split_whitespace().take(5).collect::<Vec<_>>(),
+        ["work", "healthy", "profile", "free", "no"]
+    );
+    assert_eq!(row.find("profile"), Some(44));
+    assert_eq!(row.find("free"), Some(55));
     Ok(())
 }
 
@@ -521,9 +536,7 @@ fn exec_redirects_state_and_preserves_real_uid() -> Result<(), Box<dyn Error>> {
     let expected_home = temporary.path().join("spaces/work/home");
     assert!(environment.contains(&format!("HOME={}", expected_home.display())));
     assert!(environment.contains("QUARTERS_SPACE=work"));
-    assert!(environment.lines().any(|line| {
-        line.starts_with("SSH_AUTH_SOCK=") && line.contains("/quarters-") && line.ends_with("/ssh-agent.sock")
-    }));
+    assert!(!environment.lines().any(|line| line.starts_with("SSH_AUTH_SOCK=")));
     assert!(!environment.contains("host-npm-credentials"));
     assert!(!environment.contains("host-ssh-agent"));
     assert!(!environment.contains("QUARTERS_HOST_PROFILE_"));

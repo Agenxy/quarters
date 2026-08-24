@@ -48,6 +48,7 @@ Cargo to build locally if host policy rejects them.
 ```sh
 cargo build --release
 target/release/quarters create agenxy
+target/release/quarters create studio --layout workspace
 target/release/quarters exec agenxy -- env
 target/release/quarters enter agenxy
 ```
@@ -80,7 +81,7 @@ install path.
 
 | Command | Purpose |
 |---|---|
-| `create NAME` | Atomically create a private persistent space |
+| `create NAME [--layout profile\|workspace]` | Atomically create a minimal profile or expanded workspace |
 | `list` | List healthy and unhealthy space entries without hiding siblings |
 | `status [NAME]` | Observe whether Quarters' cooperative lease is free or held |
 | `current` | Print the current space or `host` |
@@ -91,6 +92,8 @@ install path.
 | `doctor [NAME]` | Inspect platform/tools; named form prepares and validates the baseline environment |
 | `rm NAME --confirm NAME` | Remove a space after exact-name confirmation and an inactive supervisor lease |
 | `recover --confirm stale-state` | Reclaim validated internal state left by an interrupted create or remove |
+| `shell-init zsh\|bash` | Print composable prompt integration without editing shell files |
+| `shortcut status\|install\|remove [NAME]` | Inspect or manage a collision-safe short command; `qts` is recommended |
 | `mcp` | Serve the bounded local MCP adapter over standard input/output |
 
 Management and inspection commands accept `--json`. Pass-through commands do
@@ -127,6 +130,21 @@ never removal targets. A losing concurrent creation is cleaned automatically.
 prefixes while holding the same bounded management lock as creation/removal.
 If recovery metadata is corrupt, `doctor` keeps reporting platform and tool
 capabilities while marking only recovery inspection unavailable.
+
+New space startup files compose a cyan `[q:NAME]` marker with the existing zsh
+or bash prompt when `quarters` resolves on `PATH`. Existing spaces are never
+rewritten; opt in from their `.zshrc` or `.bashrc` with the corresponding
+`eval "$(quarters shell-init zsh)"` or `eval "$(quarters shell-init bash)"`
+line. The marker is context, not proof of confinement.
+
+After installing `quarters` on the host PATH, `quarters shortcut install qts`
+can add the recommended shorthand to an existing, protected `~/.local/bin`
+that is already on PATH. It never replaces an entry. Use
+`quarters shortcut status qts` plus the printed `type -a qts` check before and
+after mutation; a child process cannot inspect aliases or functions in its
+parent shell. Status distinguishes `managed`, `relocated` and `stale` links;
+remove accepts only those closed Quarters-launcher shapes. `q` is available
+only when requested explicitly.
 
 ## MCP for local agents
 
@@ -171,7 +189,8 @@ Quarters configures:
 - GitHub CLI, GnuPG, tmux, Cargo, npm and uv state locations
 - Codex, Claude Code and OpenCode config locations where those tools honor
   their documented or established environment contracts
-- an isolated `SSH_AUTH_SOCK` path
+- no inherited SSH-agent socket; `SSH_AUTH_SOCK` stays unset until reviewed
+  private-agent management exists
 - `CFFIXED_USER_HOME` on macOS as a best-effort CoreFoundation compatibility
   enhancement
 
@@ -180,6 +199,14 @@ pass any additional variable deliberately. Quarters never prints its value.
 Profile-owned variables such as `HOME`, `PATH`, `SSH_AUTH_SOCK`, XDG paths and
 `QUARTERS_*` cannot be inherited because Quarters computes them after the
 allowlist boundary.
+
+`--layout profile` is the schema-1 default and creates only the shell and CLI
+state surface. `--layout workspace` uses schema 2, assigns a random stable
+space ID and also creates private `Desktop`, `Documents`, `Downloads`, media,
+public and template directories. On macOS it adds conventional `Applications`
+and `Library` subdirectories. These are state-location conventions backed by
+HOME/XDG and platform adapters, not containment; applications may still use
+passwd-home, Keychain, TCC, app containers or absolute host paths.
 
 A custom `--root` is an operator-selected trust anchor. Put it beneath a
 directory that is owned by the current user and not writable by another user;
@@ -217,6 +244,11 @@ transaction and quiescence contract is recorded in
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Platform decision](docs/architecture/ADR-0001-PORTABLE-PROFILE-CORE.md)
 - [Agent-native MCP decision](docs/architecture/ADR-0002-AGENT-NATIVE-MCP.md)
+- [Lifecycle copy transaction](docs/architecture/ADR-0003-LIFECYCLE-COPY-TRANSACTION.md)
+- [Host inheritance and fork policy](docs/architecture/ADR-0004-INHERITANCE-AND-HOST-FORK.md)
+- [Private agent lifecycle](docs/architecture/ADR-0005-PRIVATE-AGENT-LIFECYCLE.md)
+- [Storage migration and runtime identity](docs/architecture/ADR-0006-STORAGE-MIGRATION-AND-RUNTIME-IDENTITY.md)
+- [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
 - [MCP guide](docs/mcp/README.md)
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Compatibility matrix](docs/compatibility/MATRIX.md)

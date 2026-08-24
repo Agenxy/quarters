@@ -131,6 +131,8 @@ impl QuartersMcp {
                 home: None,
                 created_unix_ms: None,
                 default_shell: None,
+                layout: None,
+                space_id: None,
                 lease_state: None,
                 issue: Some(Diagnostic::for_unhealthy_entry(&error)),
             }),
@@ -159,13 +161,18 @@ impl QuartersMcp {
         Ok(name.as_str().to_owned())
     }
 
-    fn create_space(&self, raw_name: String) -> quarters_core::Result<CreateData> {
+    fn create_space(
+        &self,
+        raw_name: String,
+        layout: Option<crate::params::CreateLayout>,
+    ) -> quarters_core::Result<CreateData> {
         let name = SpaceName::parse(raw_name)?;
         let shell = self
             .host
             .get("SHELL")
             .map_or_else(|| PathBuf::from("/bin/sh"), PathBuf::from);
-        let space = self.store.create(name, shell)?;
+        let layout = layout.map_or(quarters_core::SpaceLayout::Profile, Into::into);
+        let space = self.store.create_with_layout(name, shell, layout)?;
         Ok(CreateData {
             space: view_space(
                 &space,
@@ -250,7 +257,7 @@ impl QuartersMcp {
         Parameters(params): Parameters<CreateParams>,
     ) -> Result<ToolSuccess<CreateData>, rmcp::model::CallToolResult> {
         let data = self
-            .run_blocking(move |server| server.create_space(params.name))
+            .run_blocking(move |server| server.create_space(params.name, params.layout))
             .await
             .map_err(|error| failure(&error))?;
         Ok(success(format!("Created space '{}'.", data.space.name), data))
@@ -369,6 +376,8 @@ fn view_space(space: &Space, lease_state: LeaseState, current_space: Option<&str
             &space.manifest().default_shell.to_string_lossy(),
             512,
         )),
+        layout: Some(space.layout().as_str().to_owned()),
+        space_id: space.id().map(|space_id| space_id.as_str().to_owned()),
         lease_state: Some(lease_state.as_str().to_owned()),
         current: current_space == Some(space.manifest().name.as_str()),
         issue: None,
@@ -400,6 +409,12 @@ fn capability_views(platform: &quarters_core::Capabilities) -> Vec<CapabilityVie
                 "unavailable".to_owned()
             },
             detail: "CFFIXED_USER_HOME compatibility on macOS".to_owned(),
+        },
+        CapabilityView {
+            name: "workspace_profile".to_owned(),
+            available: platform.workspace_profile.available,
+            status: platform.workspace_profile.status.clone(),
+            detail: platform.workspace_profile.detail.clone(),
         },
         CapabilityView {
             name: "home_view".to_owned(),

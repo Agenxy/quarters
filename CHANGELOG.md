@@ -6,6 +6,19 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.3 — unreleased
 
+- Add schema-gated expanded workspaces with stable opaque IDs, private common
+  user directories, platform-specific macOS conventions, additive CLI/MCP
+  reporting and creation support across both MCP revisions. Existing/default
+  profiles remain schema 1 without new manifest fields.
+- Add composable zsh/bash `[q:NAME]` prompt context for new spaces through
+  `shell-init`, without rewriting existing startup files.
+- Add collision-safe `qts`/`q` shortcut inspection, installation and removal
+  against the installed PATH launcher, with stable JSON and doctor reporting.
+- Split storage creation/layout policy, reject unknown manifest fields after a
+  schema-first probe, and sync parent directories after publication renames.
+- Stop exporting a reserved but inactive `SSH_AUTH_SOCK`; the host agent stays
+  blocked and the variable remains unset until private-agent lifecycle
+  management exists.
 - Add a stdio-only MCP server with separately tested `2026-07-28` stateless and
   `2025-11-25` initialized lifecycles.
 - Expose typed, schema-validated status, doctor and create tools plus bounded

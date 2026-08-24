@@ -15,6 +15,13 @@ pub(super) fn platform_capabilities() -> Capabilities {
     Capabilities {
         platform: "linux".to_owned(),
         environment_profile: true,
+        workspace_profile: CapabilityStatus {
+            available: true,
+            status: "experimental".to_owned(),
+            detail:
+                "creates conventional user directories beneath the alternate HOME; applications may ignore HOME/XDG"
+                    .to_owned(),
+        },
         core_foundation_home: false,
         home_view: userns,
         confinement: CapabilityStatus {
@@ -36,6 +43,10 @@ pub(super) fn platform_runtime_base(host: &HostEnvironment) -> PathBuf {
         .map(PathBuf::from)
         .filter(|runtime| runtime.is_absolute() && home.is_none_or(|home| !runtime.starts_with(home)))
         .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+pub(super) fn platform_workspace_directories() -> &'static [&'static str] {
+    &[]
 }
 
 pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {

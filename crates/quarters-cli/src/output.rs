@@ -1,5 +1,6 @@
 //! Human and machine output contracts.
 
+use crate::shortcut::{ShortcutAction, ShortcutReport};
 use clap::error::Error as ClapError;
 use quarters_core::{Capabilities, LeaseState, QuartersError, RecoverySummary, Space, SpaceInspection, ToolProbe};
 use serde::Serialize;
@@ -32,6 +33,10 @@ pub(crate) fn print_created(space: &Space, json_output: bool) -> quarters_core::
     }
     println!("Created {}", space.manifest().name);
     println!("  Home   {}", path_for_human(&space.home()));
+    println!("  Layout {}", space.layout());
+    if let Some(space_id) = space.id() {
+        println!("  ID     {space_id}");
+    }
     println!("  Model  host account, separate user-owned state");
     Ok(())
 }
@@ -56,19 +61,25 @@ pub(crate) fn print_list(inspections: &[SpaceInspection], json_output: bool) -> 
         println!("No spaces yet. Create one with: quarters create <name>");
         return Ok(());
     }
-    println!("NAME                             HEALTH     HOME");
+    println!("NAME                             HEALTH     LAYOUT     HOME");
     for inspection in inspections {
         match inspection {
             SpaceInspection::Healthy(space) => {
                 println!(
-                    "{:<32} {:<10} {}",
+                    "{:<32} {:<10} {:<10} {}",
                     space.manifest().name,
                     "healthy",
+                    space.layout(),
                     path_for_human(&space.home())
                 );
             }
             SpaceInspection::Unhealthy { name, error, .. } => {
-                println!("{:<32} {:<10} -", entry_name_for_human(name), "unhealthy");
+                println!(
+                    "{:<32} {:<10} {:<10} -",
+                    entry_name_for_human(name),
+                    "unhealthy",
+                    "unknown"
+                );
                 print_inspection_issue(error);
             }
         }
@@ -91,6 +102,7 @@ pub(crate) enum StatusEntry {
 pub(crate) fn print_status(
     statuses: &[StatusEntry],
     current: Option<&str>,
+    shortcuts: &[ShortcutReport],
     json_output: bool,
 ) -> quarters_core::Result<()> {
     let values: Vec<Value> = statuses.iter().map(|status| status_value(status, current)).collect();
@@ -100,15 +112,17 @@ pub(crate) fn print_status(
         "current_space": current,
         "current_evidence": "self-reported QUARTERS_SPACE, matched to a fully validated healthy space",
         "spaces": values,
+        "shortcuts": shortcuts.iter().map(shortcut_value).collect::<Vec<_>>(),
     });
     if json_output {
         return print_success("status", &result, true);
     }
     if statuses.is_empty() {
         println!("No spaces yet. Create one with: quarters create <name>");
+        print_shortcut_summaries(shortcuts);
         return Ok(());
     }
-    println!("NAME                             HEALTH     LEASE    CURRENT  HOME");
+    println!("NAME                             HEALTH     LAYOUT     LEASE    CURRENT  HOME");
     for status in statuses {
         print_human_status(status, current);
     }
@@ -117,7 +131,19 @@ pub(crate) fn print_status(
     }
     println!();
     println!("Lease state covers Quarters-managed operations; detached processes are unknown.");
+    print_shortcut_summaries(shortcuts);
     Ok(())
+}
+
+fn print_shortcut_summaries(shortcuts: &[ShortcutReport]) {
+    for shortcut in shortcuts {
+        println!(
+            "Shortcut {}: {} ({})",
+            shortcut.name,
+            shortcut.state.as_str(),
+            shortcut.context
+        );
+    }
 }
 
 pub(crate) fn print_current(current: &str, json_output: bool) -> quarters_core::Result<()> {
@@ -156,6 +182,7 @@ pub(crate) fn print_environment(
 pub(crate) fn print_doctor(
     capabilities: &Capabilities,
     tools: &[ToolProbe],
+    shortcuts: &[ShortcutReport],
     space: Option<&Space>,
     lease_state: Option<LeaseState>,
     recovery: std::result::Result<&RecoverySummary, &QuartersError>,
@@ -184,6 +211,7 @@ pub(crate) fn print_doctor(
         "space_lease_state": lease_state.map(LeaseState::as_str),
         "detached_processes": space.map(|_space| "unknown"),
         "recovery": recovery_value,
+        "shortcuts": shortcuts.iter().map(shortcut_value).collect::<Vec<_>>(),
         "tools": tools,
         "classification_evidence": "installed executable plus declared state-location contract; no credentials were read",
     });
@@ -193,6 +221,10 @@ pub(crate) fn print_doctor(
     println!("Quarters doctor");
     println!("  Platform       {}", capabilities.platform);
     println!("  Baseline       available (HOME and user-state profile)");
+    println!(
+        "  Workspace      {}: {}",
+        capabilities.workspace_profile.status, capabilities.workspace_profile.detail
+    );
     println!(
         "  Home view      {}: {}",
         capabilities.home_view.status, capabilities.home_view.detail
@@ -209,10 +241,19 @@ pub(crate) fn print_doctor(
         ),
         Err(error) => println!("  Recovery       unavailable: {}", escape_for_human(error.message())),
     }
+    for shortcut in shortcuts {
+        println!(
+            "  Shortcut {:<4} {:<11} ({})",
+            shortcut.name,
+            shortcut.state.as_str(),
+            shortcut.context
+        );
+    }
     if let (Some(space), Some(lease_state)) = (space, lease_state) {
         println!(
-            "  Space          {} ({})",
+            "  Space          {} [{}] ({})",
             space.manifest().name,
+            space.layout(),
             path_for_human(&space.home())
         );
         println!("  Environment    validated");
@@ -232,6 +273,35 @@ pub(crate) fn print_doctor(
             println!("  limitation: {limitation}");
         }
     }
+    Ok(())
+}
+
+pub(crate) fn print_shortcut(
+    action: ShortcutAction,
+    report: &ShortcutReport,
+    json_output: bool,
+) -> quarters_core::Result<()> {
+    let value = shortcut_value(report);
+    if json_output {
+        return print_success(&format!("shortcut {}", action.as_str()), &value, true);
+    }
+    println!("Shortcut {}: {}", report.name, report.state.as_str());
+    println!("  Context  {}", report.context);
+    if let Some(directory) = &report.directory {
+        println!("  Directory {}", path_for_human(directory));
+        println!("  On PATH   {}", if report.directory_on_path { "yes" } else { "no" });
+    }
+    if let Some(target) = &report.link_target {
+        println!("  Target    {}", path_for_human(target));
+    }
+    for command in &report.shortcut_matches {
+        println!("  Resolves  {}", path_for_human(command));
+    }
+    if let Some(issue) = &report.issue {
+        println!("  Issue     {}", escape_for_human(issue));
+    }
+    println!("  Check     {}", report.parent_shell_check);
+    println!("  Note      {}", report.limitation);
     Ok(())
 }
 
@@ -274,6 +344,8 @@ fn space_value(space: &Space) -> Value {
         "created_unix_ms": space.manifest().created_unix_ms,
         "default_shell": safe_json_path(&space.manifest().default_shell),
         "authority_model": space.manifest().authority_model,
+        "layout": space.layout().as_str(),
+        "space_id": space.id().map(quarters_core::SpaceId::as_str),
     })
 }
 
@@ -292,6 +364,8 @@ fn inspection_value(inspection: &SpaceInspection) -> Value {
             "name": safe_json_text(name, 64),
             "name_encoding": if *name_was_lossy { "lossy_escaped_bounded" } else { "utf8_escaped_bounded" },
             "health": "unhealthy",
+            "layout": null,
+            "space_id": null,
             "error": inspection_error_value(error),
         }),
     }
@@ -314,6 +388,8 @@ fn status_value(status: &StatusEntry, current: Option<&str>) -> Value {
             "name": safe_json_text(name, 64),
             "name_encoding": if *name_was_lossy { "lossy_escaped_bounded" } else { "utf8_escaped_bounded" },
             "health": "unhealthy",
+            "layout": null,
+            "space_id": null,
             "lease_state": "unknown",
             "current": current == Some(name.as_str()),
             "error": inspection_error_value(error),
@@ -326,9 +402,10 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
         StatusEntry::Healthy { space, lease_state } => {
             let is_current = current == Some(space.manifest().name.as_str());
             println!(
-                "{:<32} {:<10} {:<8} {:<8} {}",
+                "{:<32} {:<10} {:<10} {:<8} {:<8} {}",
                 space.manifest().name,
                 "healthy",
+                space.layout(),
                 lease_state.as_str(),
                 if is_current { "yes" } else { "no" },
                 path_for_human(&space.home())
@@ -337,9 +414,10 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
         StatusEntry::Unhealthy { name, error, .. } => {
             let is_current = current == Some(name.as_str());
             println!(
-                "{:<32} {:<10} {:<8} {:<8} -",
+                "{:<32} {:<10} {:<10} {:<8} {:<8} -",
                 entry_name_for_human(name),
                 "unhealthy",
+                "unknown",
                 "unknown",
                 if is_current { "yes" } else { "no" }
             );
@@ -381,6 +459,23 @@ fn safe_json_text(value: &str, maximum: usize) -> String {
 
 fn safe_json_path(path: &Path) -> String {
     safe_json_text(&path.to_string_lossy(), 512)
+}
+
+fn shortcut_value(report: &ShortcutReport) -> Value {
+    json!({
+        "name": safe_json_text(&report.name, 32),
+        "context": report.context,
+        "state": report.state.as_str(),
+        "directory": report.directory.as_deref().map(safe_json_path),
+        "entry": report.entry.as_deref().map(safe_json_path),
+        "link_target": report.link_target.as_deref().map(safe_json_path),
+        "shortcut_matches": report.shortcut_matches.iter().map(|path| safe_json_path(path)).collect::<Vec<_>>(),
+        "quarters_matches": report.quarters_matches.iter().map(|path| safe_json_path(path)).collect::<Vec<_>>(),
+        "directory_on_path": report.directory_on_path,
+        "parent_shell_check": safe_json_text(&report.parent_shell_check, 64),
+        "parent_shell_limitation": report.limitation,
+        "issue": report.issue.as_deref().map(|issue| safe_json_text(issue, 512)),
+    })
 }
 
 fn error_envelope(kind: &str, message: &str, hint: Option<&str>) -> Value {

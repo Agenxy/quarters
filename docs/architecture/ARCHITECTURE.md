@@ -52,6 +52,12 @@ The default root is `~/.quarters`:
 Creation builds a complete directory under `.creating-<name>-<unique>` on the
 same filesystem, syncs private files and publishes it with `rename()`. A schema
 marker and matching directory name are required when opening a space.
+Schema 1 remains the minimal `profile` layout and deliberately serializes no
+layout or stable-ID fields. Schema 2 is reserved for the explicit `workspace`
+layout and requires both `"layout": "workspace"` and a random 128-bit opaque
+ID. New readers accept both; unsupported versions and inconsistent field sets
+fail closed before a space becomes healthy. The ID is future lifecycle
+identity, not an authentication secret.
 Creation, recovery, lease acquisition and removal share the bounded root
 management lock. Rename losers
 clean their skeleton immediately; interrupted `.creating-*` state and
@@ -100,13 +106,30 @@ This prevents accidental reuse of common and unknown credential variables. It
 does not stop a child from reading credentials directly from any host path its
 real account can access.
 
-`SSH_AUTH_SOCK` always points to a short per-space socket. It is intentionally
-not inherited. A missing per-space agent makes agent-backed SSH unavailable;
-explicit key paths in the per-space SSH config still work.
+`SSH_AUTH_SOCK` is intentionally not inherited and remains unset in the
+baseline. The alpha does not present a reserved path as an active private
+agent. Agent-backed SSH is unavailable until reviewed agent lifecycle
+management exists; explicit key paths in the per-space SSH config still work.
 
 The generated Git config starts with an empty credential helper. This resets
 helpers inherited from host or system policy before any per-space choice. It
 avoids silently sharing macOS Keychain credentials.
+
+Prompt context is computed only from the validated portable space name.
+`quarters shell-init zsh|bash` emits first-party, versioned snippets that
+prefix rather than replace the current prompt, so Git, virtualenv and theme
+state can remain visible. Newly created startup files resolve `quarters` at
+shell startup; existing startup files are never modified. Host escape clears
+all Quarters prompt variables.
+
+The optional `qts` or `q` shortcut is a managed symlink to the first
+`quarters` launcher on PATH, not to the currently running executable. Its
+directory must already be a protected host PATH directory. Installation never
+overwrites, and removal deletes only a symlink whose target is relative
+`quarters` or an absolute executable named `quarters`. Status distinguishes the
+current managed target, a relocated live launcher and a stale target. Every
+observed PATH match is reported. Parent-shell aliases and functions require the printed
+`type -a` check because a child cannot observe them.
 
 ## Process boundary
 
@@ -175,10 +198,20 @@ config. Keychain, TCC, app containers and login services remain host-bound.
 Seatbelt is not part of the alpha's guarantee. `doctor` can report the deprecated
 `sandbox-exec` binary, but no confinement flag exists without a reviewed policy.
 
+Workspace layout additionally creates conventional personal directories plus
+`Applications`, `Movies` and selected `Library` state directories beneath the
+space home. No Launch Services, TCC, app-container or Finder registration is
+performed, and applications are free to ignore these paths.
+
 ### Linux
 
 The portable baseline matches macOS environment behavior without the
 CoreFoundation variable.
+
+Workspace layout creates the portable personal-directory set beneath the
+space home. It does not edit host `user-dirs.dirs`, register desktop services
+or imply that programs using passwd records have been redirected. Linux
+`--home-view` remains the separate opt-in compatibility mechanism.
 
 `--home-view` starts an internal Quarters child, creates a user namespace, maps
 the real UID and GID to the same numeric values, creates a private mount
@@ -220,4 +253,5 @@ These workflows require a stronger transaction model than recursive copy:
 - preserve mode and extended metadata deliberately
 - mark exports as private material and define a safe import format
 
-The alpha documents this contract and does not ship partial commands.
+The alpha documents this contract and does not ship partial commands. The
+implementation decisions and acceptance gates are in ADRs 0003 through 0007.

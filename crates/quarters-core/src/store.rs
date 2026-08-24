@@ -1,11 +1,18 @@
 //! Atomic private storage for spaces.
 
+mod create;
+mod layout;
+
+pub(crate) use layout::StoreLayout;
+
 use crate::store_lock::lock_shared_bounded;
 use crate::store_policy::{
-    validate_private_dir, validate_private_file, validate_removal_entry_name, validate_shell, validate_store_root,
-    validate_stored_manifest,
+    validate_private_dir, validate_private_file, validate_removal_entry_name, validate_stored_manifest,
 };
-use crate::{ErrorKind, QuartersError, Result, SCHEMA_VERSION, Space, SpaceManifest, SpaceName};
+use crate::{
+    ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result, SUPPORTED_SCHEMA_VERSIONS, Space, SpaceManifest,
+    SpaceName, WORKSPACE_SCHEMA_VERSION,
+};
 use fs4::FileExt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
@@ -18,6 +25,11 @@ const MANIFEST_FILE: &str = ".quarters.json";
 const MAX_MANIFEST_BYTES: u64 = 16 * 1_024;
 pub(crate) const OBSERVATION_LOCK_FILE: &str = ".observe";
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(serde::Deserialize)]
+struct ManifestHeader {
+    schema_version: u32,
+}
 
 /// Root storage manager.
 #[derive(Clone, Debug)]
@@ -121,91 +133,6 @@ impl Store {
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    /// Create a new private space and publish it with one rename.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid shell, an existing or unfinished
-    /// target, or any filesystem or manifest failure.
-    pub fn create(&self, name: SpaceName, default_shell: PathBuf) -> Result<Space> {
-        self.ensure_layout()?;
-        validate_shell(&default_shell)?;
-        let destination = self.space_path(&name);
-        if entry_exists(&destination)? {
-            return Err(QuartersError::new(
-                ErrorKind::AlreadyExists,
-                format!("space '{name}' already exists"),
-            ));
-        }
-        let temporary = self.temporary_path(&name)?;
-        if entry_exists(&temporary)? {
-            return Err(QuartersError::new(
-                ErrorKind::CorruptState,
-                format!("unfinished creation path exists at {}", temporary.display()),
-            )
-            .with_hint("inspect and remove only that unfinished directory, then retry"));
-        }
-        let setup_observation = self.management_guard()?;
-        create_private_dir(&temporary)?;
-        let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
-        let creation_lock = match open_or_create_private_lock(&creation_lock_path) {
-            Ok(file) => file,
-            Err(error) => {
-                let _cleanup = fs::remove_dir_all(&temporary);
-                return Err(error);
-            }
-        };
-        if let Err(error) = <File as FileExt>::try_lock(&creation_lock) {
-            let _cleanup = fs::remove_dir_all(&temporary);
-            return Err(match error {
-                fs4::TryLockError::WouldBlock => {
-                    QuartersError::new(ErrorKind::CorruptState, "a new creation lock was already held")
-                }
-                fs4::TryLockError::Error(error) => QuartersError::io("lock space creation", &creation_lock_path, error),
-            });
-        }
-        drop(setup_observation);
-        let requested_name = name.as_str().to_owned();
-        let result = Self::populate_space(&temporary, name, default_shell);
-        if let Err(error) = result {
-            let _cleanup = fs::remove_dir_all(&temporary);
-            return Err(error);
-        }
-        let _publish_observation = match self.management_guard() {
-            Ok(observation) => observation,
-            Err(error) => {
-                let _cleanup = fs::remove_dir_all(&temporary);
-                return Err(error);
-            }
-        };
-        match entry_exists(&destination) {
-            Ok(false) => {}
-            Ok(true) => {
-                let _cleanup = fs::remove_dir_all(&temporary);
-                return Err(QuartersError::new(
-                    ErrorKind::AlreadyExists,
-                    format!("space '{requested_name}' already exists"),
-                ));
-            }
-            Err(error) => {
-                let _cleanup = fs::remove_dir_all(&temporary);
-                return Err(error);
-            }
-        }
-        if let Err(error) = fs::remove_file(&creation_lock_path) {
-            let failure = QuartersError::io("remove creation marker", &creation_lock_path, error);
-            let _cleanup = fs::remove_dir_all(&temporary);
-            return Err(failure);
-        }
-        if let Err(error) = fs::rename(&temporary, &destination) {
-            let failure = QuartersError::io("publish space", &destination, error);
-            let _cleanup = fs::remove_dir_all(&temporary);
-            return Err(failure);
-        }
-        drop(creation_lock);
-        Self::open_path(destination)
     }
 
     /// Open and validate a named space.
@@ -359,63 +286,44 @@ impl Store {
             )),
             fs4::TryLockError::Error(error) => QuartersError::io("lock space for removal", &lock_path, error),
         })?;
-        let trash_root = self.root.join("trash");
+        let trash_root = self.layout().trash_root().to_path_buf();
         create_private_dir(&trash_root)?;
         let retired = trash_root.join(format!(".retired-{}", unique_suffix()?));
         fs::rename(&space_path, &retired).map_err(|error| QuartersError::io("retire space", &space_path, error))?;
-        fs::remove_dir_all(&retired).map_err(|error| QuartersError::io("delete retired space", &retired, error))
-    }
-
-    pub(crate) fn ensure_layout(&self) -> Result<()> {
-        ensure_store_root(&self.root)?;
-        create_private_dir(&self.root.join("spaces"))?;
-        create_private_dir(&self.root.join("trash"))
-    }
-
-    fn existing_spaces_root(&self) -> Result<Option<PathBuf>> {
-        let root_metadata = match fs::symlink_metadata(&self.root) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(QuartersError::io("inspect Quarters root", &self.root, error)),
-        };
-        validate_store_root(&self.root, &root_metadata)?;
-        let spaces_root = self.root.join("spaces");
-        let spaces_metadata = match fs::symlink_metadata(&spaces_root) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(QuartersError::io("inspect spaces directory", &spaces_root, error)),
-        };
-        validate_private_dir(&spaces_root, &spaces_metadata)?;
-        Ok(Some(spaces_root))
-    }
-
-    fn populate_space(root: &Path, name: SpaceName, default_shell: PathBuf) -> Result<()> {
-        let home = root.join("home");
-        create_private_dir(&home)?;
-        for relative in private_directories() {
-            create_private_dir(&home.join(relative))?;
-        }
-        create_shell_files(&home)?;
-        create_git_config(&home)?;
-        write_private_file(
-            &home.join(".ssh/config"),
-            b"# Quarters-owned SSH configuration. Add only identities for this space.\nHost *\n  AddKeysToAgent no\n  IdentitiesOnly yes\n",
-        )?;
-        write_private_file(&root.join(".active"), b"")?;
-        let manifest = SpaceManifest {
-            schema_version: SCHEMA_VERSION,
-            name,
-            created_unix_ms: epoch_millis()?,
-            default_shell,
-            authority_model: "host-account-state-profile".to_owned(),
-        };
-        write_manifest(root, &manifest)
+        let recovery_hint =
+            "the space was retired from use; run 'quarters doctor' and recover only validated stale state";
+        sync_parent_directory(&space_path).map_err(|error| error.with_hint(recovery_hint))?;
+        sync_parent_directory(&retired).map_err(|error| error.with_hint(recovery_hint))?;
+        fs::remove_dir_all(&retired)
+            .map_err(|error| QuartersError::io("delete retired space", &retired, error).with_hint(recovery_hint))?;
+        sync_parent_directory(&retired).map_err(|error| {
+            error.with_hint(format!(
+                "space '{name}' was removed, but directory durability could not be confirmed; inspect status before retrying"
+            ))
+        })
     }
 
     fn open_path(path: PathBuf) -> Result<Space> {
         let manifest_path = path.join(MANIFEST_FILE);
         validate_space_anchors(&path)?;
         let bytes = read_private_file(&manifest_path)?;
+        let header: ManifestHeader = serde_json::from_slice(&bytes).map_err(|error| {
+            QuartersError::new(
+                ErrorKind::CorruptState,
+                format!("space manifest header is invalid at {}", manifest_path.display()),
+            )
+            .with_source(error)
+        })?;
+        if !SUPPORTED_SCHEMA_VERSIONS.contains(&header.schema_version) {
+            return Err(QuartersError::new(
+                ErrorKind::CorruptState,
+                format!(
+                    "space uses schema {}, but this build supports schemas {} and {}",
+                    header.schema_version, PROFILE_SCHEMA_VERSION, WORKSPACE_SCHEMA_VERSION
+                ),
+            )
+            .with_hint("upgrade Quarters before opening this space; do not delete or rewrite its manifest"));
+        }
         let manifest: SpaceManifest = serde_json::from_slice(&bytes).map_err(|error| {
             QuartersError::new(
                 ErrorKind::CorruptState,
@@ -423,15 +331,6 @@ impl Store {
             )
             .with_source(error)
         })?;
-        if manifest.schema_version != SCHEMA_VERSION {
-            return Err(QuartersError::new(
-                ErrorKind::CorruptState,
-                format!(
-                    "space uses schema {}, but this build supports {}",
-                    manifest.schema_version, SCHEMA_VERSION
-                ),
-            ));
-        }
         validate_stored_manifest(&manifest)?;
         let expected_name = path.file_name().and_then(|value| value.to_str());
         if expected_name != Some(manifest.name.as_str()) {
@@ -453,60 +352,6 @@ impl Store {
             },
         }
     }
-
-    fn space_path(&self, name: &SpaceName) -> PathBuf {
-        self.root.join("spaces").join(name.as_str())
-    }
-
-    fn temporary_path(&self, name: &SpaceName) -> Result<PathBuf> {
-        Ok(self
-            .root
-            .join("spaces")
-            .join(format!(".creating-{name}-{}", unique_suffix()?)))
-    }
-}
-
-fn private_directories() -> &'static [&'static str] {
-    &[
-        ".cache",
-        ".cargo",
-        ".claude",
-        ".codex",
-        ".config/gh",
-        ".config/npm",
-        ".gnupg",
-        ".local/bin",
-        ".local/share",
-        ".local/state/shell",
-        ".ssh",
-    ]
-}
-
-fn create_shell_files(home: &Path) -> Result<()> {
-    write_private_file(
-        &home.join(".zshrc"),
-        b"# Quarters-owned starting point. This file belongs to this space.\nexport HISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/zsh_history\"\nsetopt APPEND_HISTORY INC_APPEND_HISTORY SHARE_HISTORY\nif [[ -n \"$QUARTERS_SPACE\" ]]; then\n  PROMPT=\"[$QUARTERS_SPACE] %~ %# \"\nfi\n",
-    )?;
-    write_private_file(
-        &home.join(".bashrc"),
-        b"# Quarters-owned starting point. This file belongs to this space.\nHISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/bash_history\"\nexport HISTFILE\nif [ -n \"${QUARTERS_SPACE:-}\" ]; then\n  PS1=\"[$QUARTERS_SPACE] \\w \\$ \"\nfi\n",
-    )
-}
-
-fn create_git_config(home: &Path) -> Result<()> {
-    write_private_file(
-        &home.join(".gitconfig"),
-        b"# Host credential helpers are deliberately cleared.\n[credential]\n\thelper =\n\tuseHttpPath = true\n",
-    )
-}
-
-fn write_manifest(root: &Path, manifest: &SpaceManifest) -> Result<()> {
-    let path = root.join(MANIFEST_FILE);
-    let mut bytes = serde_json::to_vec_pretty(manifest).map_err(|error| {
-        QuartersError::new(ErrorKind::System, "could not serialize the space manifest").with_source(error)
-    })?;
-    bytes.push(b'\n');
-    write_private_file(&path, &bytes)
 }
 
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -643,19 +488,37 @@ fn create_private_dir(path: &Path) -> Result<()> {
     validate_private_dir(path, &metadata)
 }
 
+fn sync_directory(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("inspect directory before syncing", path, error))?;
+    validate_private_dir(path, &metadata)?;
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(nix::libc::O_CLOEXEC | nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW);
+    let directory = options
+        .open(path)
+        .map_err(|error| QuartersError::io("open directory for syncing", path, error))?;
+    directory
+        .sync_all()
+        .map_err(|error| QuartersError::io("sync directory", path, error))
+}
+
+fn sync_parent_directory(path: &Path) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        QuartersError::new(
+            ErrorKind::InvalidInput,
+            format!("path has no parent directory: {}", path.display()),
+        )
+    })?;
+    sync_directory(parent)
+}
+
 pub(crate) fn entry_exists(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_metadata) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(QuartersError::io("inspect path", path, error)),
-    }
-}
-
-fn ensure_store_root(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => validate_store_root(path, &metadata),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => create_private_dir(path),
-        Err(error) => Err(QuartersError::io("inspect Quarters root", path, error)),
     }
 }
 
@@ -705,6 +568,8 @@ mod tests {
         assert_eq!(created.manifest().name.as_str(), "work");
         assert_eq!(store.list().expect("list spaces").len(), 1);
         assert!(created.home().join(".gitconfig").is_file());
+        let zshrc = fs::read_to_string(created.home().join(".zshrc")).expect("read zsh startup file");
+        assert!(zshrc.contains("quarters shell-init zsh 2>/dev/null"));
     }
 
     #[test]
@@ -873,6 +738,117 @@ mod tests {
             store.open(&name).expect_err("relative shell must fail").kind(),
             ErrorKind::CorruptState
         );
+    }
+
+    #[test]
+    fn manifest_schema_is_probed_before_strict_deserialization() {
+        let (_temporary, store) = test_store();
+        let name = SpaceName::parse("future").expect("valid name");
+        let space = store
+            .create(name.clone(), PathBuf::from("/bin/sh"))
+            .expect("create space");
+        let manifest_path = space.root().join(MANIFEST_FILE);
+        let bytes = fs::read(&manifest_path).expect("read manifest");
+        let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parse manifest");
+        manifest["schema_version"] = serde_json::json!(3);
+        manifest["layout"] = serde_json::json!("workspace");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("encode manifest")).expect("replace manifest");
+
+        let error = store.open(&name).expect_err("future schema must fail closed");
+        assert_eq!(error.kind(), ErrorKind::CorruptState);
+        assert!(error.message().contains("space uses schema 3"));
+        assert!(error.hint().is_some_and(|hint| hint.contains("upgrade Quarters")));
+    }
+
+    #[test]
+    fn unknown_manifest_fields_fail_strict_deserialization() {
+        let (_temporary, store) = test_store();
+        let name = SpaceName::parse("strict").expect("valid name");
+        let space = store
+            .create(name.clone(), PathBuf::from("/bin/sh"))
+            .expect("create space");
+        let manifest_path = space.root().join(MANIFEST_FILE);
+        let bytes = fs::read(&manifest_path).expect("read manifest");
+        let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parse manifest");
+        manifest["unexpected"] = serde_json::json!(true);
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("encode manifest")).expect("replace manifest");
+
+        let error = store.open(&name).expect_err("unknown field must fail closed");
+        assert_eq!(error.kind(), ErrorKind::CorruptState);
+        assert!(error.message().contains("space manifest is invalid"));
+    }
+
+    #[test]
+    fn profile_manifests_remain_schema_one_without_workspace_fields() {
+        let (_temporary, store) = test_store();
+        let space = store
+            .create(
+                SpaceName::parse("profile").expect("valid name"),
+                PathBuf::from("/bin/sh"),
+            )
+            .expect("create profile");
+        let bytes = fs::read(space.root().join(MANIFEST_FILE)).expect("read manifest");
+        let manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parse manifest");
+        assert_eq!(manifest["schema_version"], serde_json::json!(PROFILE_SCHEMA_VERSION));
+        assert!(manifest.get("layout").is_none());
+        assert!(manifest.get("space_id").is_none());
+        assert_eq!(space.layout(), crate::SpaceLayout::Profile);
+        assert!(space.id().is_none());
+    }
+
+    #[test]
+    fn workspace_manifests_have_stable_identity_and_private_directories() {
+        let (_temporary, store) = test_store();
+        let space = store
+            .create_with_layout(
+                SpaceName::parse("workspace").expect("valid name"),
+                PathBuf::from("/bin/sh"),
+                crate::SpaceLayout::Workspace,
+            )
+            .expect("create workspace");
+        assert_eq!(space.manifest().schema_version, WORKSPACE_SCHEMA_VERSION);
+        assert_eq!(space.layout(), crate::SpaceLayout::Workspace);
+        assert_eq!(space.id().expect("workspace ID").as_str().len(), 32);
+        for relative in ["Desktop", "Documents", "Downloads", "Pictures", "Templates"] {
+            let directory = space.home().join(relative);
+            let metadata = fs::symlink_metadata(directory).expect("inspect workspace directory");
+            assert!(metadata.is_dir());
+            assert_eq!(metadata.mode() & 0o777, 0o700);
+        }
+        #[cfg(target_os = "macos")]
+        for relative in [
+            "Applications",
+            "Library/Application Support",
+            "Library/Preferences",
+            "Movies",
+        ] {
+            let directory = space.home().join(relative);
+            let metadata = fs::symlink_metadata(directory).expect("inspect macOS workspace directory");
+            assert!(metadata.is_dir());
+            assert_eq!(metadata.mode() & 0o777, 0o700);
+        }
+        let reopened = store
+            .open(&SpaceName::parse("workspace").expect("valid name"))
+            .expect("reopen workspace");
+        assert_eq!(reopened.id(), space.id());
+    }
+
+    #[test]
+    fn schema_two_requires_workspace_layout_and_stable_identity() {
+        let (_temporary, store) = test_store();
+        let name = SpaceName::parse("invalid-v2").expect("valid name");
+        let space = store
+            .create(name.clone(), PathBuf::from("/bin/sh"))
+            .expect("create profile");
+        let manifest_path = space.root().join(MANIFEST_FILE);
+        let bytes = fs::read(&manifest_path).expect("read manifest");
+        let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parse manifest");
+        manifest["schema_version"] = serde_json::json!(WORKSPACE_SCHEMA_VERSION);
+        manifest["layout"] = serde_json::json!("workspace");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("encode manifest")).expect("replace manifest");
+        let error = store.open(&name).expect_err("missing stable ID must fail closed");
+        assert_eq!(error.kind(), ErrorKind::CorruptState);
+        assert!(error.message().contains("stable identity"));
     }
 
     #[test]
