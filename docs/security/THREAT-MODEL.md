@@ -119,11 +119,15 @@ rewrite its ancestors.
 Clone copies arbitrary included state without interpreting or rewriting embedded
 absolute paths. Such paths can still read or mutate the source Quarter or host.
 Detached same-UID processes can change source files during a clone despite the
-exclusive cooperative lease. Descriptor identity checks prevent path swapping
-from redirecting the walker, but the portable copy is not a database-consistent
-snapshot. Skipped sockets, FIFOs, devices, foreign-owned entries and cache roots
-are reported by count. Timestamps, ACLs, xattrs, filesystem flags, special mode
-bits, sparse extents and hard-link topology are not preserved.
+exclusive cooperative lease. Descriptor identity checks reject replacements
+when any compared ownership, mode, topology, size or timestamp field changes.
+A same-type replacement can still pass if every field matches within the
+filesystem's timestamp granularity; held descriptors and no-follow opens still
+prevent path escape. Concurrent metadata changes before open abort the clone,
+but the portable copy is not a database-consistent snapshot. Skipped sockets,
+FIFOs, devices, foreign-owned entries and cache roots are reported by count.
+Timestamps, ACLs, xattrs, filesystem flags, special mode bits, sparse extents
+and hard-link topology are not preserved.
 
 MCP is not an authorization boundary against another process already running as
 the same account. A peer can invoke the same CLI or edit files it owns. The MCP

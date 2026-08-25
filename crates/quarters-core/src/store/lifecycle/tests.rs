@@ -125,9 +125,11 @@ fn assert_replaced_entry_is_rejected(action: TestMutationAction, fixture: impl F
     let relative = Path::new("race-entry");
     fixture(&source.home().join(relative));
     let mutation = TestMutation::new(&source.home(), relative, action);
+    let applied = mutation.clone();
     let error = store
         .clone_space_with_mutation(&name("source"), name("copy"), mutation, None)
         .expect_err("entry replacement must fail");
+    assert!(applied.was_applied(), "hostile-source mutation must run");
     assert_eq!(error.kind(), ErrorKind::CorruptState);
     assert!(error.message().contains("source entry changed during clone"));
     assert!(!store.root().join("spaces/copy").exists());
@@ -150,6 +152,7 @@ fn replaced_regular_file_is_rejected_by_descriptor_identity() {
 fn replaced_directory_is_rejected_by_descriptor_identity() {
     assert_replaced_entry_is_rejected(TestMutationAction::ReplaceDirectory, |path| {
         fs::create_dir(path).expect("create directory fixture");
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).expect("set directory fixture mode");
     });
 }
 
@@ -204,9 +207,10 @@ fn a_file_growing_after_stat_is_still_bounded_during_copy() {
     let source = store
         .create(name("source"), PathBuf::from("/bin/sh"))
         .expect("create source");
-    let relative = Path::new("growing");
+    let relative = Path::new("!growing");
     fs::write(source.home().join(relative), b"x").expect("create growing file");
     let mutation = TestMutation::new(&source.home(), relative, TestMutationAction::GrowRegular { bytes: 2 });
+    let applied = mutation.clone();
     let error = store
         .clone_space_with_mutation(
             &name("source"),
@@ -218,8 +222,10 @@ fn a_file_growing_after_stat_is_still_bounded_during_copy() {
             }),
         )
         .expect_err("growth beyond the limit must fail");
+    assert!(applied.was_applied(), "growth mutation must run after open");
     assert_eq!(error.kind(), ErrorKind::ResourceLimit);
     assert!(error.message().contains("regular-file bytes"));
+    assert!(error.message().contains("!growing"));
     assert!(!store.root().join("spaces/copy").exists());
 }
 

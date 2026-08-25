@@ -98,7 +98,7 @@ impl<'a> Walker<'a> {
             let metadata = entry_metadata(&source, &name, &path)?;
             #[cfg(test)]
             if let Some(mutation) = &self.control.mutation {
-                mutation.apply_if_selected(&path)?;
+                mutation.apply_before_open_if_selected(&path)?;
             }
             self.note_entry()?;
             if self.is_excluded_cache(&path) {
@@ -176,6 +176,10 @@ impl<'a> Walker<'a> {
             ));
         }
         let source = open_regular_at(source_parent, name, metadata, path)?;
+        #[cfg(test)]
+        if let Some(mutation) = &self.control.mutation {
+            mutation.apply_after_open_if_selected(path)?;
+        }
         let actual = if let Some(parent) = destination_parent {
             copy_regular(
                 source,
@@ -466,6 +470,11 @@ fn verify_identity(expected: &FileStat, actual: &FileStat, kind: SFlag, path: &[
     if expected.st_dev == actual.st_dev
         && expected.st_ino == actual.st_ino
         && expected.st_uid == actual.st_uid
+        && expected.st_gid == actual.st_gid
+        && expected.st_mode == actual.st_mode
+        && expected.st_nlink == actual.st_nlink
+        && expected.st_size == actual.st_size
+        && same_timestamps(expected, actual)
         && actual_kind == kind
     {
         return Ok(());
@@ -475,6 +484,13 @@ fn verify_identity(expected: &FileStat, actual: &FileStat, kind: SFlag, path: &[
         format!("source entry changed during clone at {}", relative_text(path)),
     )
     .with_hint("stop processes writing to the source Quarter and retry the preview"))
+}
+
+fn same_timestamps(expected: &FileStat, actual: &FileStat) -> bool {
+    expected.st_mtime == actual.st_mtime
+        && expected.st_mtime_nsec == actual.st_mtime_nsec
+        && expected.st_ctime == actual.st_ctime
+        && expected.st_ctime_nsec == actual.st_ctime_nsec
 }
 
 fn file_length(metadata: &FileStat, path: &[OsString]) -> Result<u64> {
@@ -603,4 +619,53 @@ fn conversion_error(source: std::num::TryFromIntError) -> QuartersError {
         "filesystem size cannot be represented by this build",
     )
     .with_source(source)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod identity_tests {
+    use super::{FileStat, SFlag, entry_metadata, verify_identity};
+    use nix::dir::Dir;
+    use nix::fcntl::OFlag;
+    use nix::sys::stat::Mode;
+    use std::ffi::OsString;
+    use std::fs;
+    use tempfile::TempDir;
+
+    type Mutation = fn(&mut FileStat);
+
+    #[test]
+    fn metadata_changes_on_the_same_inode_are_rejected() {
+        let temporary = TempDir::new().expect("temporary directory");
+        fs::write(temporary.path().join("state"), b"state").expect("write fixture");
+        let directory = Dir::open(temporary.path(), OFlag::O_RDONLY | OFlag::O_DIRECTORY, Mode::empty())
+            .expect("open fixture directory");
+        let path = [OsString::from("state")];
+        let expected = entry_metadata(&directory, &path[0], &path).expect("fixture metadata");
+        verify_identity(&expected, &expected, SFlag::S_IFREG, &path).expect("unchanged metadata must be accepted");
+        let cases: [(&str, Mutation); 8] = [
+            ("GID", |value| value.st_gid = value.st_gid.saturating_add(1)),
+            ("mode", |value| value.st_mode ^= 0o100),
+            ("link count", |value| value.st_nlink = value.st_nlink.saturating_add(1)),
+            ("size", |value| value.st_size = value.st_size.saturating_add(1)),
+            ("mtime seconds", |value| {
+                value.st_mtime = value.st_mtime.saturating_add(1);
+            }),
+            ("mtime nanoseconds", |value| {
+                value.st_mtime_nsec = value.st_mtime_nsec.saturating_add(1);
+            }),
+            ("ctime seconds", |value| {
+                value.st_ctime = value.st_ctime.saturating_add(1);
+            }),
+            ("ctime nanoseconds", |value| {
+                value.st_ctime_nsec = value.st_ctime_nsec.saturating_add(1);
+            }),
+        ];
+        for (label, mutate) in cases {
+            let mut changed = expected;
+            mutate(&mut changed);
+            let error = verify_identity(&expected, &changed, SFlag::S_IFREG, &path).expect_err(label);
+            assert!(error.message().contains("source entry changed during clone"));
+        }
+    }
 }

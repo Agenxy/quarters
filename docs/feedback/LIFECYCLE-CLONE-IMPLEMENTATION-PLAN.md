@@ -100,15 +100,20 @@ transaction entry point is `clone_space_controlled`.
    failure reports observed versus allowed counts and publishes nothing. Logical
    file length, not allocated block count, enforces byte limits; sparse holes
    are materialized as zeros by this backend.
-7. Open each source regular file relative to its held parent descriptor with
-   `O_NONBLOCK|O_NOFOLLOW`. Compare only device, inode, type and UID against the no-follow
-   entry metadata. The opened descriptor is then authoritative: copy through it,
-   clear `O_NONBLOCK`,
-   enforce the per-file and aggregate actual-byte limits while reading, and
-   report the actual copied length. Create destination files relative to a held
-   parent descriptor with `O_EXCL|O_NOFOLLOW`; apply the source Unix permission
-   bits after writing. Create destination directories at 0700 and defer their
-   source modes to one bottom-up pass immediately before validation.
+7. Compare device, inode, UID, GID, full mode, link count, size, and both the
+   seconds and nanoseconds of modification and change times for source files,
+   directories and symbolic links. This rejects inode reuse whenever any
+   compared metadata differs. A same-type replacement within one filesystem
+   timestamp interval that matches the entire tuple remains a portable
+   limitation. A metadata change by a non-cooperating writer between inspection
+   and open aborts the clone. Open regular files relative to their held parent
+   descriptor with `O_NONBLOCK|O_NOFOLLOW`; the opened descriptor is then
+   authoritative. Clear `O_NONBLOCK`, enforce per-file and aggregate
+   actual-byte limits while reading, and report the actual copied length.
+   Create destination files relative to a held parent descriptor with
+   `O_EXCL|O_NOFOLLOW`; apply the source Unix permission bits after writing.
+   Create destination directories at 0700 and defer their source modes to one
+   bottom-up pass immediately before validation.
 8. Copy without `File::sync_all`. Before pre-publish validation, issue one
    ordinary `nix::unistd::fsync` per written file and sync directories bottom-up.
    This avoids macOS `F_FULLFSYNC` per entry. After rename, sync the spaces parent.

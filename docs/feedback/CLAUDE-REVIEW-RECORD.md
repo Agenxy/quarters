@@ -152,6 +152,22 @@ that a repository-relative image would not resolve on package-registry README
 pages. The README now uses the absolute repository-hosted image URL it
 recommended.
 
+### Linux CI identity-race correction, 2026-08-25
+
+The first GitHub Ubuntu quality run exposed immediate inode reuse in the three
+source-replacement tests. The production identity check was strengthened to
+compare ownership, full mode, link count, size, modification time and change
+time as well as device, inode and type. The threat model records the remaining
+matching-tuple and filesystem-timestamp-granularity limit.
+
+Two maximum-effort Opus 5 passes returned `BLOCK` while the hostile-growth test
+could still pass without reaching its intended post-open copy path. The test
+seam was split into pre-open replacement and post-open growth phases, every
+mutation now proves it ran, the growth failure names its exact target, directory
+replacement is deterministic across umasks, and each new metadata comparison
+has direct regression coverage. The repaired exact delta then received
+`VERDICT: SHIP`.
+
 ## Dibs availability
 
 The final Codex session checked callable tools, MCP resources and MCP resource
