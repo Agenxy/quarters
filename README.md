@@ -51,19 +51,19 @@ Cargo to build locally if host policy rejects them.
 
 ```sh
 cargo build --release
-target/release/quarters create agenxy
+target/release/quarters create work
 target/release/quarters create studio --layout workspace
 target/release/quarters clone studio experiment --preview
 target/release/quarters clone studio experiment --confirm-sensitive-state studio
-target/release/quarters exec agenxy -- env
-target/release/quarters enter agenxy
+target/release/quarters exec work -- env
+target/release/quarters enter work
 ```
 
 Inside the shell:
 
 ```sh
 echo "$QUARTERS_SPACE"
-git config --global user.name "Agenxy contributor"
+git config --global user.name "Work identity"
 quarters current
 ```
 
