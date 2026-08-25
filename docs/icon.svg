@@ -11,8 +11,8 @@
        which is the claim. A single bar says: the same kind of thing lives here,
        and it is yours.
 
-       Tile, stroke weight and accent rule follow docs/icon.svg in Agenxy/dibs.
-       Accent is the pigment-1 token at oklch(70% 0.145 32) for a dark surface. -->
+       Tile, stroke weight and accent rule are the shared mark conventions.
+       Accent is the madder pigment at oklch(70% 0.145 32) for a dark surface. -->
   <rect width="32" height="32" rx="7.5" fill="#131518"/>
   <g fill="none" stroke="#dcdee2" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
     <rect x="6.8" y="8.6" width="18.4" height="14.8" rx="2.6"/>
