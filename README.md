@@ -1,4 +1,4 @@
-<img src="docs/icon.svg" width="72" height="72" alt="">
+<img src="https://raw.githubusercontent.com/Agenxy/quarters/main/docs/icon.svg" width="72" height="72" alt="">
 
 # Quarters
 

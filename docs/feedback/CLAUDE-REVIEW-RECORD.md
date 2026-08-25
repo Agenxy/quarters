@@ -142,6 +142,16 @@ Claude remained read-only throughout and did not execute local gates.
 - default cache exclusion, fresh destination identity, healthy reopened state,
   redirected HOME and preserved host UID verified from the installed binary
 
+### Rebase integration acceptance, 2026-08-25
+
+After upstream `main` added the Quarters mark, the reviewed implementation was
+rebased without source changes. A fresh read-only Opus 5 review returned
+`VERDICT: SHIP` and confirmed that the post-review delta was limited to the
+README inclusion and `docs/icon.svg`. Its only low-severity observation was
+that a repository-relative image would not resolve on package-registry README
+pages. The README now uses the absolute repository-hosted image URL it
+recommended.
+
 ## Dibs availability
 
 The final Codex session checked callable tools, MCP resources and MCP resource
