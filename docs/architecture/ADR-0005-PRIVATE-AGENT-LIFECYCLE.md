@@ -1,6 +1,6 @@
 # ADR 0005: Explicit private-agent lifecycle
 
-Status: proposed; required before any agent socket is advertised
+Status: accepted for OpenSSH; other agent protocols remain separate work
 
 ## Context
 
@@ -20,17 +20,30 @@ unset -> starting -> active -> stopping -> unset
 active -> stale, when identity or liveness verification fails
 ```
 
-The baseline exports no SSH-agent socket. A future `quarters agent` surface
-must support `status`, `start`, `stop` and `restart` for a closed adapter set.
+The baseline exports no host SSH-agent socket. The implemented `quarters agent`
+surface supports `status`, `start`, `stop`, `restart` and confirmed narrow
+recovery for OpenSSH.
 Only a successfully started, identity-verified private agent may add its socket
 to a launch environment.
 
-Each agent receives a runtime directory derived from the stable space identity,
-private mode, a bounded startup deadline and a first-party ownership record.
-Liveness requires a protocol-aware check where available, not socket existence.
-PID files alone are never trusted. Stop verifies recorded process identity and
-removes only owned runtime entries. Stale state is reported separately and
-requires a narrow recovery path.
+The agent receives a runtime directory derived from the stable space identity,
+private mode, a bounded startup deadline and an atomic first-party ownership
+record. The launcher uses the current Quarters executable only for an
+environment-carried token and PID handoff, then clears its environment and
+replaces itself with fixed `/usr/bin/ssh-agent -D`; no shell
+or PATH lookup is involved. Liveness sends a bounded SSH identities request and
+requires the corresponding protocol response while comparing the socket device
+and inode before and after the exchange. The kernel-reported peer PID must also
+match the ownership record. PID files alone are never trusted.
+
+Stop first re-verifies the active process, exact socket identity, peer PID and
+protocol, records `stopping`, repeats the complete socket proof immediately
+before signaling only that PID, waits within a deadline, and removes only the
+same device/inode. Recovery promotes an interrupted `starting` record
+only when that protocol proof succeeds. Dead records without a socket and dead
+records with an exact stored socket identity can be cleared after exact-name
+confirmation. Unowned sockets, symbolic links, live incomplete records and
+malformed registries are retained without signaling or unlinking.
 
 Host-agent use is a separate explicit adapter. It previews the authority being
 shared, is off by default and never copies the host socket into persistent
@@ -43,16 +56,18 @@ than being forced into the SSH model.
 
 ## Acceptance gates
 
-- start/status/stop races and crashed supervisors
+- start/status/stop races and interrupted startup reconciliation
 - stale PID reuse, replaced sockets and symlinked runtime paths
 - bounded startup and shutdown with no orphan created on error
 - two spaces cannot observe each other's private agent through Quarters state
-- host-agent authority requires an explicit, visible choice
+- host-agent authority remains unavailable; the host socket is always blocked
 - environment and doctor output distinguish every state above
 - lifecycle behavior passes on macOS and Linux without shellouts from the core
 
 ## Consequences
 
-Agent-backed credentials remain unavailable by default today. The eventual
-feature can be useful without repeating the false implication that a reserved
-path is a running or isolated service.
+Agent-backed credentials remain unavailable until a user explicitly starts the
+private agent and adds keys to it. The record, socket and keys are still owned
+by the real UID: this lifecycle prevents accidental host-agent sharing and
+unsafe cleanup, but does not protect keys from another process with the same
+account authority.

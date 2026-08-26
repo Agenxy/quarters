@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use quarters_core::{HostEnvironment, Store};
@@ -31,11 +32,12 @@ impl QuartersService {
     pub(crate) fn with_controls(
         store: Store,
         host: HostEnvironment,
+        command_launcher: Option<PathBuf>,
         family: ProtocolFamily,
         admission: RequestAdmission,
     ) -> Self {
         Self {
-            inner: QuartersMcp::new(store, host),
+            inner: QuartersMcp::new(store, host, command_launcher),
             family,
             admission,
         }

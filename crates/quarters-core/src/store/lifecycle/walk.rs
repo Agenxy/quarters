@@ -261,6 +261,10 @@ impl<'a> Walker<'a> {
             ));
         }
         recheck_symlink(source_parent, name, metadata, path)?;
+        if is_managed_command_link(path, &target) {
+            self.report.exclusions.managed_command_links += 1;
+            return Ok(());
+        }
         let resolved = resolve_relative_target(parent_path, &target, path)?;
         self.add_logical_bytes(target_bytes, path)?;
         if let Some(parent) = destination_parent {
@@ -360,6 +364,18 @@ impl<'a> Walker<'a> {
         }
         Ok(())
     }
+}
+
+fn is_managed_command_link(path: &[OsString], target: &OsStr) -> bool {
+    if path.len() != 3 || path[0] != ".local" || path[1] != "bin" {
+        return false;
+    }
+    let name = &path[2];
+    if name == "quarters" {
+        let target = Path::new(target);
+        return target.is_absolute() && target.file_name() == Some(OsStr::new("quarters"));
+    }
+    matches!(name.to_str(), Some("ssh" | "scp" | "sftp" | "ssh-add")) && target == "quarters"
 }
 
 fn open_root(path: &Path, label: &str) -> Result<Dir> {

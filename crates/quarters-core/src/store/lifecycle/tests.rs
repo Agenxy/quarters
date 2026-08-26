@@ -391,7 +391,7 @@ fn absolute_links_fail_closed() {
 }
 
 #[test]
-fn profile_clone_stays_schema_one_with_fresh_creation_time() {
+fn profile_clone_gets_a_fresh_stable_identity_and_creation_time() {
     let (_temporary, store) = test_store();
     let source = store
         .create(name("source"), PathBuf::from("/bin/sh"))
@@ -401,9 +401,10 @@ fn profile_clone_stays_schema_one_with_fresh_creation_time() {
         .expect("clone profile");
     let copy = store.open(&name("copy")).expect("open clone");
     assert_eq!(copy.layout(), SpaceLayout::Profile);
-    assert!(copy.id().is_none());
+    assert!(copy.id().is_some());
+    assert_ne!(copy.id(), source.id());
     assert!(copy.manifest().created_unix_ms >= source.manifest().created_unix_ms);
-    assert!(report.destination_space_id.is_none());
+    assert_eq!(report.destination_space_id.as_deref().map(str::len), Some(32));
 }
 
 #[test]

@@ -16,6 +16,9 @@ pub(crate) struct Diagnostic {
     pub(crate) message: String,
     /// Whether retrying after external state changes may succeed.
     pub(crate) retryable: bool,
+    /// Safe recovery guidance, when Quarters can provide one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) hint: Option<String>,
 }
 
 impl From<&QuartersError> for Diagnostic {
@@ -27,6 +30,7 @@ impl From<&QuartersError> for Diagnostic {
                 error.kind(),
                 ErrorKind::AlreadyExists | ErrorKind::SpaceActive | ErrorKind::System
             ),
+            hint: error.hint().map(|hint| escape_untrusted_text_bounded(hint, 512)),
         }
     }
 }
@@ -37,7 +41,25 @@ impl Diagnostic {
             code: error.kind().as_str().to_owned(),
             message: "an untrusted store entry failed Quarters control-anchor validation".to_owned(),
             retryable: false,
+            hint: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Diagnostic;
+    use quarters_core::{ErrorKind, QuartersError};
+
+    #[test]
+    fn diagnostics_preserve_bounded_recovery_guidance() {
+        let error = QuartersError::new(ErrorKind::CorruptState, "agent state is stale")
+            .with_hint("run 'quarters agent recover demo --confirm demo'");
+        let diagnostic = Diagnostic::from(&error);
+        assert_eq!(
+            diagnostic.hint.as_deref(),
+            Some("run 'quarters agent recover demo --confirm demo'")
+        );
     }
 }
 
@@ -68,6 +90,8 @@ pub(crate) struct SpaceView {
     pub(crate) space_id: Option<String>,
     /// Cooperative Quarters lease state, when healthy.
     pub(crate) lease_state: Option<String>,
+    /// Verified private SSH-agent state, when healthy.
+    pub(crate) ssh_agent_state: Option<String>,
     /// Whether this server process identifies itself as inside the space.
     pub(crate) current: bool,
     /// Validation failure for an unhealthy entry.

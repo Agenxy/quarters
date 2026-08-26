@@ -1,8 +1,8 @@
 //! Versioned artifact model and validated identifiers.
 
 use crate::{
-    CloneCounts, CloneExclusions, CloneLimits, CloneMode, ErrorKind, QuartersError, Result, Space, SpaceId,
-    SpaceLayout, SpaceName,
+    CloneCounts, CloneExclusions, CloneLimits, CloneMode, ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result,
+    STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceLayout, SpaceName, WORKSPACE_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::{Display, Formatter};
@@ -186,7 +186,21 @@ impl SourceIdentity {
     /// Whether this identity names the exact stored space generation.
     #[must_use]
     pub fn matches(&self, space: &Space) -> bool {
-        *self == Self::for_space(space)
+        let current = Self::for_space(space);
+        match (&self.space_id, &current.space_id) {
+            (Some(captured), Some(opened)) => {
+                captured == opened
+                    && self.created_unix_ms == current.created_unix_ms
+                    && self.schema_version == current.schema_version
+            }
+            (None, None) => *self == current,
+            (None, Some(_)) => {
+                self.schema_version == PROFILE_SCHEMA_VERSION
+                    && self.name == current.name
+                    && self.created_unix_ms == current.created_unix_ms
+            }
+            (Some(_), None) => false,
+        }
     }
 }
 
@@ -318,8 +332,14 @@ impl ArtifactManifest {
 fn validate_source_identity(manifest: &ArtifactManifest) -> Result<()> {
     let source = &manifest.source_identity;
     let valid = match manifest.source_layout {
-        SpaceLayout::Profile => source.schema_version == 1 && source.space_id.is_none(),
-        SpaceLayout::Workspace => source.schema_version == 2 && source.space_id.is_some(),
+        SpaceLayout::Profile => {
+            (source.schema_version == PROFILE_SCHEMA_VERSION && source.space_id.is_none())
+                || (source.schema_version == STABLE_SCHEMA_VERSION && source.space_id.is_some())
+        }
+        SpaceLayout::Workspace => {
+            (source.schema_version == WORKSPACE_SCHEMA_VERSION || source.schema_version == STABLE_SCHEMA_VERSION)
+                && source.space_id.is_some()
+        }
     };
     if valid {
         return Ok(());
@@ -573,7 +593,9 @@ fn valid_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ArtifactId, ArtifactName};
+    use super::{ArtifactId, ArtifactName, SourceIdentity};
+    use crate::{STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceLayout, SpaceManifest, SpaceName};
+    use std::path::PathBuf;
 
     #[test]
     fn artifact_names_and_ids_are_strict() {
@@ -581,5 +603,30 @@ mod tests {
         assert!(ArtifactName::parse("../daily").is_err());
         assert!(ArtifactId::parse("0123456789abcdef0123456789abcdef").is_ok());
         assert!(ArtifactId::parse("0123456789ABCDEF0123456789ABCDEF").is_err());
+    }
+
+    #[test]
+    fn stable_source_identity_survives_a_display_name_change() -> Result<(), Box<dyn std::error::Error>> {
+        let id = SpaceId::parse("0123456789abcdef0123456789abcdef")?;
+        let captured = SourceIdentity {
+            schema_version: STABLE_SCHEMA_VERSION,
+            name: SpaceName::parse("before")?,
+            created_unix_ms: 42,
+            space_id: Some(id.clone()),
+        };
+        let renamed = Space::new(
+            PathBuf::from("/tmp/renamed"),
+            SpaceManifest {
+                schema_version: STABLE_SCHEMA_VERSION,
+                layout: Some(SpaceLayout::Profile),
+                space_id: Some(id),
+                name: SpaceName::parse("after")?,
+                created_unix_ms: 42,
+                default_shell: PathBuf::from("/bin/sh"),
+                authority_model: "host-account-state-profile".to_owned(),
+            },
+        );
+        assert!(captured.matches(&renamed));
+        Ok(())
     }
 }

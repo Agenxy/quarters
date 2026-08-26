@@ -9,10 +9,13 @@ use std::path::{Path, PathBuf};
 pub const PROFILE_SCHEMA_VERSION: u32 = 1;
 /// Expanded workspace-layout manifest schema.
 pub const WORKSPACE_SCHEMA_VERSION: u32 = 2;
+/// Stable-identity manifest schema for every user-directory layout.
+pub const STABLE_SCHEMA_VERSION: u32 = 3;
 /// Newest on-disk manifest schema supported by this build.
-pub const LATEST_SCHEMA_VERSION: u32 = WORKSPACE_SCHEMA_VERSION;
+pub const LATEST_SCHEMA_VERSION: u32 = STABLE_SCHEMA_VERSION;
 /// Every on-disk manifest schema supported by this build.
-pub const SUPPORTED_SCHEMA_VERSIONS: [u32; 2] = [PROFILE_SCHEMA_VERSION, WORKSPACE_SCHEMA_VERSION];
+pub const SUPPORTED_SCHEMA_VERSIONS: [u32; 3] =
+    [PROFILE_SCHEMA_VERSION, WORKSPACE_SCHEMA_VERSION, STABLE_SCHEMA_VERSION];
 
 /// User-state directory layout created for a space.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -41,7 +44,7 @@ impl Display for SpaceLayout {
     }
 }
 
-/// Stable opaque identity for schema-2 spaces.
+/// Stable opaque identity for schema-2 and newer spaces.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SpaceId(String);

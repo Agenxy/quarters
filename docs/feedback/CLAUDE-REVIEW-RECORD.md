@@ -253,3 +253,163 @@ repository unchanged.
 Linux-only home-view and non-UTF-8-entry paths remain CI-gated rather than
 executed on this macOS host. Dibs registration was unavailable to the read-only
 Opus sessions, so these reviews were not recorded on the board.
+
+## Stable identity, private credentials and adapters, 2026-08-26
+
+### Before implementation
+
+Claude Code Opus 5 inspected `main` at `f4e0a95` in maximum-effort, read-only
+mode. The first attempt was stopped after the unavailable Dibs MCP integration
+prevented useful output; the review was rerun with an explicit empty MCP
+configuration and completed normally.
+
+The review returned `VERDICT: PROCEED`. It judged Quarters worth building,
+useful and feasible within its same-UID boundary, and changed the implementation
+order to make stable identity and recoverable rename prerequisites for private
+agents and OpenSSH adaptation. It explicitly rejected presenting cooperative
+freeze as enforcement and deferred export until an authentication-key story
+exists. It also required old snapshot binding across upgrade and rename,
+socket-protocol evidence instead of path existence, collision-safe adapters,
+host-path bypass disclosure and representative tool evidence.
+
+Final implementation and security acceptance for this phase is recorded only
+after the local security scan, all gates, installed-binary E2E and a separate
+Opus 5 ship verdict complete.
+
+### First implementation review
+
+The first maximum-effort, read-only implementation review returned
+`VERDICT: DO NOT SHIP`. It identified three high-severity defects: stale active
+agent state could remain pinned by PID reuse, OpenSSH's option parser split an
+unquoted per-space known-hosts path, and space removal could orphan a live
+private agent holding keys. It also found incomplete bundled-`-F` parsing,
+nested Linux runtime drift, static adapter claims in doctor output, private
+agent keys disabled by the generated SSH policy, unbounded aggregate MCP socket
+probing, weak launch preflight, a permissive home-view sentinel and runtime
+cleanup/re-key gaps.
+
+The implementation was revised across those boundaries rather than accepting
+them as residual risk. Adversarial tests now cover disconnected exact sockets,
+an unrelated live recycled PID, active-agent removal refusal, bundled and
+remote `-F`, paths containing spaces, stale doctor routes, real ephemeral-key
+loading, rollback adapter recreation and schema-1 runtime re-keying. A fresh
+Opus verdict is required after the complete local gate and installed-binary
+walkthrough; the initial non-ship verdict is not superseded until that review
+explicitly returns `VERDICT: SHIP`.
+
+### Second implementation review
+
+The next fresh maximum-effort pass again returned `VERDICT: DO NOT SHIP`. Its
+two high findings were concrete OpenSSH credential regressions: bare `ssh-add`
+could load passwd-home defaults into the private agent, and a shared option
+arity table let `ssh -D ... -F`, `ssh -X -F` and `sftp -s ... -F` bypass the
+managed configuration. Medium findings covered stale-agent doctor failure,
+unbounded aggregate CLI status, a cross-platform forged home-view sentinel and
+silent host-tool fallback after launcher relocation. Lower findings covered
+argv handoff metadata, unrecoverable disconnected stopping state, quadratic
+artifact source lookup, legacy-artifact rename binding, and unused visibility
+widening.
+
+All were addressed or made fail-closed with explicit disclosure. In
+particular, bare/default and keychain `ssh-add` imports are refused, each
+OpenSSH tool has its own option grammar, stale doctor remains usable, aggregate
+status skips live agent probing, macOS ignores the Linux-only bypass, launch
+warns on incomplete managed links, stopping recovery never signals an
+unverified PID, legacy bindings block rename, artifact lookup is indexed, and
+the unused visibility changes were reverted. New regressions cover every
+reported bypass and failure mode. A later explicit ship verdict is still
+required.
+
+### Third implementation review
+
+The third maximum-effort pass verified every prior finding as resolved, then
+returned `VERDICT: DO NOT SHIP` for two newly identified edge cases. In Linux
+home-view, a host PATH entry beneath the overmounted home could resolve a
+managed OpenSSH name back to the running Quarters inode and recurse. Invoking
+creation through the documented `qts` symlink could also leave a published
+space without its managed command set on platforms where `current_exe()`
+retains the symlink spelling. Two lower findings concerned discarded MCP error
+hints and a rename-marker ceiling that blocked recovery with the same limit it
+reported.
+
+All four were repaired. Host-tool lookup skips the running executable by
+device/inode and direct recursive dispatch has a parent-PID guard. Launcher
+paths are canonicalized before installation, with a process test that creates
+a complete space through a `qts` symlink. MCP diagnostics retain bounded
+recovery hints. Rename inspection counts every valid marker while recovery
+drains at most 128 actionable records per pass, so repeated recovery remains
+bounded and makes progress. Retained ambiguous markers are inspected but do not
+consume that progress budget, so they cannot starve a later actionable record.
+Regression coverage also proves the managed SSH
+configuration resolves exactly one `IdentityFile` entry.
+
+The final independent verdict is recorded only after the repaired tree passes
+the complete local and installed-binary gates.
+
+### Fourth implementation review
+
+The fourth maximum-effort pass verified all carried findings and found two
+remaining ship blockers. Linux home-view could cover an absolute launcher
+installed beneath the host home, leaving the managed OpenSSH links unreachable.
+The getting-started guide also suggested renaming immediately after a legacy
+upgrade even though pre-upgrade artifacts deliberately block that operation.
+Lower observations covered released pre-alpha.4 runtime spelling, OpenSSH
+quoting evidence for quote/backslash path bytes, embedded MCP launcher policy
+and the linear cost of complete rename-marker scans.
+
+The home-view launcher now publishes its own protected five-command set in the
+private runtime bin before mounting, with collision-safe verification and a
+directory sync. The tutorial states the artifact precondition. Runtime lookup,
+migration and removal recognize both the released FNV spelling and the
+transition identity, accepting exactly one predecessor and refusing ambiguous
+state. Compatibility acceptance runs OpenSSH from a store path containing
+spaces, quotes and backslashes; hard-link and poisoned-host-PATH regressions
+exercise executable-identity exclusion. Standalone MCP now resolves its
+canonical launcher before serving, while the in-memory test transport
+explicitly has no launcher authority. Documentation records that rename
+recovery bounds mutations but performs a complete linear same-UID scan.
+
+A later explicit ship verdict is still required.
+
+### Fifth implementation review
+
+The fifth maximum-effort pass verified five of the six carried fixes and found
+one remaining Linux capability defect. The home-view launcher copy is a
+different inode from a system-installed Quarters binary, so an overmounted
+host-home PATH entry could resolve a managed OpenSSH name to that other binary
+and hit the recursion fuse instead of reaching OpenSSH. A lower cleanup finding
+covered a staged launcher retained after failed rename; informational notes
+requested clearer rename-scan documentation and avoiding the agent ownership
+token in a private temporary filename.
+
+Host-tool lookup now canonicalizes each candidate and skips both the running
+device/inode and every candidate resolving to a basename of `quarters`. The
+regression models distinct runtime and system launchers before a real fallback.
+Failed runtime publication removes its exact staging file, with collision
+coverage. Architecture documentation now states the complete linear marker
+scan and 128-success mutation bound. Agent registry staging uses the existing
+process/time/counter unique suffix rather than the ownership token.
+
+A later explicit ship verdict is still required.
+
+### Sixth acceptance review
+
+The sixth maximum-effort read-only pass verified the fifth-pass repairs from
+source and re-audited the cumulative alpha surface. It confirmed that
+canonical basename rejection closes both Linux installation layouts, that the
+device/inode and basename regressions exercise independent guards, and that
+failed runtime publication leaves no staging residue. It also verified the
+token-free registry staging name, complete linear rename scan disclosure,
+stable identity/runtime migration, agent peer verification, OpenSSH policy,
+MCP bounds and same-UID non-boundary statements.
+
+Claude's environment denied compiler execution, so this pass was source-only;
+the local `make check`, dependency policy and installed-binary evidence remain
+separate acceptance inputs. The reviewer independently counted the conditional
+test inventory and reconciled it to the 201 tests run on macOS. Its remaining
+observations were informational availability, same-UID and Linux-composition
+residuals, not authority or data-isolation defects.
+
+The explicit final verdict for the exact tested implementation tree was:
+
+> VERDICT: SHIP

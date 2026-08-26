@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 blake3.workspace = true
 fs4.workspace = true
 getrandom.workspace = true
-nix = { workspace = true, features = ["dir", "fs", "mount", "sched", "user"] }
+nix = { workspace = true, features = ["dir", "fs", "mount", "poll", "process", "sched", "signal", "socket", "user"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 

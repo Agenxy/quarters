@@ -37,12 +37,20 @@ credential-bearing mutation has a preview and exact confirmation. Rollback
 first captures an automatic recovery snapshot and uses a durable three-state
 transaction that `doctor` can explain and `recover` can finish safely.
 
+New spaces have opaque stable identities, recoverable display-name changes,
+managed OpenSSH invocation adapters and an explicit private SSH-agent
+lifecycle. The socket enters a child environment only after process liveness,
+socket identity and the SSH-agent protocol all verify.
+
 Linux uses the same baseline. An experimental `--home-view` can additionally
 bind the space home over the real passwd home inside an unprivileged user and
 mount namespace. It is opt-in because distro policy can disable user
 namespaces, supplementary groups cannot be mapped without added privilege, and
 ordinary `sudo` does not work inside that view. Quarters fails closed instead of
 starting a home view that would silently reduce the account's group authority.
+Before the mount, it copies the current native launcher and the four managed
+OpenSSH links into the private runtime directory that remains reachable after
+the host home is covered.
 
 Filesystem confinement is not implemented. `doctor` reports Seatbelt and
 Landlock as implementation gaps without claiming protection. The prebuilt
@@ -96,6 +104,8 @@ install path.
 | `create NAME [--layout profile\|workspace]` | Atomically create a minimal profile or expanded workspace |
 | `clone SOURCE DESTINATION --preview` | Validate and summarize a bounded clone without mutation |
 | `clone SOURCE DESTINATION --confirm-sensitive-state SOURCE` | Copy included persistent state into a new independent space |
+| `upgrade NAME --preview\|--confirm NAME` | Assign stable identity to an inactive legacy profile |
+| `rename PREVIOUS NAME --preview\|--confirm PREVIOUS` | Recoverably change an inactive space's display name |
 | `template create\|list\|show\|use\|rename\|rm` | Manage reusable, integrity-checked creation sources |
 | `snapshot create\|list\|show\|verify\|rename\|rm` | Manage named, integrity-checked recovery points |
 | `rollback SPACE SNAPSHOT --recovery-name NAME --preview` | Verify replacement and automatic recovery capture without mutation |
@@ -107,7 +117,10 @@ install path.
 | `enter NAME` | Open the space's interactive shell |
 | `exec NAME -- COMMAND` | Run one native command |
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
-| `doctor [NAME]` | Inspect platform/tools; named form prepares and validates the baseline environment |
+| `agent status\|start\|stop\|restart [NAME]` | Manage a protocol-verified private OpenSSH agent |
+| `agent recover NAME --confirm NAME` | Reconcile only dead or protocol-verified private-agent state |
+| `adapter status\|install\|remove [NAME]` | Inspect or manage collision-safe OpenSSH invocation adapters |
+| `doctor [NAME]` | Inspect platform/tools; named form attempts baseline validation and still reports stale agent state |
 | `rm NAME --confirm NAME` | Remove a space after exact-name confirmation and an inactive supervisor lease |
 | `recover --confirm stale-state` | Reclaim validated internal state left by an interrupted lifecycle operation |
 | `shell-init zsh\|bash` | Print composable prompt integration without editing shell files |
@@ -170,6 +183,40 @@ parent shell. Status distinguishes `managed`, `relocated` and `stale` links;
 remove accepts only those closed Quarters-launcher shapes. `q` is available
 only when requested explicitly.
 
+Each new space also gets a managed `quarters` launcher plus `ssh`, `scp`,
+`sftp` and `ssh-add` links in its private `.local/bin`, which is first on the
+space PATH. The network-client adapters initially resolve the real executable
+from the captured host PATH, canonicalize candidates, skip the running
+Quarters filesystem identity and every candidate that resolves to a launcher
+named `quarters`, and stop direct recursive dispatch. They force the protected
+per-space `.ssh/config` and user-known-hosts path while disabling passwd-home
+default identity files.
+Keys intentionally loaded into the private agent and explicit `-i` keys remain
+possible; leading and bundled competing `-F` arguments are rejected.
+Bare `ssh-add` and host-keychain import flags are refused because OpenSSH would
+search host-account defaults; name a per-space key explicitly. Inspection and
+agent-management forms such as `ssh-add -l` and `ssh-add -D` remain available.
+`quarters host -- ssh ...` is the intentional host-config escape, and absolute
+host-tool paths bypass adaptation. No link replaces an existing entry, and
+lifecycle copies omit machine-local links before recreating them for the
+destination.
+
+`quarters agent start NAME` launches `/usr/bin/ssh-agent` without a shell. Its
+private socket is advertised only after a bounded SSH protocol exchange and
+socket device/inode and kernel-reported peer-PID checks. Status remains
+read-only when no runtime exists. Stop signals only that fully verified record.
+Stale or ambiguous state blocks process launch; confirmed `agent recover`
+removes only dead records or exact recorded socket identities and never follows
+a link. Space removal refuses non-unset private-agent state and reclaims the
+exact private runtime tree after the persistent space has been removed.
+
+Moving or replacing the installed Quarters executable can make an existing
+space's absolute launcher stale. `exec` and `enter` warn before launch when the
+managed route is incomplete; repair it explicitly with
+`quarters adapter install NAME`. Like every environment value under the same
+UID, `QUARTERS_HOST_PATH` can be changed by the running process and is not an
+integrity boundary.
+
 ## MCP for local agents
 
 `quarters mcp` exposes the same validated store through a local, newline-framed
@@ -195,6 +242,10 @@ root or removing data. Agents can read `quarters://help`, `quarters://security` 
 private, short-lived `quarters://status` resource. Read the security resource
 before permitting mutations.
 
+When MCP is served by the installed `quarters` executable, created spaces get
+the same managed command links as CLI-created spaces. Library test hosts that
+are not the Quarters executable deliberately skip machine-local launcher links.
+
 The transport caps each frame at one MiB, caps active requests, rejects reused
 legacy or duplicate live request IDs, bounds store listings and keeps blocking
 filesystem work off the protocol executor. Unhealthy directory names are
@@ -213,8 +264,8 @@ Quarters configures:
 - GitHub CLI, GnuPG, tmux, Cargo, npm and uv state locations
 - Codex, Claude Code and OpenCode config locations where those tools honor
   their documented or established environment contracts
-- no inherited SSH-agent socket; `SSH_AUTH_SOCK` stays unset until reviewed
-  private-agent management exists
+- no inherited SSH-agent socket; `SSH_AUTH_SOCK` is present only while that
+  space's private agent passes process, inode and protocol verification
 - `CFFIXED_USER_HOME` on macOS as a best-effort CoreFoundation compatibility
   enhancement
 
@@ -224,9 +275,9 @@ Profile-owned variables such as `HOME`, `PATH`, `SSH_AUTH_SOCK`, XDG paths and
 `QUARTERS_*` cannot be inherited because Quarters computes them after the
 allowlist boundary.
 
-`--layout profile` is the schema-1 default and creates only the shell and CLI
-state surface. `--layout workspace` uses schema 2, assigns a random stable
-space ID and also creates private `Desktop`, `Documents`, `Downloads`, media,
+New profile and workspace spaces use schema 3 with a random stable identity.
+The profile layout creates only the shell and CLI state surface. The workspace
+layout also creates private `Desktop`, `Documents`, `Downloads`, media,
 public and template directories. On macOS it adds conventional `Applications`
 and `Library` subdirectories. These are state-location conventions backed by
 HOME/XDG and platform adapters, not containment; applications may still use
@@ -293,8 +344,9 @@ exact target generation, creates and verifies the required automatic recovery
 snapshot, stages the replacement, preserves the target identity, and publishes
 through durable `prepared`, `retired` and `published` states. The visible state
 is old, new, or explicitly `rollback_in_progress`; `doctor` reports the exact
-recovery action. This still adds no containment boundary. Freeze, export,
-encryption and live space rename remain unavailable.
+recovery action. This still adds no containment boundary. Display-name rename
+is a separate recoverable transaction that retains stable identity and
+snapshot binding. Freeze, export and encryption remain unavailable.
 
 ## Documentation
 
@@ -310,6 +362,7 @@ encryption and live space rename remain unavailable.
 - [Lifecycle artifacts and rollback](docs/architecture/ADR-0008-LIFECYCLE-ARTIFACTS-AND-ROLLBACK.md)
 - [MCP guide](docs/mcp/README.md)
 - [Threat model](docs/security/THREAT-MODEL.md)
+- [Alpha 3 security review](docs/security/ALPHA3-SECURITY-REVIEW.md)
 - [Compatibility matrix](docs/compatibility/MATRIX.md)
 - [Security policy](SECURITY.md)
 - [Registry publishing](docs/operations/REGISTRY-PUBLISHING.md)

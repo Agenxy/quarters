@@ -1,5 +1,7 @@
 //! Portable state-profile primitives for Quarters.
 
+mod agent;
+mod command_links;
 mod environment;
 mod error;
 mod model;
@@ -14,11 +16,13 @@ mod text;
 
 pub mod platform;
 
+pub use agent::{AgentState, AgentStatus, run_ssh_agent_helper};
+pub use command_links::{CommandLinkEntry, CommandLinkReport, CommandLinkState, inspect_command_links};
 pub use environment::{EnvironmentPlan, HostEnvironment, host_command_environment};
 pub use error::{ErrorKind, QuartersError, Result};
 pub use model::{
-    LATEST_SCHEMA_VERSION, PROFILE_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS, Space, SpaceId, SpaceLayout,
-    SpaceManifest, SpaceName, WORKSPACE_SCHEMA_VERSION,
+    LATEST_SCHEMA_VERSION, PROFILE_SCHEMA_VERSION, STABLE_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS, Space, SpaceId,
+    SpaceLayout, SpaceManifest, SpaceName, WORKSPACE_SCHEMA_VERSION,
 };
 pub use platform::{Capabilities, CapabilityStatus};
 pub use probe::{CompatibilityTier, ToolProbe, executable_matches, tool_probes};
@@ -28,6 +32,6 @@ pub use store::artifact::{
     RollbackObservation, RollbackRecoveryAction, RollbackReport, SourceIdentity, SourceStatus, TemplateUseReport,
 };
 pub use store::lifecycle::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};
-pub use store::{LeaseState, SpaceInspection, SpaceLease, Store};
+pub use store::{LeaseState, SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store};
 pub use store_recovery::RecoverySummary;
 pub use text::{encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded};

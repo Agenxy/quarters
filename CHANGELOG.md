@@ -6,6 +6,43 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.3 — unreleased
 
+- Give every newly created profile and workspace an opaque schema-3 identity;
+  add an atomic legacy-profile upgrade and recoverable display-name rename
+  without breaking existing snapshot binding.
+- Add an explicit per-space OpenSSH agent lifecycle with bounded startup and
+  shutdown, private ownership records, process and socket-identity checks,
+  protocol liveness, fail-closed environment injection and narrow recovery.
+- Install collision-safe `ssh`, `scp`, `sftp` and `ssh-add` invocation adapters
+  into new CLI and installed-server MCP spaces; force a protected per-space SSH
+  configuration while preserving child output and exit status.
+- Add installed-tool compatibility evidence for representative shells, CLIs
+  and coding agents when present, with host sentinels proving the probes did
+  not mutate host state.
+- Preserve the original host environment across nested Quarters launches so
+  adapters do not recurse and `quarters host` does not escape only one level.
+- Keep agent status and MCP inspection read-only when no runtime exists; verify
+  the kernel-reported socket peer PID before advertising or stopping an agent.
+- Reject legacy agent start before runtime creation, boundedly reap failed
+  launchers and retain failed ownership records when socket cleanup is unsafe.
+- Validate every managed-command directory ancestor and adapter context, report
+  exact links with a missing launcher as stale, and reverify created links
+  before rollback cleanup.
+- Override OpenSSH's passwd-home-derived user-known-hosts and default identity
+  paths so ordinary adapted invocations do not silently select host SSH state.
+- Prevent adapter self-resolution through overmounted Linux home paths by
+  rejecting the running executable inode and direct parent-child recursion.
+- Keep the complete managed OpenSSH route reachable inside Linux home-view by
+  publishing a protected runtime launcher and four verified relative links
+  before the host home is mounted over.
+- Prevent that distinct runtime launcher from rediscovering a system-installed
+  Quarters binary through an overmounted host-home PATH entry; remove staged
+  runtime copies after failed publication.
+- Canonicalize shortcut-spelled launchers before installing managed commands,
+  preserve bounded MCP recovery hints and drain rename recovery in bounded
+  batches beyond the inspection ceiling.
+- Recognize and re-key the released pre-alpha.4 runtime-directory spelling,
+  refusing multiple candidate trees rather than abandoning or merging state.
+
 - Add named, verifiable templates and snapshots with create, list, show,
   verify, use, rename and removal lifecycles, stable JSON contracts and private
   content-addressed manifests.
@@ -22,8 +59,8 @@ compatibility notes will be called out here.
   delete them after releasing it.
 - Add schema-gated expanded workspaces with stable opaque IDs, private common
   user directories, platform-specific macOS conventions, additive CLI/MCP
-  reporting and creation support across both MCP revisions. Existing/default
-  profiles remain schema 1 without new manifest fields.
+  reporting and creation support across both MCP revisions. Legacy schema-1
+  profiles remain readable and can now be upgraded explicitly.
 - Add composable zsh/bash `[q:NAME]` prompt context for new spaces through
   `shell-init`, without rewriting existing startup files.
 - Add collision-safe `qts`/`q` shortcut inspection, installation and removal
@@ -31,8 +68,8 @@ compatibility notes will be called out here.
 - Split storage creation/layout policy, reject unknown manifest fields after a
   schema-first probe, and sync parent directories after publication renames.
 - Stop exporting a reserved but inactive `SSH_AUTH_SOCK`; the host agent stays
-  blocked and the variable remains unset until private-agent lifecycle
-  management exists.
+  blocked and the variable remains unset unless a managed private agent is
+  fully verified.
 - Add a stdio-only MCP server with separately tested `2026-07-28` stateless and
   `2025-11-25` initialized lifecycles.
 - Expose typed, schema-validated status, doctor and create tools plus bounded

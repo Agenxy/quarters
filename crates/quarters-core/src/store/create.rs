@@ -7,8 +7,7 @@ use super::{
 };
 use crate::store_policy::validate_shell;
 use crate::{
-    ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result, Space, SpaceId, SpaceLayout, SpaceManifest, SpaceName,
-    WORKSPACE_SCHEMA_VERSION,
+    ErrorKind, QuartersError, Result, STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceLayout, SpaceManifest, SpaceName,
 };
 use fs4::FileExt;
 use std::fs::{self, DirBuilder, File};
@@ -36,6 +35,7 @@ impl Store {
     pub fn create_with_layout(&self, name: SpaceName, default_shell: PathBuf, layout: SpaceLayout) -> Result<Space> {
         self.ensure_layout()?;
         validate_shell(&default_shell)?;
+        self.ensure_no_rename_target(&name)?;
         self.ensure_no_rollback_target(&name)?;
         let destination = self.space_path(&name);
         if entry_exists(&destination)? {
@@ -63,7 +63,9 @@ impl Store {
                 return Err(error);
             }
         };
-        self.ensure_no_rollback_target(&SpaceName::parse(requested_name.clone())?)?;
+        let publication_name = SpaceName::parse(requested_name.clone())?;
+        self.ensure_no_rename_target(&publication_name)?;
+        self.ensure_no_rollback_target(&publication_name)?;
         reject_publish_collision(&destination, &temporary, &requested_name)?;
         if let Err(error) = fs::remove_file(&creation_lock_path) {
             let failure = QuartersError::io("remove creation marker", &creation_lock_path, error);
@@ -156,21 +158,13 @@ fn populate_space(root: &Path, name: SpaceName, default_shell: PathBuf, layout: 
     create_git_config(&home)?;
     write_private_file(
         &home.join(".ssh/config"),
-        b"# Quarters-owned SSH configuration. Add only identities for this space.\nHost *\n  AddKeysToAgent no\n  IdentitiesOnly yes\n",
+        b"# Quarters-owned SSH configuration.\n# OpenSSH expands ~ from the host passwd home; use explicit space paths.\nHost *\n  AddKeysToAgent no\n",
     )?;
     write_private_file(&root.join(".active"), b"")?;
-    let (schema_version, declared_layout, space_id) = match layout {
-        SpaceLayout::Profile => (PROFILE_SCHEMA_VERSION, None, None),
-        SpaceLayout::Workspace => (
-            WORKSPACE_SCHEMA_VERSION,
-            Some(SpaceLayout::Workspace),
-            Some(SpaceId::generate()?),
-        ),
-    };
     let manifest = SpaceManifest {
-        schema_version,
-        layout: declared_layout,
-        space_id,
+        schema_version: STABLE_SCHEMA_VERSION,
+        layout: Some(layout),
+        space_id: Some(SpaceId::generate()?),
         name,
         created_unix_ms: epoch_millis()?,
         default_shell,
@@ -274,4 +268,20 @@ pub(super) fn write_manifest(root: &Path, manifest: &SpaceManifest) -> Result<()
     })?;
     bytes.push(b'\n');
     write_private_file(&path, &bytes)
+}
+
+pub(super) fn replace_manifest(root: &Path, manifest: &SpaceManifest, operation: &str) -> Result<()> {
+    crate::store_policy::validate_stored_manifest(manifest)?;
+    let temporary = root.join(format!(".quarters-{operation}.tmp"));
+    let destination = root.join(MANIFEST_FILE);
+    let mut bytes = serde_json::to_vec_pretty(manifest).map_err(|error| {
+        QuartersError::new(ErrorKind::System, "could not serialize the replacement space manifest").with_source(error)
+    })?;
+    bytes.push(b'\n');
+    write_private_file(&temporary, &bytes)?;
+    if let Err(error) = fs::rename(&temporary, &destination) {
+        let _cleanup = fs::remove_file(&temporary);
+        return Err(QuartersError::io("replace space manifest", &destination, error));
+    }
+    sync_directory(root)
 }

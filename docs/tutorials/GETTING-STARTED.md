@@ -34,6 +34,28 @@ This adds private personal directories such as `Desktop`, `Documents` and
 `Downloads`; macOS also gets conventional `Applications` and selected
 `Library` paths. It is still the same OS account and filesystem authority.
 
+Every new space has an opaque stable ID. For a schema-1 profile created by an
+older release, preview and confirm the metadata-only upgrade while it is
+inactive:
+
+```sh
+quarters upgrade old-space --preview
+quarters upgrade old-space --confirm old-space
+```
+
+You can then change only its display name without breaking artifacts captured
+after the upgrade:
+
+```sh
+quarters rename old-space new-name --preview
+quarters rename old-space new-name --confirm old-space
+```
+
+If the space still has templates or snapshots captured before the upgrade,
+rename refuses to orphan those name-bound artifacts. Recreate the artifacts
+from the upgraded space and intentionally remove the legacy copies before
+renaming, or retain the original display name.
+
 ## 3. Clone a space safely
 
 Preview the included state and exclusions without creating anything:
@@ -117,6 +139,24 @@ its parent shell. Remove only the managed link with
 `quarters shortcut remove qts`. The shorter `q` name is opt-in.
 
 ## 6. Prove state separation
+
+New spaces place a managed Quarters launcher and OpenSSH adapters first on
+their private PATH. Inspect them, then start the private agent only if this
+space needs agent-backed keys:
+
+```sh
+quarters adapter status clean
+quarters agent status clean
+quarters agent start clean
+quarters exec clean -- ssh-add -l
+quarters agent stop clean
+```
+
+An empty agent makes `ssh-add -l` return its ordinary no-identities status.
+Quarters does not import the host agent or its keys. Use `quarters host -- ssh`
+for an intentional host-config escape. If an interrupted lifecycle is reported,
+inspect it first; `quarters agent recover clean --confirm clean` removes only
+state whose ownership is safe to reconcile.
 
 ```sh
 target/release/quarters exec clean -- sh -c 'printf "%s\n" "$HOME" "$QUARTERS_SPACE"'

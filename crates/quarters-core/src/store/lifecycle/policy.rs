@@ -85,6 +85,8 @@ pub struct CloneExclusions {
     pub hard_linked_files_copied_independently: u64,
     /// Preserved links whose targets are omitted cache roots.
     pub symlinks_into_omitted_cache_roots: u64,
+    /// Quarters-managed command links omitted for destination-local recreation.
+    pub managed_command_links: u64,
 }
 
 /// Stable human- and machine-readable clone result.

@@ -71,13 +71,12 @@ pub(crate) fn derived_cache_directories() -> &'static [&'static str] {
 
 /// Create and return a short private per-space runtime directory.
 pub(crate) fn runtime_directory(space: &Space, host: &HostEnvironment) -> Result<PathBuf> {
-    let base = platform_runtime_base(host);
     let uid = Uid::current().as_raw();
-    let fingerprint = path_fingerprint(space.root());
-    let namespace_root = base.join(format!("quarters-{uid}"));
-    let runtime = namespace_root.join(format!("{}-{fingerprint:016x}", space.manifest().name));
+    let namespace_root = runtime_namespace(host, uid);
+    ensure_owned_private_directory(&namespace_root, uid)?;
+    migrate_existing_legacy_runtime(space, host)?;
+    let runtime = namespace_root.join(runtime_identity(space));
     for directory in [
-        &namespace_root,
         &runtime,
         &runtime.join("bin"),
         &runtime.join("tmp"),
@@ -86,6 +85,76 @@ pub(crate) fn runtime_directory(space: &Space, host: &HostEnvironment) -> Result
         ensure_owned_private_directory(directory, uid)?;
     }
     Ok(runtime)
+}
+
+/// Return an existing per-space runtime directory without creating state.
+pub(crate) fn existing_runtime_directory(space: &Space, host: &HostEnvironment) -> Result<Option<PathBuf>> {
+    let uid = Uid::current().as_raw();
+    let namespace_root = runtime_namespace(host, uid);
+    if !existing_valid_runtime_directory(&namespace_root, uid)? {
+        return Ok(None);
+    }
+    let mut existing = Vec::new();
+    for path in runtime_candidates(space, &namespace_root) {
+        if existing_valid_runtime_directory(&path, uid)? {
+            existing.push(path);
+        }
+    }
+    match existing.as_slice() {
+        [] => Ok(None),
+        [path] => Ok(Some(path.clone())),
+        _ => Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "multiple private runtime directories exist for one space",
+        )
+        .with_hint("inspect the exact private runtime paths; Quarters will not guess which state is authoritative")),
+    }
+}
+
+/// Re-key an existing released or transitional legacy runtime.
+pub(crate) fn migrate_existing_legacy_runtime(space: &Space, host: &HostEnvironment) -> Result<()> {
+    let uid = Uid::current().as_raw();
+    let namespace_root = runtime_namespace(host, uid);
+    if !existing_valid_runtime_directory(&namespace_root, uid)? {
+        return Ok(());
+    }
+    let destination = namespace_root.join(runtime_identity(space));
+    let destination_exists = existing_valid_runtime_directory(&destination, uid)?;
+    let mut sources = Vec::new();
+    for source in legacy_runtime_fallbacks(space, &namespace_root) {
+        if existing_valid_runtime_directory(&source, uid)? {
+            sources.push(source);
+        }
+    }
+    match (destination_exists, sources.as_slice()) {
+        (_, []) => return Ok(()),
+        (false, [source]) => {
+            fs::rename(source, &destination)
+                .map_err(|error| QuartersError::io("re-key legacy private runtime directory", source, error))?;
+            return crate::store::sync_directory(&namespace_root);
+        }
+        _ => {}
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "legacy private runtime migration found multiple authoritative candidates",
+    )
+    .with_hint("inspect the exact private runtime paths; Quarters will not merge or delete ambiguous state"))
+}
+
+/// Remove the exact private runtime tree after its owning space is gone.
+pub(crate) fn remove_runtime_directory(space: &Space, host: &HostEnvironment) -> Result<()> {
+    let Some(runtime) = existing_runtime_directory(space, host)? else {
+        return Ok(());
+    };
+    let parent = runtime.parent().ok_or_else(|| {
+        QuartersError::new(
+            ErrorKind::CorruptState,
+            "the private runtime directory has no namespace parent",
+        )
+    })?;
+    crate::store::lifecycle::remove_tree_restoring_owner_access(&runtime)?;
+    crate::store::sync_directory(parent)
 }
 
 fn ensure_owned_private_directory(path: &Path, uid: u32) -> Result<()> {
@@ -104,6 +173,14 @@ fn ensure_owned_private_directory(path: &Path, uid: u32) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| QuartersError::io("inspect created runtime directory", path, error))?;
     validate_runtime_directory(path, uid, &metadata)
+}
+
+fn existing_valid_runtime_directory(path: &Path, uid: u32) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => validate_runtime_directory(path, uid, &metadata).map(|()| true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(QuartersError::io("inspect runtime directory", path, error)),
+    }
 }
 
 fn validate_runtime_directory(path: &Path, uid: u32, metadata: &fs::Metadata) -> Result<()> {
@@ -127,6 +204,48 @@ fn validate_runtime_directory(path: &Path, uid: u32, metadata: &fs::Metadata) ->
     Ok(())
 }
 
+fn runtime_identity(space: &Space) -> String {
+    if let Some(id) = space.id() {
+        return id.as_str().to_owned();
+    }
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"quarters-runtime-legacy-v1\0");
+    hash.update(&space.manifest().schema_version.to_le_bytes());
+    hash.update(space.manifest().name.as_str().as_bytes());
+    hash.update(&space.manifest().created_unix_ms.to_le_bytes());
+    let digest = hash.finalize();
+    format!("legacy-{}", &digest.to_hex()[..32])
+}
+
+fn legacy_runtime_identity(space: &Space) -> String {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"quarters-runtime-legacy-v1\0");
+    hash.update(&crate::PROFILE_SCHEMA_VERSION.to_le_bytes());
+    hash.update(space.manifest().name.as_str().as_bytes());
+    hash.update(&space.manifest().created_unix_ms.to_le_bytes());
+    let digest = hash.finalize();
+    format!("legacy-{}", &digest.to_hex()[..32])
+}
+
+fn runtime_candidates(space: &Space, namespace_root: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![namespace_root.join(runtime_identity(space))];
+    candidates.extend(legacy_runtime_fallbacks(space, namespace_root));
+    candidates
+}
+
+fn legacy_runtime_fallbacks(space: &Space, namespace_root: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(2);
+    if space.id().is_some() {
+        candidates.push(namespace_root.join(legacy_runtime_identity(space)));
+    }
+    candidates.push(namespace_root.join(pre_alpha4_runtime_identity(space)));
+    candidates
+}
+
+fn pre_alpha4_runtime_identity(space: &Space) -> String {
+    format!("{}-{:016x}", space.manifest().name, path_fingerprint(space.root()))
+}
+
 fn path_fingerprint(path: &Path) -> u64 {
     let mut hash = 14_695_981_039_346_656_037_u64;
     for byte in path.as_os_str().as_encoded_bytes() {
@@ -134,6 +253,10 @@ fn path_fingerprint(path: &Path) -> u64 {
         hash = hash.wrapping_mul(1_099_511_628_211);
     }
     hash
+}
+
+fn runtime_namespace(host: &HostEnvironment, uid: u32) -> PathBuf {
+    platform_runtime_base(host).join(format!("quarters-{uid}"))
 }
 
 /// Enter the Linux-only bind-mounted home view in the current process.

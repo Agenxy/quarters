@@ -20,11 +20,13 @@ current host. It does not read credentials.
 | Named templates | B/C | canonical BLAKE3-verified portable copy plus fresh destination controls | arbitrary state may contain credentials; embedded paths are not rewritten |
 | Named snapshots | B/C | immutable-by-interface recovery point with whole-tree verification | cooperative lease cannot prove detached writers are absent |
 | Rollback | C | verified recovery capture plus durable three-state whole-home replacement | old, new or marked-in-progress visibility; no recursive merge or detached-writer proof |
+| Space rename | C | durable marker, same-filesystem directory move and atomic manifest replacement | display name only; detached same-UID processes remain unknown |
 | Private cleanup | C | iterative owner-checked removal with depth/count limits | mode-`000` recovery on Linux may require `/proc` for no-follow `fchmodat` emulation |
 | Git | B | `GIT_CONFIG_GLOBAL` | repository-local config still wins |
 | Git credentials | B/D | empty per-space helper | macOS Keychain is host-bound if a user adds that helper |
-| OpenSSH | C | per-space config used with `ssh -F` | macOS passwd home is unchanged; absolute invocations bypass adapters |
-| SSH agent | D | none; host `SSH_AUTH_SOCK` is cleared | private-agent lifecycle is not implemented in this alpha |
+| OpenSSH | C | managed `ssh`, `scp` and `sftp` links force protected config, user-known-hosts path and no default identity files | passwd home is unchanged; explicit or absolute host paths remain intentional bypasses |
+| `ssh-add` | C | managed link permits explicit per-space keys and agent inspection; bare/default and host-keychain import are refused | explicit host import requires `quarters host -- ssh-add ...` |
+| SSH agent | C/D | explicit private lifecycle and narrow recovery; host socket stays blocked | agent keys remain same-UID state and are not a containment boundary |
 | GitHub CLI | B | `GH_CONFIG_DIR` | environment tokens require explicit `--inherit` |
 | tmux | B | `TMUX_TMPDIR` | host sessions are intentionally not visible |
 | GnuPG | B | `GNUPGHOME`, short runtime | external keychain or hardware identity remains host hardware |

@@ -26,6 +26,10 @@ pub(crate) enum Command {
     Create(CreateArgs),
     /// Clone persistent state into a new independent space.
     Clone(CloneArgs),
+    /// Assign stable identity to an inactive legacy space.
+    Upgrade(UpgradeArgs),
+    /// Change an inactive stable-identity space display name.
+    Rename(RenameArgs),
     /// Create and manage reusable named creation sources.
     Template(TemplateArgs),
     /// Create and manage named recovery points.
@@ -46,6 +50,10 @@ pub(crate) enum Command {
     Exec(ExecArgs),
     /// Run a command with host user-state paths from a baseline space.
     Host(RawCommand),
+    /// Manage a verified private OpenSSH agent for one space.
+    Agent(AgentArgs),
+    /// Inspect or manage compiled OpenSSH invocation adapters.
+    Adapter(AdapterArgs),
     /// Inspect capabilities and optionally prepare and validate one environment.
     Doctor(DoctorArgs),
     /// Remove an inactive space after exact-name confirmation.
@@ -61,6 +69,9 @@ pub(crate) enum Command {
     /// Internal Linux launcher used to isolate namespace setup to a child.
     #[command(name = "__linux-launch", hide = true)]
     LinuxLaunch(LinuxLaunchArgs),
+    /// Internal launcher which becomes the fixed OpenSSH agent executable.
+    #[command(name = "__agent-launch", hide = true)]
+    AgentLaunch(AgentLaunchArgs),
 }
 
 #[derive(Debug, Args)]
@@ -96,6 +107,32 @@ pub(crate) struct CloneArgs {
     /// Copy derived cache contents instead of recreating cache roots empty.
     #[arg(long)]
     pub(crate) include_cache: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UpgradeArgs {
+    /// Existing space to inspect or upgrade.
+    pub(crate) name: String,
+    /// Validate lease and schema without changing metadata.
+    #[arg(long, conflicts_with = "confirm")]
+    pub(crate) preview: bool,
+    /// Exactly repeat NAME to execute the metadata upgrade.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RenameArgs {
+    /// Current space name.
+    pub(crate) previous: String,
+    /// New space name.
+    pub(crate) name: String,
+    /// Validate identities, activity and collisions without changing state.
+    #[arg(long, conflicts_with = "confirm")]
+    pub(crate) preview: bool,
+    /// Exactly repeat PREVIOUS to execute the recoverable rename.
+    #[arg(long, value_name = "PREVIOUS")]
+    pub(crate) confirm: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -315,6 +352,57 @@ pub(crate) struct RawCommand {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct AgentArgs {
+    #[command(subcommand)]
+    pub(crate) command: AgentCommand,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AdapterArgs {
+    #[command(subcommand)]
+    pub(crate) command: AdapterCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AdapterCommand {
+    /// Inspect the closed managed launcher set without changing it.
+    Status(AgentTargetArgs),
+    /// Install only absent managed launcher links.
+    Install(AgentTargetArgs),
+    /// Remove only verified OpenSSH adapter links.
+    Remove(AgentTargetArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentCommand {
+    /// Inspect process, socket identity and protocol liveness.
+    Status(AgentTargetArgs),
+    /// Start a private OpenSSH agent, or report the verified active agent.
+    Start(AgentTargetArgs),
+    /// Stop only an identity-verified private OpenSSH agent.
+    Stop(AgentTargetArgs),
+    /// Stop and start the private OpenSSH agent.
+    Restart(AgentTargetArgs),
+    /// Reconcile only dead or protocol-verified private-agent state.
+    Recover(AgentRecoverArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentTargetArgs {
+    /// Space name. Defaults to the current Quarter when inside one.
+    pub(crate) name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentRecoverArgs {
+    /// Space whose private-agent state should be reconciled.
+    pub(crate) name: String,
+    /// Must exactly repeat the space name.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: String,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DoctorArgs {
     /// Also validate one space and its computed environment.
     pub(crate) name: Option<String>,
@@ -387,4 +475,10 @@ pub(crate) struct LinuxLaunchArgs {
     pub(crate) host_home: PathBuf,
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) command: Vec<OsString>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentLaunchArgs {
+    #[arg(long)]
+    pub(crate) space: String,
 }

@@ -35,6 +35,10 @@ pub struct RecoverySummary {
     pub retired_entries: usize,
     /// Interrupted rollback transactions with deterministic recovery actions.
     pub rollback_transactions: usize,
+    /// Interrupted rename transactions awaiting deterministic recovery.
+    pub rename_transactions: usize,
+    /// Malformed rename markers retained for manual reconciliation.
+    pub rename_issues: usize,
     /// Exact target, marker state and action shown before confirmed recovery.
     pub rollbacks: Vec<RollbackObservation>,
     /// Retained marker failures that require manual reconciliation.
@@ -120,12 +124,16 @@ impl Store {
         validate_layout(&self.root, &layout)?;
         let _observation = self.observation_guard()?;
         let rollback_inventory = Self::rollback_inventory_unlocked(layout.spaces_root())?;
+        let rename_transactions = self.rename_recovery_count()?;
+        let rename_issues = self.rename_recovery_issue_count()?;
         let artifacts = inspect_artifact_state(self)?;
         inspect(
             &self.root,
             &layout,
             rollback_inventory.observations,
             rollback_inventory.issues,
+            rename_transactions,
+            rename_issues,
             &artifacts,
         )
     }
@@ -141,6 +149,11 @@ impl Store {
     /// validated private directory or the management lock is unavailable.
     pub fn recover(&self) -> Result<RecoverySummary> {
         self.ensure_layout()?;
+        let rename_recovery = self.recover_renames()?;
+        let rename_transactions = rename_recovery.recovered;
+        let rename_issues = self
+            .rename_recovery_issue_count()?
+            .saturating_add(rename_recovery.issues);
         let rollbacks = self.recover_rollbacks()?;
         let rollback_issues = self.rollback_issues()?;
         let layout = self.layout();
@@ -168,9 +181,14 @@ impl Store {
             ));
         }
         sync_result?;
-        let unknown_entries_at_least = summary.unknown_entries_at_least.saturating_add(rollback_issues.len());
+        let unknown_entries_at_least = summary
+            .unknown_entries_at_least
+            .saturating_add(rollback_issues.len())
+            .saturating_add(rename_issues);
         Ok(RecoverySummary {
             rollback_transactions: rollbacks.len(),
+            rename_transactions,
+            rename_issues,
             rollbacks,
             rollback_issues,
             unknown_entries_at_least,
@@ -184,19 +202,24 @@ fn inspect(
     layout: &StoreLayout,
     rollbacks: Vec<RollbackObservation>,
     rollback_issues: Vec<RollbackIssue>,
+    rename_transactions: usize,
+    rename_issues: usize,
     artifacts: &ArtifactRecoveryState,
 ) -> Result<RecoverySummary> {
     validate_layout(root, layout)?;
     let (unfinished, active) = classify_creations(layout.spaces_root())?;
     let retired = matching_entries(layout.trash_root(), &[RETIRED_PREFIX])?;
     let reclaiming = matching_entries(layout.trash_root(), &[RECLAIMING_PREFIX])?;
-    let unknown_entries_at_least =
-        count_unknown_space_entries(layout.spaces_root())?.saturating_add(rollback_issues.len());
+    let unknown_entries_at_least = count_unknown_space_entries(layout.spaces_root())?
+        .saturating_add(rollback_issues.len())
+        .saturating_add(rename_issues);
     let mut summary = RecoverySummary {
         active_creations: active,
         unfinished_creations: unfinished.len(),
         retired_entries: retired.len().saturating_add(reclaiming.len()),
         rollback_transactions: rollbacks.len(),
+        rename_transactions,
+        rename_issues,
         rollbacks,
         rollback_issues,
         unknown_entries_at_least,
@@ -240,6 +263,7 @@ fn prepare_recovery(root: &Path, layout: &StoreLayout) -> Result<(RecoverySummar
         unfinished_creations: creations.len(),
         retired_entries: retired.len().saturating_add(existing_reclaiming.len()),
         rollback_transactions: 0,
+        rename_transactions: 0,
         rollbacks: Vec::new(),
         rollback_issues: Vec::new(),
         unknown_entries_at_least: count_unknown_space_entries(layout.spaces_root())?,
@@ -537,8 +561,16 @@ fn is_known_space_hidden_entry(spaces: &Path, name: &OsStr) -> bool {
     };
     parse_wrapped_artifact_id(name, ".rollback-", ".json")
         || parse_wrapped_artifact_id(name, ".rollback-", ".tmp")
+        || parse_wrapped_space_id(name, ".rename-", ".json")
         || parse_prefixed_artifact_id(name, ".rollback-staging-")
         || retired_entry_has_marker(spaces, name)
+}
+
+fn parse_wrapped_space_id(name: &str, prefix: &str, suffix: &str) -> bool {
+    name.strip_prefix(prefix)
+        .and_then(|value| value.strip_suffix(suffix))
+        .and_then(|value| crate::SpaceId::parse(value.to_owned()).ok())
+        .is_some()
 }
 
 fn retired_entry_has_marker(spaces: &Path, name: &str) -> bool {

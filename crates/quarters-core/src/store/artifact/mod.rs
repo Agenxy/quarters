@@ -1,5 +1,6 @@
 //! Persistent named lifecycle artifacts.
 
+mod binding;
 mod catalog;
 mod integrity;
 mod model;

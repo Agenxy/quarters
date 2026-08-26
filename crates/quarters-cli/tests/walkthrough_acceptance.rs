@@ -3,9 +3,10 @@
 use serde_json::Value;
 use std::error::Error;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use tempfile::TempDir;
 
+mod support;
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
     command.arg("--root").arg(root);
@@ -27,6 +28,281 @@ fn run(command: &mut Command) -> Result<Output, Box<dyn Error>> {
 
 fn create(root: &Path, name: &str) -> Result<(), Box<dyn Error>> {
     run(quarters(root).args(["create", name]))?;
+    Ok(())
+}
+#[test]
+fn private_agent_never_follows_an_unowned_socket_link() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "stale-agent")?;
+    let environment = run(quarters(temporary.path()).args(["--json", "env", "stale-agent"]))?;
+    let environment: Value = serde_json::from_slice(&environment.stdout)?;
+    let runtime = environment["result"]["environment"]["XDG_RUNTIME_DIR"]
+        .as_str()
+        .ok_or("missing runtime")?;
+    let socket = Path::new(runtime).join("ssh-agent.sock");
+    symlink("/tmp/host-agent.sock", &socket)?;
+
+    let status = run(quarters(temporary.path()).args(["--json", "agent", "status", "stale-agent"]))?;
+    let status: Value = serde_json::from_slice(&status.stdout)?;
+    assert_eq!(status["result"]["state"], "stale");
+    assert!(status["result"]["socket"].is_null());
+
+    let launched = quarters(temporary.path())
+        .args(["exec", "stale-agent", "--", "/usr/bin/true"])
+        .output()?;
+    assert_eq!(launched.status.code(), Some(7));
+    assert!(String::from_utf8_lossy(&launched.stderr).contains("state is stale"));
+    assert!(std::fs::symlink_metadata(&socket)?.file_type().is_symlink());
+    let doctor = run(quarters(temporary.path()).args(["--json", "doctor", "stale-agent"]))?;
+    let doctor: Value = serde_json::from_slice(&doctor.stdout)?;
+    assert_eq!(doctor["result"]["space_environment_validated"], false);
+    assert_eq!(doctor["result"]["space_ssh_agent"]["state"], "stale");
+    Ok(())
+}
+
+#[test]
+fn concurrent_private_agent_starts_converge_on_one_verified_process() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "concurrent-agent")?;
+    let first = quarters(temporary.path())
+        .args(["--json", "agent", "start", "concurrent-agent"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let second = quarters(temporary.path())
+        .args(["--json", "agent", "start", "concurrent-agent"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let first = first.wait_with_output()?;
+    let second = second.wait_with_output()?;
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
+    let first: Value = serde_json::from_slice(&first.stdout)?;
+    let second: Value = serde_json::from_slice(&second.stdout)?;
+    assert_eq!(first["result"]["state"], "active");
+    assert_eq!(second["result"]["state"], "active");
+    assert_eq!(first["result"]["pid"], second["result"]["pid"]);
+    run(quarters(temporary.path()).args(["agent", "stop", "concurrent-agent"]))?;
+    Ok(())
+}
+
+#[test]
+fn openssh_adapters_are_installed_by_default_and_preserve_version_output() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "adapter-demo")?;
+    let status = run(quarters(temporary.path()).args(["--json", "adapter", "status", "adapter-demo"]))?;
+    let status: Value = serde_json::from_slice(&status.stdout)?;
+    assert_eq!(status["result"]["launcher"]["state"], "managed");
+    let tools = status["result"]["tools"].as_array().ok_or("missing adapter tools")?;
+    assert_eq!(tools.len(), 4);
+    assert!(tools.iter().all(|entry| entry["state"] == "managed"));
+
+    let adapted = quarters(temporary.path())
+        .args(["exec", "adapter-demo", "--", "ssh", "-V"])
+        .output()?;
+    let direct = Command::new("/usr/bin/ssh").arg("-V").output()?;
+    assert_eq!(adapted.status.code(), direct.status.code());
+    assert_eq!(adapted.stdout, direct.stdout);
+    assert_eq!(adapted.stderr, direct.stderr);
+
+    let override_attempt = quarters(temporary.path())
+        .args([
+            "exec",
+            "adapter-demo",
+            "--",
+            "ssh",
+            "-F",
+            "/dev/null",
+            "example.invalid",
+        ])
+        .output()?;
+    assert_eq!(override_attempt.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&override_attempt.stderr).contains("does not accept a competing -F"));
+
+    let managed_ssh = temporary.path().join("spaces/adapter-demo/home/.local/bin/ssh");
+    let forged = Command::new(managed_ssh)
+        .arg("-V")
+        .env("QUARTERS_ROOT", temporary.path())
+        .env("QUARTERS_SPACE", "adapter-demo")
+        .env("QUARTERS_SPACE_HOME", "/tmp/forged-quarter-home")
+        .env("QUARTERS_HOST_PATH", "/usr/bin:/bin")
+        .output()?;
+    assert_eq!(forged.status.code(), Some(7));
+    assert!(String::from_utf8_lossy(&forged.stderr).contains("does not match the validated space home"));
+    #[cfg(target_os = "macos")]
+    {
+        let forged_home_view = Command::new(temporary.path().join("spaces/adapter-demo/home/.local/bin/ssh"))
+            .arg("-V")
+            .env("QUARTERS_ROOT", temporary.path())
+            .env("QUARTERS_SPACE", "adapter-demo")
+            .env("QUARTERS_SPACE_HOME", "/tmp/forged-quarter-home")
+            .env("QUARTERS_HOST_PATH", "/usr/bin:/bin")
+            .env("QUARTERS_NO_HOST_ESCAPE", "home-view")
+            .output()?;
+        assert_eq!(forged_home_view.status.code(), Some(7));
+    }
+    Ok(())
+}
+
+#[test]
+fn adapter_management_never_overwrites_or_removes_an_unmanaged_command() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "adapter-collision")?;
+    run(quarters(temporary.path()).args(["adapter", "remove", "adapter-collision"]))?;
+    let ssh = temporary.path().join("spaces/adapter-collision/home/.local/bin/ssh");
+    std::fs::write(&ssh, b"unmanaged")?;
+    std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o700))?;
+
+    let install = quarters(temporary.path())
+        .args(["--json", "adapter", "install", "adapter-collision"])
+        .output()?;
+    assert_eq!(install.status.code(), Some(4));
+    assert_eq!(std::fs::read(&ssh)?, b"unmanaged");
+
+    let remove = quarters(temporary.path())
+        .args(["--json", "adapter", "remove", "adapter-collision"])
+        .output()?;
+    assert_eq!(remove.status.code(), Some(4));
+    assert_eq!(std::fs::read(&ssh)?, b"unmanaged");
+    Ok(())
+}
+
+#[test]
+fn adapter_management_rejects_a_symlinked_command_directory_ancestor() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "adapter-ancestor")?;
+    let home = temporary.path().join("spaces/adapter-ancestor/home");
+    std::fs::rename(home.join(".local"), home.join(".local-original"))?;
+    let redirected = temporary.path().join("redirected-local");
+    std::fs::create_dir_all(redirected.join("bin"))?;
+    std::fs::set_permissions(&redirected, std::fs::Permissions::from_mode(0o700))?;
+    std::fs::set_permissions(redirected.join("bin"), std::fs::Permissions::from_mode(0o700))?;
+    symlink(&redirected, home.join(".local"))?;
+
+    let status = quarters(temporary.path())
+        .args(["adapter", "status", "adapter-ancestor"])
+        .output()?;
+
+    assert_eq!(status.status.code(), Some(7));
+    let stderr = String::from_utf8_lossy(&status.stderr);
+    assert!(stderr.contains("not a protected current-user directory"), "{stderr}");
+    assert!(std::fs::read_dir(redirected.join("bin"))?.next().is_none());
+    Ok(())
+}
+
+#[test]
+fn lifecycle_copy_omits_and_recreates_only_managed_command_links() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "adapter-source")?;
+    let preview =
+        run(quarters(temporary.path()).args(["--json", "clone", "adapter-source", "adapter-copy", "--preview"]))?;
+    let preview: Value = serde_json::from_slice(&preview.stdout)?;
+    assert_eq!(preview["result"]["exclusions"]["managed_command_links"], 5);
+    run(quarters(temporary.path()).args([
+        "clone",
+        "adapter-source",
+        "adapter-copy",
+        "--confirm-sensitive-state",
+        "adapter-source",
+    ]))?;
+    let status = run(quarters(temporary.path()).args(["--json", "adapter", "status", "adapter-copy"]))?;
+    let status: Value = serde_json::from_slice(&status.stdout)?;
+    assert_eq!(status["result"]["launcher"]["state"], "managed");
+    assert!(
+        status["result"]["tools"]
+            .as_array()
+            .is_some_and(|entries| entries.iter().all(|entry| entry["state"] == "managed"))
+    );
+    Ok(())
+}
+
+#[test]
+fn legacy_upgrade_assigns_identity_without_stranding_existing_snapshots() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "legacy")?;
+    let manifest_path = temporary.path().join("spaces/legacy/.quarters.json");
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
+    manifest["schema_version"] = serde_json::json!(1);
+    let object = manifest.as_object_mut().ok_or("manifest is not an object")?;
+    object.remove("layout");
+    object.remove("space_id");
+    std::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
+    let legacy_environment = run(quarters(temporary.path()).args(["--json", "env", "legacy"]))?;
+    let legacy_environment: Value = serde_json::from_slice(&legacy_environment.stdout)?;
+    let transitional_runtime = Path::new(
+        legacy_environment["result"]["environment"]["XDG_RUNTIME_DIR"]
+            .as_str()
+            .ok_or("missing legacy runtime")?,
+    )
+    .to_path_buf();
+    let runtime_parent = transitional_runtime.parent().ok_or("runtime has no parent")?;
+    let space_root = temporary.path().join("spaces/legacy");
+    let fingerprint = support::pre_alpha4_runtime_fingerprint(&space_root);
+    let legacy_runtime = runtime_parent.join(format!("legacy-{fingerprint:016x}"));
+    std::fs::rename(&transitional_runtime, &legacy_runtime)?;
+    std::fs::write(legacy_runtime.join("tmp/runtime-proof"), b"runtime-state")?;
+    let proof = temporary.path().join("spaces/legacy/home/proof");
+    std::fs::write(&proof, b"before-upgrade")?;
+    run(quarters(temporary.path()).args([
+        "snapshot",
+        "create",
+        "legacy",
+        "legacy-point",
+        "--confirm-sensitive-state",
+        "legacy",
+    ]))?;
+
+    let preview = run(quarters(temporary.path()).args(["--json", "upgrade", "legacy", "--preview"]))?;
+    let preview: Value = serde_json::from_slice(&preview.stdout)?;
+    assert_eq!(preview["result"]["previous_schema"], 1);
+    assert_eq!(preview["result"]["schema"], 3);
+    assert_eq!(preview["result"]["would_change"], true);
+    assert!(preview["result"]["space_id"].is_null());
+
+    let upgraded = run(quarters(temporary.path()).args(["--json", "upgrade", "legacy", "--confirm", "legacy"]))?;
+    let upgraded: Value = serde_json::from_slice(&upgraded.stdout)?;
+    assert_eq!(upgraded["result"]["changed"], true);
+    assert_eq!(upgraded["result"]["space_id"].as_str().map(str::len), Some(32));
+    let rename = quarters(temporary.path())
+        .args(["rename", "legacy", "moved", "--confirm", "legacy"])
+        .output()?;
+    assert_eq!(rename.status.code(), Some(6));
+    assert!(String::from_utf8_lossy(&rename.stderr).contains("captured before stable identity upgrade"));
+    let stable_environment = run(quarters(temporary.path()).args(["--json", "env", "legacy"]))?;
+    let stable_environment: Value = serde_json::from_slice(&stable_environment.stdout)?;
+    let stable_runtime = Path::new(
+        stable_environment["result"]["environment"]["XDG_RUNTIME_DIR"]
+            .as_str()
+            .ok_or("missing stable runtime")?,
+    );
+    assert_ne!(stable_runtime, legacy_runtime);
+    assert!(!legacy_runtime.exists());
+    assert!(!transitional_runtime.exists());
+    assert_eq!(
+        std::fs::read(stable_runtime.join("tmp/runtime-proof"))?,
+        b"runtime-state"
+    );
+
+    std::fs::write(&proof, b"after-upgrade")?;
+    run(quarters(temporary.path()).args([
+        "rollback",
+        "legacy",
+        "legacy-point",
+        "--recovery-name",
+        "upgrade-recovery",
+        "--confirm-space",
+        "legacy",
+        "--confirm-replace-state",
+        "legacy",
+    ]))?;
+    assert_eq!(std::fs::read(&proof)?, b"before-upgrade");
     Ok(())
 }
 
@@ -261,6 +537,14 @@ fn rollback_restores_snapshot_and_preserves_automatic_recovery() -> Result<(), B
     let recovery = run(quarters(temporary.path()).args(["--json", "snapshot", "show", "pre-rollback"]))?;
     let recovery: Value = serde_json::from_slice(&recovery.stdout)?;
     assert_eq!(recovery["result"]["manifest"]["origin"], "automatic-rollback-recovery");
+    let adapters = run(quarters(temporary.path()).args(["--json", "adapter", "status", "work"]))?;
+    let adapters: Value = serde_json::from_slice(&adapters.stdout)?;
+    assert_eq!(adapters["result"]["launcher"]["state"], "managed");
+    assert!(
+        adapters["result"]["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().all(|tool| tool["state"] == "managed"))
+    );
     Ok(())
 }
 
@@ -286,6 +570,7 @@ fn interrupted_and_malformed_rollbacks_share_one_target_row() -> Result<(), Box<
             "schema_version": manifest["schema_version"],
             "name": "work",
             "created_unix_ms": manifest["created_unix_ms"],
+            "space_id": manifest["space_id"],
         },
         "staging_entry": staging_entry,
         "retired_entry": format!(".rolled-back-{id}"),
@@ -305,6 +590,7 @@ fn interrupted_and_malformed_rollbacks_share_one_target_row() -> Result<(), Box<
             "schema_version": manifest["schema_version"],
             "name": "work",
             "created_unix_ms": manifest["created_unix_ms"],
+            "space_id": manifest["space_id"],
         },
         "staging_entry": ".wrong-staging",
         "retired_entry": ".wrong-retired",
@@ -388,19 +674,19 @@ fn write_executable(path: &Path, body: &[u8]) -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn profile_default_and_expanded_workspace_have_distinct_schema_contracts() -> Result<(), Box<dyn Error>> {
+fn profile_default_and_expanded_workspace_have_stable_schema_contracts() -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt;
 
     let temporary = TempDir::new()?;
     let profile = run(quarters(temporary.path()).args(["--json", "create", "profile"]))?;
     let profile: Value = serde_json::from_slice(&profile.stdout)?;
     assert_eq!(profile["result"]["layout"], "profile");
-    assert!(profile["result"]["space_id"].is_null());
+    assert_eq!(profile["result"]["space_id"].as_str().map(str::len), Some(32));
     let profile_manifest: Value =
         serde_json::from_slice(&std::fs::read(temporary.path().join("spaces/profile/.quarters.json"))?)?;
-    assert_eq!(profile_manifest["schema_version"], 1);
-    assert!(profile_manifest.get("layout").is_none());
-    assert!(profile_manifest.get("space_id").is_none());
+    assert_eq!(profile_manifest["schema_version"], 3);
+    assert_eq!(profile_manifest["layout"], "profile");
+    assert_eq!(profile_manifest["space_id"].as_str().map(str::len), Some(32));
 
     let workspace = run(quarters(temporary.path()).args(["--json", "create", "workspace", "--layout", "workspace"]))?;
     let workspace: Value = serde_json::from_slice(&workspace.stdout)?;
@@ -732,7 +1018,7 @@ fn doctor_json_pins_shortcut_and_runtime_truthfulness() -> Result<(), Box<dyn Er
     assert!(
         ssh["limitation"]
             .as_str()
-            .is_some_and(|limitation| limitation.contains("SSH_AUTH_SOCK is unset"))
+            .is_some_and(|limitation| limitation.contains("absolute host-tool paths bypass adapters"))
     );
     Ok(())
 }

@@ -48,8 +48,10 @@ pub fn tool_probes() -> Vec<ToolProbe> {
         probe(
             "ssh",
             CompatibilityTier::C,
-            "explicit ssh -F <space>/home/.ssh/config",
-            Some("passwd home is unchanged; SSH_AUTH_SOCK is unset until private-agent management exists"),
+            "verified managed ssh/scp/sftp links select the per-space configuration",
+            Some(
+                "doctor NAME reports actual link state; passwd home is unchanged; absolute host-tool paths bypass adapters",
+            ),
         ),
         probe("gh", CompatibilityTier::B, "GH_CONFIG_DIR", None),
         probe(

@@ -5,7 +5,7 @@ use quarters_core::{EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -166,15 +166,63 @@ fn install_runtime_binary(source: &Path, environment: &EnvironmentPlan) -> Resul
             "home-view environment has no runtime directory",
         )
     })?;
-    let destination = PathBuf::from(runtime).join("bin/quarters");
+    let command_directory = PathBuf::from(runtime).join("bin");
+    install_runtime_command_set(source, &command_directory)
+}
+
+fn install_runtime_command_set(source: &Path, command_directory: &Path) -> Result<()> {
+    validate_runtime_command_directory(command_directory)?;
+    let destination = command_directory.join("quarters");
     let sequence = RUNTIME_COPY_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temporary = destination.with_extension(format!("tmp-{}-{sequence}", std::process::id()));
     if let Err(error) = copy_private_executable(source, &temporary) {
         let _cleanup = fs::remove_file(&temporary);
         return Err(error);
     }
-    fs::rename(&temporary, &destination)
-        .map_err(|error| QuartersError::io("publish the home-view launcher", &destination, error))
+    if let Err(error) = fs::rename(&temporary, &destination) {
+        let _cleanup = fs::remove_file(&temporary);
+        return Err(QuartersError::io("publish the home-view launcher", &destination, error));
+    }
+    for tool in ["ssh", "scp", "sftp", "ssh-add"] {
+        install_runtime_adapter(&command_directory.join(tool))?;
+    }
+    File::open(command_directory)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| QuartersError::io("sync home-view command directory", command_directory, error))
+}
+
+fn validate_runtime_command_directory(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("inspect home-view command directory", path, error))?;
+    let valid = metadata.is_dir()
+        && !metadata.file_type().is_symlink()
+        && metadata.uid() == nix::unistd::Uid::current().as_raw()
+        && metadata.permissions().mode() & 0o777 == 0o700;
+    if valid {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "the home-view command directory is not a protected current-user directory",
+    ))
+}
+
+fn install_runtime_adapter(path: &Path) -> Result<()> {
+    match symlink("quarters", path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(QuartersError::io("install home-view OpenSSH adapter", path, error)),
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("inspect home-view OpenSSH adapter", path, error))?;
+    if metadata.file_type().is_symlink() && fs::read_link(path).is_ok_and(|target| target == Path::new("quarters")) {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::AlreadyExists,
+        format!("home-view adapter entry is not managed: {}", path.display()),
+    )
+    .with_hint("inspect the exact private runtime entry; Quarters never replaces an unverified command"))
 }
 
 fn copy_private_executable(source: &Path, destination: &Path) -> Result<()> {
@@ -223,4 +271,34 @@ fn process_error(operation: &str, program: &OsStr, source: std::io::Error) -> Qu
     )
     .with_hint("check that the executable exists and is permitted by the host account")
     .with_source(source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::install_runtime_command_set;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn home_view_command_set_is_complete_and_collision_safe() -> Result<(), Box<dyn std::error::Error>> {
+        let temporary = tempfile::tempdir()?;
+        let directory = temporary.path().join("bin");
+        std::fs::create_dir(&directory)?;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        std::fs::create_dir(directory.join("quarters"))?;
+        assert!(install_runtime_command_set(&std::env::current_exe()?, &directory).is_err());
+        assert_eq!(std::fs::read_dir(&directory)?.count(), 1);
+        std::fs::remove_dir(directory.join("quarters"))?;
+        install_runtime_command_set(&std::env::current_exe()?, &directory)?;
+        for tool in ["ssh", "scp", "sftp", "ssh-add"] {
+            assert_eq!(
+                std::fs::read_link(directory.join(tool))?,
+                std::path::Path::new("quarters")
+            );
+        }
+        std::fs::remove_file(directory.join("ssh"))?;
+        std::fs::write(directory.join("ssh"), b"collision")?;
+        assert!(install_runtime_command_set(&std::env::current_exe()?, &directory).is_err());
+        assert_eq!(std::fs::read(directory.join("ssh"))?, b"collision");
+        Ok(())
+    }
 }

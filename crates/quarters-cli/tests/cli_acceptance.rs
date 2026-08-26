@@ -3,6 +3,7 @@
 use serde_json::Value;
 use std::error::Error;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use tempfile::TempDir;
@@ -28,6 +29,43 @@ fn run(command: &mut Command) -> Result<Output, Box<dyn Error>> {
 
 fn create(root: &Path, name: &str) -> Result<(), Box<dyn Error>> {
     run(quarters(root).args(["create", name]))?;
+    Ok(())
+}
+
+#[test]
+fn shortcut_invocation_creates_a_space_with_managed_commands() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let shortcut = temporary.path().join("qts");
+    let root = temporary.path().join("store");
+    symlink(env!("CARGO_BIN_EXE_quarters"), &shortcut)?;
+    run(Command::new(&shortcut)
+        .arg("--root")
+        .arg(&root)
+        .args(["create", "shortcut"]))?;
+    for command in ["quarters", "ssh", "scp", "sftp", "ssh-add"] {
+        assert!(
+            std::fs::symlink_metadata(root.join("spaces/shortcut/home/.local/bin").join(command))?
+                .file_type()
+                .is_symlink()
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn renamed_mcp_executable_fails_before_serving() -> Result<(), Box<dyn Error>> {
+    let executable = Path::new(env!("CARGO_BIN_EXE_quarters"));
+    let parent = executable.parent().ok_or("test executable has no parent")?;
+    let temporary = tempfile::tempdir_in(parent)?;
+    let renamed = temporary.path().join("renamed-quarters");
+    std::fs::hard_link(executable, &renamed)?;
+    let output = Command::new(renamed)
+        .arg("--root")
+        .arg(temporary.path().join("store"))
+        .arg("mcp")
+        .output()?;
+    assert_eq!(output.status.code(), Some(6));
+    assert!(String::from_utf8(output.stderr)?.contains("not a stable Quarters launcher"));
     Ok(())
 }
 
@@ -105,6 +143,13 @@ fn mcp_stdio_serves_the_stateless_2026_path_end_to_end() -> Result<(), Box<dyn E
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
     assert!(completed.stderr.is_empty());
+    for command in ["quarters", "ssh", "scp", "sftp", "ssh-add"] {
+        assert!(
+            std::fs::symlink_metadata(temporary.path().join("spaces/agent/home/.local/bin").join(command))?
+                .file_type()
+                .is_symlink()
+        );
+    }
     Ok(())
 }
 
@@ -366,8 +411,8 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
         .find(|line| line.starts_with("broken"))
         .ok_or("missing unhealthy current row")?;
     assert_eq!(
-        row.split_whitespace().take(5).collect::<Vec<_>>(),
-        ["broken", "unhealthy", "unknown", "unknown", "no"]
+        row.split_whitespace().take(6).collect::<Vec<_>>(),
+        ["broken", "unhealthy", "unknown", "unknown", "unknown", "no"]
     );
 
     run(quarters(temporary.path()).args(["rm", "broken", "--confirm", "broken"]))?;
@@ -489,11 +534,18 @@ fn status_reports_supervised_activity_and_current_space() -> Result<(), Box<dyn 
         .find(|line| line.starts_with("work"))
         .ok_or("missing status row")?;
     assert_eq!(
-        row.split_whitespace().take(5).collect::<Vec<_>>(),
-        ["work", "healthy", "profile", "free", "no"]
+        row.split_whitespace().take(6).collect::<Vec<_>>(),
+        ["work", "healthy", "profile", "free", "unset", "no"]
     );
     assert_eq!(row.find("profile"), Some(44));
     assert_eq!(row.find("free"), Some(55));
+    let aggregate = run(quarters(temporary.path()).args(["--json", "status"]))?;
+    let aggregate: Value = serde_json::from_slice(&aggregate.stdout)?;
+    assert!(
+        aggregate["result"]["spaces"]
+            .as_array()
+            .is_some_and(|spaces| spaces.iter().all(|space| space["ssh_agent_state"] == "not-inspected"))
+    );
     Ok(())
 }
 

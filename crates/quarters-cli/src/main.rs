@@ -1,5 +1,6 @@
 //! Quarters command-line entry point.
 
+mod adapter;
 mod app;
 mod cli;
 mod output;
@@ -13,6 +14,15 @@ use quarters_core::QuartersError;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    if let Some(tool) = adapter::invoked_adapter() {
+        return match adapter::dispatch(tool) {
+            Ok(code) => exit_code(code),
+            Err(error) => {
+                output::print_error(&error, false);
+                ExitCode::from(error_exit_code(&error))
+            }
+        };
+    }
     let json_requested = std::env::args_os()
         .take_while(|argument| argument != "--")
         .any(|argument| argument == "--json");

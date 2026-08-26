@@ -55,6 +55,18 @@ impl HostEnvironment {
         self.values.get(OsStr::new(name))
     }
 
+    /// Return the original host runtime root across nested Quarters launches.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn original_xdg_runtime(&self) -> Option<&OsString> {
+        self.get("QUARTERS_HOST_XDG_RUNTIME_DIR").or_else(|| {
+            if self.get("QUARTERS_SPACE").is_none() {
+                self.get("XDG_RUNTIME_DIR")
+            } else {
+                None
+            }
+        })
+    }
+
     fn safe_values(&self) -> BTreeMap<OsString, OsString> {
         self.values
             .iter()
@@ -193,6 +205,9 @@ fn insert_profile_values(
     values.insert("GIT_CONFIG_GLOBAL".into(), home.join(".gitconfig").into_os_string());
     values.insert("GH_CONFIG_DIR".into(), config.join("gh").into_os_string());
     values.insert("GNUPGHOME".into(), home.join(".gnupg").into_os_string());
+    if let Some(socket) = crate::agent::active_socket(space, host)? {
+        values.insert("SSH_AUTH_SOCK".into(), socket.into_os_string());
+    }
     values.insert("CARGO_HOME".into(), home.join(".cargo").into_os_string());
     values.insert(
         "NPM_CONFIG_USERCONFIG".into(),
@@ -219,7 +234,7 @@ fn insert_profile_values(
         OsString::from(format!("[q:{}] ", space.manifest().name)),
     );
     values.insert("QUARTERS_SPACE_ROOT".into(), space.root().as_os_str().to_owned());
-    values.insert("QUARTERS_SPACE_HOME".into(), space.home().into_os_string());
+    values.insert("QUARTERS_SPACE_HOME".into(), home.as_os_str().to_owned());
     values.insert("QUARTERS_ROOT".into(), store_root(space).into_os_string());
     preserve_host_value(values, host, "HOME", "QUARTERS_HOST_HOME");
     preserve_host_value(values, host, "PATH", "QUARTERS_HOST_PATH");
@@ -316,7 +331,7 @@ fn preserve_host_value(
     source: &str,
     destination: &str,
 ) {
-    if let Some(value) = host.get(source) {
+    if let Some(value) = host.get(destination).or_else(|| host.get(source)) {
         values.insert(OsString::from(destination), value.clone());
     }
 }

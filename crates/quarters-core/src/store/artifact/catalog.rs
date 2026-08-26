@@ -10,7 +10,7 @@ use crate::store::create::{acquire_creation_lock, ensure_directory_skeleton, wri
 use crate::store::lifecycle::{CloneMode, CloneReport, WalkControl, remove_tree_restoring_owner_access, walk_home};
 use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease};
 use crate::store_policy::{validate_private_dir, validate_shell};
-use crate::{ErrorKind, QuartersError, Result, SpaceId, SpaceLayout, SpaceManifest, SpaceName, Store};
+use crate::{ErrorKind, QuartersError, Result, STABLE_SCHEMA_VERSION, SpaceId, SpaceManifest, SpaceName, Store};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -113,7 +113,7 @@ impl Store {
     ///
     /// Fails when the category root cannot be validated or exceeds its bound.
     pub fn inspect_artifacts(&self, kind: ArtifactKind) -> Result<Vec<ArtifactInspection>> {
-        let Some(root) = self.existing_artifact_root(kind)? else {
+        let Some(root) = existing_artifact_root(self, kind)? else {
             return Ok(Vec::new());
         };
         let rollback_inventory = match self.existing_spaces_root()? {
@@ -125,6 +125,20 @@ impl Store {
             .into_iter()
             .map(|observation| observation.target)
             .chain(rollback_inventory.issues.into_iter().filter_map(|issue| issue.target))
+            .collect::<BTreeSet<_>>();
+        let stable_sources = self
+            .inspect()?
+            .into_iter()
+            .filter_map(|inspection| match inspection {
+                crate::SpaceInspection::Healthy(space) => space.id().map(|id| {
+                    (
+                        id.as_str().to_owned(),
+                        space.manifest().created_unix_ms,
+                        space.manifest().schema_version,
+                    )
+                }),
+                crate::SpaceInspection::Unhealthy { .. } => None,
+            })
             .collect::<BTreeSet<_>>();
         let mut inspections = Vec::new();
         let entries = fs::read_dir(&root).map_err(|error| QuartersError::io("read artifact catalog", &root, error))?;
@@ -145,7 +159,7 @@ impl Store {
             }
             let inspection = match Self::open_artifact_path(kind, entry.path()) {
                 Ok(artifact) => ArtifactInspection::Healthy {
-                    source_status: self.source_status(&artifact, &rollback_targets),
+                    source_status: source_status(self, &artifact, &rollback_targets, &stable_sources),
                     artifact: Box::new(artifact),
                 },
                 Err(error) => ArtifactInspection::Unhealthy { id, error },
@@ -162,24 +176,39 @@ impl Store {
     ///
     /// Fails when absent, duplicated or corrupt.
     pub fn open_artifact(&self, kind: ArtifactKind, name: &ArtifactName) -> Result<Artifact> {
+        self.open_artifact_with_status(kind, name)
+            .map(|(artifact, _status)| artifact)
+    }
+
+    /// Resolve one artifact and its source status in one bounded catalog pass.
+    ///
+    /// # Errors
+    ///
+    /// Fails when absent, duplicated or corrupt.
+    pub fn open_artifact_with_status(
+        &self,
+        kind: ArtifactKind,
+        name: &ArtifactName,
+    ) -> Result<(Artifact, SourceStatus)> {
         let mut found = None;
         for inspection in self.inspect_artifacts(kind)? {
             match inspection {
-                ArtifactInspection::Healthy { artifact, .. } if artifact.manifest().name == *name => {
+                ArtifactInspection::Healthy {
+                    artifact,
+                    source_status,
+                } if artifact.manifest().name == *name => {
                     if found.is_some() {
                         return Err(QuartersError::new(
                             ErrorKind::CorruptState,
                             format!("duplicate {} name '{}'", kind.as_str(), name),
                         ));
                     }
-                    found = Some(artifact);
+                    found = Some((*artifact, source_status));
                 }
                 ArtifactInspection::Healthy { .. } | ArtifactInspection::Unhealthy { .. } => {}
             }
         }
-        found
-            .map(|artifact| *artifact)
-            .ok_or_else(|| artifact_not_found(kind, name))
+        found.ok_or_else(|| artifact_not_found(kind, name))
     }
 
     /// Recompute and compare one artifact's canonical integrity record.
@@ -510,29 +539,46 @@ impl Store {
         }
         Ok(Artifact::new(path, manifest))
     }
+}
 
-    fn source_status(&self, artifact: &Artifact, rollback_targets: &BTreeSet<SpaceName>) -> SourceStatus {
-        let identity = &artifact.manifest().source_identity;
-        if rollback_targets.contains(&identity.name) {
-            return SourceStatus::Orphaned;
-        }
-        match self.inspect_named_without_rollback(&identity.name) {
-            Ok(crate::SpaceInspection::Healthy(space)) if identity.matches(&space) => SourceStatus::Present,
-            Ok(crate::SpaceInspection::Healthy(_) | crate::SpaceInspection::Unhealthy { .. }) | Err(_) => {
-                SourceStatus::Orphaned
-            }
-        }
+fn existing_artifact_root(store: &Store, kind: ArtifactKind) -> Result<Option<PathBuf>> {
+    let root = artifact_root(store, kind);
+    let metadata = match fs::symlink_metadata(&root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(QuartersError::io("inspect artifact root", &root, error)),
+    };
+    validate_private_dir(&root, &metadata)?;
+    Ok(Some(root))
+}
+
+fn source_status(
+    store: &Store,
+    artifact: &Artifact,
+    rollback_targets: &BTreeSet<SpaceName>,
+    stable_sources: &BTreeSet<(String, u128, u32)>,
+) -> SourceStatus {
+    let identity = &artifact.manifest().source_identity;
+    if rollback_targets.contains(&identity.name) {
+        return SourceStatus::Orphaned;
     }
-
-    fn existing_artifact_root(&self, kind: ArtifactKind) -> Result<Option<PathBuf>> {
-        let root = artifact_root(self, kind);
-        let metadata = match fs::symlink_metadata(&root) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(QuartersError::io("inspect artifact root", &root, error)),
+    if let Some(space_id) = &identity.space_id {
+        let present = stable_sources.contains(&(
+            space_id.as_str().to_owned(),
+            identity.created_unix_ms,
+            identity.schema_version,
+        ));
+        return if present {
+            SourceStatus::Present
+        } else {
+            SourceStatus::Orphaned
         };
-        validate_private_dir(&root, &metadata)?;
-        Ok(Some(root))
+    }
+    match store.inspect_named_without_rollback(&identity.name) {
+        Ok(crate::SpaceInspection::Healthy(space)) if identity.matches(&space) => SourceStatus::Present,
+        Ok(crate::SpaceInspection::Healthy(_) | crate::SpaceInspection::Unhealthy { .. }) | Err(_) => {
+            SourceStatus::Orphaned
+        }
     }
 }
 
@@ -573,6 +619,7 @@ impl ArtifactSetup {
         if mode == CloneMode::Execute {
             store.ensure_layout()?;
         }
+        store.ensure_no_rename_target(source)?;
         let management = store.management_guard()?;
         let source_space = store.open(source)?;
         validate_shell(&source_space.manifest().default_shell)?;
@@ -684,6 +731,7 @@ pub(super) fn prepare_space_staging(store: &Store, destination: &SpaceName) -> R
 }
 
 pub(super) fn reject_space_destination(store: &Store, destination: &SpaceName) -> Result<()> {
+    store.ensure_no_rename_target(destination)?;
     store.ensure_no_rollback_target(destination)?;
     let path = store.space_path(destination);
     if entry_exists(&path)? {
@@ -700,11 +748,10 @@ fn fresh_template_space_manifest(
     name: SpaceName,
     default_shell: PathBuf,
 ) -> Result<SpaceManifest> {
-    let workspace = template.source_layout == SpaceLayout::Workspace;
     Ok(SpaceManifest {
-        schema_version: template.source_identity.schema_version,
-        layout: workspace.then_some(SpaceLayout::Workspace),
-        space_id: workspace.then(SpaceId::generate).transpose()?,
+        schema_version: STABLE_SCHEMA_VERSION,
+        layout: Some(template.source_layout),
+        space_id: Some(SpaceId::generate()?),
         name,
         created_unix_ms: epoch_millis()?,
         default_shell,

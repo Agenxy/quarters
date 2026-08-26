@@ -11,7 +11,7 @@ use crate::store::create::{acquire_creation_lock, write_manifest};
 use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease};
 use crate::store_policy::{validate_shell, validate_stored_manifest};
 use crate::text::escape_untrusted_text_bounded_bytes;
-use crate::{ErrorKind, QuartersError, Result, Space, SpaceId, SpaceManifest, SpaceName, Store};
+use crate::{ErrorKind, QuartersError, Result, STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceManifest, SpaceName, Store};
 use serde::Serialize;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -288,6 +288,8 @@ impl CloneSetup {
         } else if store.existing_spaces_root()?.is_none() {
             return Err(space_not_found(source.as_str()));
         }
+        store.ensure_no_rename_target(source)?;
+        store.ensure_no_rename_target(destination)?;
         let management = store.management_guard()?;
         let source_space = store.open(source)?;
         validate_shell(&source_space.manifest().default_shell)?;
@@ -347,11 +349,10 @@ fn prepare_staging(store: &Store, destination: &SpaceName, destination_path: Pat
 }
 
 fn destination_manifest(source: &Space, destination: SpaceName) -> Result<SpaceManifest> {
-    let space_id = source.id().map(|_| SpaceId::generate()).transpose()?;
     Ok(SpaceManifest {
-        schema_version: source.manifest().schema_version,
-        layout: source.manifest().layout,
-        space_id,
+        schema_version: STABLE_SCHEMA_VERSION,
+        layout: Some(source.layout()),
+        space_id: Some(SpaceId::generate()?),
         name: destination,
         created_unix_ms: epoch_millis()?,
         default_shell: source.manifest().default_shell.clone(),
@@ -410,6 +411,7 @@ fn publish(store: &Store, setup: &CloneSetup, manifest: &SpaceManifest, control:
         );
     }
     store.ensure_no_rollback_target(&manifest.name)?;
+    store.ensure_no_rename_target(&manifest.name)?;
     reject_destination(&staging.destination, manifest.name.as_str())?;
     #[cfg(test)]
     control.abort_before_publish()?;

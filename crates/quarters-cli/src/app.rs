@@ -1,14 +1,15 @@
 //! Command dispatch.
 
 use crate::cli::{
-    ArtifactCreateArgs, ArtifactRemoveArgs, ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DoctorArgs,
-    EnterArgs, ExecArgs, ProfileArgs, RecoverArgs, RemoveArgs, RollbackArgs, SnapshotCommand, SnapshotCreateArgs,
-    SnapshotListArgs, StatusArgs, TemplateCommand, TemplateUseArgs,
+    AdapterCommand, AgentCommand, AgentRecoverArgs, AgentTargetArgs, ArtifactCreateArgs, ArtifactRemoveArgs,
+    ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ProfileArgs, RecoverArgs,
+    RemoveArgs, RenameArgs, RollbackArgs, SnapshotCommand, SnapshotCreateArgs, SnapshotListArgs, StatusArgs,
+    TemplateCommand, TemplateUseArgs, UpgradeArgs,
 };
 use crate::{output, process};
 use quarters_core::{
     ArtifactInspection, ArtifactKind, ArtifactName, ArtifactOrigin, EnvironmentPlan, ErrorKind, HostEnvironment,
-    QuartersError, Result, SourceStatus, Space, SpaceInspection, SpaceName, Store,
+    QuartersError, Result, Space, SpaceInspection, SpaceName, Store,
 };
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -33,11 +34,13 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
     match cli.command {
         Command::Create(arguments) => create(&store, &host, arguments, cli.json),
         Command::Clone(arguments) => clone_space(&store, &arguments, cli.json),
+        Command::Upgrade(arguments) => upgrade(&store, &arguments, cli.json),
+        Command::Rename(arguments) => rename(&store, &arguments, cli.json),
         Command::Template(arguments) => template(&store, arguments.command, cli.json),
         Command::Snapshot(arguments) => snapshot(&store, arguments.command, cli.json),
         Command::Rollback(arguments) => rollback(&store, &arguments, cli.json),
         Command::List => list(&store, cli.json),
-        Command::Status(arguments) => status(&store, &arguments, cli.json),
+        Command::Status(arguments) => status(&store, &host, &arguments, cli.json),
         Command::Current => current(&store, cli.json),
         Command::Env(arguments) => environment(&store, &host, &arguments, cli.json),
         Command::Enter(arguments) => enter(&store, &host, arguments, cli.json),
@@ -45,6 +48,8 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         Command::Host(arguments) => {
             passthrough_json_guard(cli.json).and_then(|()| process::run_host(&arguments.command))
         }
+        Command::Agent(arguments) => agent(&store, &host, arguments.command, cli.json),
+        Command::Adapter(arguments) => adapter(&store, arguments.command, cli.json),
         Command::Doctor(arguments) => doctor(&store, &host, &arguments, cli.json),
         Command::Rm(arguments) => remove(&store, &arguments, cli.json),
         Command::Recover(arguments) => recover(&store, &arguments, cli.json),
@@ -58,7 +63,133 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
             passthrough_json_guard(cli.json)?;
             process::linux_launch(&arguments.space_home, &arguments.host_home, &arguments.command)
         }
+        Command::AgentLaunch(arguments) => {
+            passthrough_json_guard(cli.json)?;
+            let space = open_space(&store, &arguments.space)?;
+            let token = std::env::var("QUARTERS_AGENT_TOKEN").map_err(|_error| {
+                QuartersError::new(
+                    ErrorKind::Unsupported,
+                    "the private-agent launcher has no ownership handoff",
+                )
+            })?;
+            quarters_core::run_ssh_agent_helper(&host, &space, &token)
+        }
     }
+}
+
+fn upgrade(store: &Store, arguments: &UpgradeArgs, json: bool) -> Result<i32> {
+    let name = SpaceName::parse(arguments.name.clone())?;
+    let report = if arguments.preview {
+        store.upgrade_plan(&name)?
+    } else {
+        if arguments.confirm.as_deref() != Some(name.as_str()) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm must exactly repeat the legacy space name",
+            )
+            .with_hint(format!(
+                "run 'quarters upgrade {name} --preview', then repeat with '--confirm {name}'"
+            )));
+        }
+        store.upgrade_space(&name)?
+    };
+    output::print_upgrade(&report, arguments.preview, json)?;
+    Ok(0)
+}
+
+fn rename(store: &Store, arguments: &RenameArgs, json: bool) -> Result<i32> {
+    let previous = SpaceName::parse(arguments.previous.clone())?;
+    let name = SpaceName::parse(arguments.name.clone())?;
+    let report = if arguments.preview {
+        store.rename_plan(&previous, &name)?
+    } else {
+        if arguments.confirm.as_deref() != Some(previous.as_str()) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm must exactly repeat the current space name",
+            )
+            .with_hint(format!(
+                "run 'quarters rename {previous} {name} --preview', then repeat with '--confirm {previous}'"
+            )));
+        }
+        store.rename_space(&previous, &name)?
+    };
+    output::print_space_rename(&report, arguments.preview, json)?;
+    Ok(0)
+}
+
+fn agent(store: &Store, host: &HostEnvironment, command: AgentCommand, json: bool) -> Result<i32> {
+    let command = match command {
+        AgentCommand::Recover(arguments) => return recover_agent(store, host, &arguments, json),
+        command => command,
+    };
+    let (action, target) = match command {
+        AgentCommand::Status(target) => ("status", target),
+        AgentCommand::Start(target) => ("start", target),
+        AgentCommand::Stop(target) => ("stop", target),
+        AgentCommand::Restart(target) => ("restart", target),
+        AgentCommand::Recover(_) => return Err(QuartersError::new(ErrorKind::System, "invalid agent dispatch")),
+    };
+    let name = agent_target(&target)?;
+    let space = store.open(&name)?;
+    let status = match action {
+        "status" => store.ssh_agent_status(&space, host)?,
+        "start" => store.start_ssh_agent(&space, host)?,
+        "stop" => store.stop_ssh_agent(&space, host)?,
+        "restart" => {
+            if store.ssh_agent_status(&space, host)?.state == quarters_core::AgentState::Active {
+                store.stop_ssh_agent(&space, host)?;
+            }
+            store.start_ssh_agent(&space, host)?
+        }
+        _ => return Err(QuartersError::new(ErrorKind::System, "unknown private-agent action")),
+    };
+    output::print_agent(action, &status, json)?;
+    Ok(0)
+}
+
+fn recover_agent(store: &Store, host: &HostEnvironment, arguments: &AgentRecoverArgs, json: bool) -> Result<i32> {
+    let name = SpaceName::parse(arguments.name.clone())?;
+    if arguments.confirm != name.as_str() {
+        return Err(
+            QuartersError::new(ErrorKind::InvalidInput, "--confirm must exactly repeat the space name").with_hint(
+                format!("inspect 'quarters agent status {name}', then repeat with '--confirm {name}'"),
+            ),
+        );
+    }
+    let space = store.open(&name)?;
+    let status = store.recover_ssh_agent(&space, host)?;
+    output::print_agent("recover", &status, json)?;
+    Ok(0)
+}
+
+fn adapter(store: &Store, command: AdapterCommand, json: bool) -> Result<i32> {
+    let (action, target) = match command {
+        AdapterCommand::Status(target) => ("status", target),
+        AdapterCommand::Install(target) => ("install", target),
+        AdapterCommand::Remove(target) => ("remove", target),
+    };
+    let name = agent_target(&target)?;
+    let space = store.open(&name)?;
+    let report = match action {
+        "status" => crate::adapter::inspect(&space)?,
+        "install" => crate::adapter::install(store, &space)?,
+        "remove" => crate::adapter::remove(store, &space)?,
+        _ => return Err(QuartersError::new(ErrorKind::System, "unknown adapter action")),
+    };
+    output::print_adapter(action, &report, json)?;
+    Ok(0)
+}
+
+fn agent_target(arguments: &AgentTargetArgs) -> Result<SpaceName> {
+    if let Some(name) = &arguments.name {
+        return SpaceName::parse(name.clone());
+    }
+    let current = std::env::var("QUARTERS_SPACE").map_err(|_| {
+        QuartersError::new(ErrorKind::InvalidInput, "a space name is required outside a Quarter")
+            .with_hint("run 'quarters agent status NAME'")
+    })?;
+    SpaceName::parse(current)
 }
 
 fn rollback(store: &Store, arguments: &RollbackArgs, json: bool) -> Result<i32> {
@@ -79,6 +210,12 @@ fn rollback(store: &Store, arguments: &RollbackArgs, json: bool) -> Result<i32> 
         }
         store.rollback_space(&target, &snapshot, &recovery, include_cache)?
     };
+    if !arguments.preview {
+        let space = store.open(&target)?;
+        crate::adapter::install(store, &space).map_err(|error| {
+            error.with_hint("rollback completed, but managed OpenSSH command links require inspection")
+        })?;
+    }
     output::print_rollback(&report, json)?;
     Ok(0)
 }
@@ -157,6 +294,9 @@ fn use_template(store: &Store, arguments: &TemplateUseArgs, json: bool) -> Resul
         }
         store.use_template(&name, &destination, arguments.shell.clone())?
     };
+    if !arguments.preview {
+        install_created_commands(store, &destination)?;
+    }
     output::print_template_use(&report, json)?;
     Ok(0)
 }
@@ -188,11 +328,7 @@ fn list_artifacts(store: &Store, kind: ArtifactKind, source: Option<&Space>, jso
 
 fn show_artifact(store: &Store, kind: ArtifactKind, raw_name: &str, json: bool) -> Result<i32> {
     let name = ArtifactName::parse(raw_name.to_owned())?;
-    let artifact = store.open_artifact(kind, &name)?;
-    let source_status = match store.open(&artifact.manifest().source_identity.name) {
-        Ok(space) if artifact.manifest().source_identity.matches(&space) => SourceStatus::Present,
-        Ok(_) | Err(_) => SourceStatus::Orphaned,
-    };
+    let (artifact, source_status) = store.open_artifact_with_status(kind, &name)?;
     output::print_artifact(&artifact, source_status, json)?;
     Ok(0)
 }
@@ -231,7 +367,8 @@ fn require_sensitive_confirmation(confirmation: Option<&str>, source: &SpaceName
 fn create(store: &Store, host: &HostEnvironment, arguments: CreateArgs, json: bool) -> Result<i32> {
     let name = SpaceName::parse(arguments.name)?;
     let shell = arguments.shell.unwrap_or_else(|| default_shell(host));
-    let space = store.create_with_layout(name, shell, arguments.layout.into())?;
+    let space = store.create_with_layout(name.clone(), shell, arguments.layout.into())?;
+    install_created_commands(store, &name)?;
     output::print_created(&space, json)?;
     Ok(0)
 }
@@ -251,10 +388,22 @@ fn clone_space(store: &Store, arguments: &CloneArgs, json: bool) -> Result<i32> 
                 "run 'quarters clone {source} {destination} --preview', then execute with '--confirm-sensitive-state {source}'"
             )));
         }
-        store.clone_space(&source, destination, arguments.include_cache)?
+        store.clone_space(&source, destination.clone(), arguments.include_cache)?
     };
+    if !arguments.preview {
+        install_created_commands(store, &destination)?;
+    }
     output::print_clone(&report, json)?;
     Ok(0)
+}
+
+fn install_created_commands(store: &Store, name: &SpaceName) -> Result<()> {
+    let space = store.open(name)?;
+    crate::adapter::install(store, &space).map(|_report| ()).map_err(|error| {
+        error.with_hint(format!(
+            "space '{name}' was published, but managed commands are incomplete; inspect 'quarters adapter status {name}', then retry installation"
+        ))
+    })
 }
 
 fn list(store: &Store, json: bool) -> Result<i32> {
@@ -263,7 +412,7 @@ fn list(store: &Store, json: bool) -> Result<i32> {
     Ok(0)
 }
 
-fn status(store: &Store, arguments: &StatusArgs, json: bool) -> Result<i32> {
+fn status(store: &Store, host: &HostEnvironment, arguments: &StatusArgs, json: bool) -> Result<i32> {
     let unfiltered = arguments.name.is_none();
     let inspections = arguments.name.as_deref().map_or_else(
         || store.inspect(),
@@ -286,7 +435,21 @@ fn status(store: &Store, arguments: &StatusArgs, json: bool) -> Result<i32> {
             SpaceInspection::Healthy(space) => lease_states
                 .next()
                 .ok_or_else(|| QuartersError::new(ErrorKind::System, "activity observation returned too few states"))
-                .map(|lease_state| output::StatusEntry::Healthy { space, lease_state }),
+                .map(|lease_state| {
+                    let agent_state = if unfiltered {
+                        "not-inspected".to_owned()
+                    } else {
+                        store.ssh_agent_status(&space, host).map_or_else(
+                            |_error| "unavailable".to_owned(),
+                            |status| status.state.as_str().to_owned(),
+                        )
+                    };
+                    output::StatusEntry::Healthy {
+                        space,
+                        lease_state,
+                        agent_state,
+                    }
+                }),
             SpaceInspection::Unhealthy {
                 name,
                 name_was_lossy,
@@ -352,6 +515,7 @@ fn environment(store: &Store, host: &HostEnvironment, arguments: &ProfileArgs, j
 fn enter(store: &Store, host: &HostEnvironment, arguments: EnterArgs, json: bool) -> Result<i32> {
     passthrough_json_guard(json)?;
     let space = open_space(store, &arguments.profile.name)?;
+    crate::adapter::warn_if_incomplete(&space);
     let shell = arguments
         .shell
         .unwrap_or_else(|| space.manifest().default_shell.clone());
@@ -362,6 +526,7 @@ fn enter(store: &Store, host: &HostEnvironment, arguments: EnterArgs, json: bool
 fn exec(store: &Store, host: &HostEnvironment, arguments: &ExecArgs, json: bool) -> Result<i32> {
     passthrough_json_guard(json)?;
     let space = open_space(store, &arguments.profile.name)?;
+    crate::adapter::warn_if_incomplete(&space);
     let launch = profile_launch(store, &space, host, &arguments.profile);
     launch.run(&arguments.command)
 }
@@ -373,16 +538,42 @@ fn doctor(store: &Store, host: &HostEnvironment, arguments: &DoctorArgs, json: b
         .map(|name| open_space(store, name))
         .transpose()?;
     let lease_state = space.as_ref().map(|space| store.lease_state(space)).transpose()?;
-    if let Some(space) = &space {
-        EnvironmentPlan::for_space(space, host, &space.home(), &[])?;
-    }
+    let agent_status = space
+        .as_ref()
+        .map(|space| store.ssh_agent_status(space, host))
+        .transpose()?;
+    let adapters = space.as_ref().map(crate::adapter::inspect).transpose()?;
+    let tools = crate::adapter::tool_probes(adapters.as_ref());
+    let environment_validated = space
+        .as_ref()
+        .map(|space| {
+            let blocked = agent_status.as_ref().is_some_and(|status| {
+                matches!(
+                    status.state,
+                    quarters_core::AgentState::Starting
+                        | quarters_core::AgentState::Stopping
+                        | quarters_core::AgentState::Stale
+                )
+            });
+            if blocked {
+                Ok(false)
+            } else {
+                EnvironmentPlan::for_space(space, host, &space.home(), &[]).map(|_plan| true)
+            }
+        })
+        .transpose()?;
     let recovery = store.recovery_summary();
     output::print_doctor(
         &quarters_core::platform::capabilities(),
-        &quarters_core::tool_probes(),
+        &tools,
         &crate::shortcut::default_reports(),
-        space.as_ref(),
-        lease_state,
+        output::DoctorSpace {
+            space: space.as_ref(),
+            environment_validated,
+            lease_state,
+            agent_status: agent_status.as_ref(),
+            adapters: adapters.as_ref(),
+        },
         recovery.as_ref(),
         json,
     )?;
@@ -437,7 +628,11 @@ fn recover(store: &Store, arguments: &RecoverArgs, json: bool) -> Result<i32> {
 }
 
 fn open_space(store: &Store, raw_name: &str) -> Result<Space> {
-    store.open(&SpaceName::parse(raw_name.to_owned())?)
+    let name = SpaceName::parse(raw_name.to_owned())?;
+    match store.inspect_named(&name)? {
+        SpaceInspection::Healthy(space) => Ok(space),
+        SpaceInspection::Unhealthy { error, .. } => Err(error),
+    }
 }
 
 fn validated_current_space(store: &Store) -> Option<String> {
@@ -492,7 +687,11 @@ fn home_view_management_guard(command: &Command) -> Result<()> {
     }
     if matches!(
         command,
-        Command::Current | Command::ShellInit(_) | Command::LinuxLaunch(_) | Command::Doctor(DoctorArgs { name: None })
+        Command::Current
+            | Command::ShellInit(_)
+            | Command::LinuxLaunch(_)
+            | Command::AgentLaunch(_)
+            | Command::Doctor(DoctorArgs { name: None })
     ) {
         return Ok(());
     }

@@ -96,5 +96,6 @@ fn resource_limit_failure() -> CallToolResult {
         code: "resource_limit".to_owned(),
         message: "the complete tool result exceeded Quarters' bounded MCP response budget".to_owned(),
         retryable: false,
+        hint: None,
     })
 }

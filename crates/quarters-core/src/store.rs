@@ -4,16 +4,20 @@ pub(crate) mod artifact;
 mod create;
 mod layout;
 pub(crate) mod lifecycle;
+mod rename;
+mod upgrade;
 
 pub(crate) use layout::StoreLayout;
+pub use rename::SpaceRenameReport;
+pub use upgrade::SpaceUpgradeReport;
 
 use crate::store_lock::lock_shared_bounded;
 use crate::store_policy::{
     validate_private_dir, validate_private_file, validate_removal_entry_name, validate_stored_manifest,
 };
 use crate::{
-    ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result, SUPPORTED_SCHEMA_VERSIONS, Space, SpaceManifest,
-    SpaceName, WORKSPACE_SCHEMA_VERSION,
+    ErrorKind, LATEST_SCHEMA_VERSION, PROFILE_SCHEMA_VERSION, QuartersError, Result, SUPPORTED_SCHEMA_VERSIONS, Space,
+    SpaceManifest, SpaceName,
 };
 use fs4::FileExt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -234,6 +238,7 @@ impl Store {
     /// Returns an error when the name is absent or the store layout itself
     /// cannot be inspected.
     pub fn inspect_named(&self, name: &SpaceName) -> Result<SpaceInspection> {
+        self.ensure_no_rename_target(name)?;
         self.ensure_no_rollback_target(name)?;
         self.inspect_named_without_rollback(name)
     }
@@ -270,9 +275,15 @@ impl Store {
     /// operation fails.
     pub fn remove(&self, name: &str) -> Result<()> {
         validate_removal_entry_name(name)?;
-        if let Ok(validated_name) = SpaceName::parse(name.to_owned()) {
+        let host = crate::HostEnvironment::capture();
+        let removable_space = if let Ok(validated_name) = SpaceName::parse(name.to_owned()) {
+            self.ensure_no_rename_target(&validated_name)?;
             self.ensure_no_rollback_target(&validated_name)?;
-        }
+            self.ensure_no_agent_for_removal(&validated_name, &host)?;
+            self.open(&validated_name).ok()
+        } else {
+            None
+        };
         let Some(spaces_root) = self.existing_spaces_root()? else {
             return Err(space_not_found(name));
         };
@@ -286,7 +297,15 @@ impl Store {
             error.with_hint(format!(
                 "space '{name}' was removed, but directory durability could not be confirmed; inspect status before retrying"
             ))
-        })
+        })?;
+        if let Some(space) = removable_space {
+            crate::platform::remove_runtime_directory(&space, &host).map_err(|error| {
+                error.with_hint(format!(
+                    "space '{name}' was removed, but its exact private runtime directory was retained for inspection"
+                ))
+            })?;
+        }
+        Ok(())
     }
 
     fn open_path(path: PathBuf) -> Result<Space> {
@@ -317,8 +336,8 @@ impl Store {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 format!(
-                    "space uses schema {}, but this build supports schemas {} and {}",
-                    header.schema_version, PROFILE_SCHEMA_VERSION, WORKSPACE_SCHEMA_VERSION
+                    "space uses schema {}, but this build supports schemas {} through {}",
+                    header.schema_version, PROFILE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION
                 ),
             )
             .with_hint("upgrade Quarters before opening this space; do not delete or rewrite its manifest"));
@@ -382,7 +401,7 @@ fn retire_space(store: &Store, spaces_root: &Path, name: &str) -> Result<PathBuf
     Ok(retired)
 }
 
-fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true).mode(0o600);
     let mut file = options
@@ -394,7 +413,7 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|error| QuartersError::io("sync private file", path, error))
 }
 
-fn read_private_file(path: &Path) -> Result<Vec<u8>> {
+pub(crate) fn read_private_file(path: &Path) -> Result<Vec<u8>> {
     let path_metadata = fs::symlink_metadata(path).map_err(|error| missing_private_file(path, error))?;
     validate_private_file(path, &path_metadata)?;
     let mut options = OpenOptions::new();
@@ -550,7 +569,7 @@ pub(crate) fn entry_exists(path: &Path) -> Result<bool> {
     }
 }
 
-fn epoch_millis() -> Result<u128> {
+pub(crate) fn epoch_millis() -> Result<u128> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
@@ -778,13 +797,13 @@ mod tests {
         let manifest_path = space.root().join(MANIFEST_FILE);
         let bytes = fs::read(&manifest_path).expect("read manifest");
         let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parse manifest");
-        manifest["schema_version"] = serde_json::json!(3);
+        manifest["schema_version"] = serde_json::json!(4);
         manifest["layout"] = serde_json::json!("workspace");
         fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("encode manifest")).expect("replace manifest");
 
         let error = store.open(&name).expect_err("future schema must fail closed");
         assert_eq!(error.kind(), ErrorKind::CorruptState);
-        assert!(error.message().contains("space uses schema 3"));
+        assert!(error.message().contains("space uses schema 4"));
         assert!(error.hint().is_some_and(|hint| hint.contains("upgrade Quarters")));
     }
 
@@ -807,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_manifests_remain_schema_one_without_workspace_fields() {
+    fn new_profile_manifests_have_stable_identity() {
         let (_temporary, store) = test_store();
         let space = store
             .create(
@@ -817,11 +836,11 @@ mod tests {
             .expect("create profile");
         let bytes = fs::read(space.root().join(MANIFEST_FILE)).expect("read manifest");
         let manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parse manifest");
-        assert_eq!(manifest["schema_version"], serde_json::json!(PROFILE_SCHEMA_VERSION));
-        assert!(manifest.get("layout").is_none());
-        assert!(manifest.get("space_id").is_none());
+        assert_eq!(manifest["schema_version"], serde_json::json!(LATEST_SCHEMA_VERSION));
+        assert_eq!(manifest["layout"], serde_json::json!("profile"));
+        assert_eq!(manifest["space_id"].as_str().map(str::len), Some(32));
         assert_eq!(space.layout(), crate::SpaceLayout::Profile);
-        assert!(space.id().is_none());
+        assert!(space.id().is_some());
     }
 
     #[test]
@@ -834,7 +853,7 @@ mod tests {
                 crate::SpaceLayout::Workspace,
             )
             .expect("create workspace");
-        assert_eq!(space.manifest().schema_version, WORKSPACE_SCHEMA_VERSION);
+        assert_eq!(space.manifest().schema_version, LATEST_SCHEMA_VERSION);
         assert_eq!(space.layout(), crate::SpaceLayout::Workspace);
         assert_eq!(space.id().expect("workspace ID").as_str().len(), 32);
         for relative in ["Desktop", "Documents", "Downloads", "Pictures", "Templates"] {
@@ -871,8 +890,9 @@ mod tests {
         let manifest_path = space.root().join(MANIFEST_FILE);
         let bytes = fs::read(&manifest_path).expect("read manifest");
         let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parse manifest");
-        manifest["schema_version"] = serde_json::json!(WORKSPACE_SCHEMA_VERSION);
+        manifest["schema_version"] = serde_json::json!(crate::WORKSPACE_SCHEMA_VERSION);
         manifest["layout"] = serde_json::json!("workspace");
+        manifest.as_object_mut().expect("manifest object").remove("space_id");
         fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("encode manifest")).expect("replace manifest");
         let error = store.open(&name).expect_err("missing stable ID must fail closed");
         assert_eq!(error.kind(), ErrorKind::CorruptState);

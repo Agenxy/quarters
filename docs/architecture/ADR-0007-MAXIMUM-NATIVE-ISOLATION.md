@@ -17,7 +17,7 @@ Report isolation as independently earned capabilities, never one marketing
 mode:
 
 1. `state-profile`: HOME/XDG and tool adapters; current portable baseline.
-2. `workspace-profile`: expanded user-directory conventions; current schema-2
+2. `workspace-profile`: expanded user-directory conventions; current schema-3
    layout, still not containment.
 3. `passwd-home-view`: Linux user/mount namespace compatibility where policy
    and group mapping permit it; currently experimental.

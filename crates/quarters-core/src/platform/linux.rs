@@ -39,7 +39,7 @@ pub(super) fn platform_extend_environment(_values: &mut BTreeMap<OsString, OsStr
 
 pub(super) fn platform_runtime_base(host: &HostEnvironment) -> PathBuf {
     let home = host.get("HOME").map(Path::new);
-    host.get("XDG_RUNTIME_DIR")
+    host.original_xdg_runtime()
         .map(PathBuf::from)
         .filter(|runtime| runtime.is_absolute() && home.is_none_or(|home| !runtime.starts_with(home)))
         .unwrap_or_else(|| PathBuf::from("/tmp"))

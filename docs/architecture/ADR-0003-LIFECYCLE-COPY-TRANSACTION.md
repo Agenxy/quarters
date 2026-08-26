@@ -90,6 +90,7 @@ such entry. Both modes compare metadata before open, after open and after read.
 Named lifecycle artifacts and deterministic rollback recovery are accepted in
 ADR 0008.
 
-Remaining gates are clonefile/reflink semantic equivalence, schema-1 stable-ID
-migration, managed-agent or detached-process quiescence, filesystem
-immutability flags, authenticated export and enforceable freeze.
+Remaining gates are clonefile/reflink semantic equivalence, detached-process
+quiescence, filesystem immutability flags, authenticated export and enforceable
+freeze. Schema-1 stable-ID upgrade and managed OpenSSH agents are implemented
+under ADRs 0006 and 0005.

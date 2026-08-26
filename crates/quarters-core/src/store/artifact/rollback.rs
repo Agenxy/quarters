@@ -74,6 +74,7 @@ impl Store {
         recovery_name: &ArtifactName,
         recovery_includes_cache: bool,
     ) -> Result<RollbackReport> {
+        self.ensure_no_rename_target(target)?;
         let snapshot = self.verify_artifact(ArtifactKind::Snapshot, snapshot_name)?;
         validate_snapshot_target(&snapshot, &self.open(target)?)?;
         require_recovery_name_available(self, recovery_name)?;
@@ -233,6 +234,7 @@ impl Store {
         recovery_name: &ArtifactName,
         transaction_id: &ArtifactId,
     ) -> Result<(Space, LifecycleLease, SpaceStaging)> {
+        self.ensure_no_rename_target(target)?;
         let management = self.management_guard()?;
         let target_space = self.open(target)?;
         validate_snapshot_target(snapshot, &target_space)?;

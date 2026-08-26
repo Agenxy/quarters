@@ -38,6 +38,7 @@ policy.
 | Artifact content changes after capture | Canonical whole-tree BLAKE3 verification binds stored paths, types, ordinary modes, content, link targets and counts before every use |
 | Artifact digest is mistaken for authentication | Output and documentation state that another same-UID process can alter both content and manifest |
 | Partial rollback replaces only some state | Complete staging, verified automatic recovery snapshot and durable prepared/retired/published transaction; recursive merge is forbidden |
+| Interrupted display-name rename | Stable identity, private durable marker, same-filesystem move and atomic manifest replacement; valid states recover deterministically while malformed markers remain localized issues |
 | Crash leaves a target apparently absent | Atomic marker publication and exact filesystem tuples produce bounded actions; malformed or ambiguous markers preserve every tree, become itemized issues, block only a known named target and do not stop unrelated recovery |
 | Recovery deletes an unrelated path | Only private exact-form generated IDs, free creation locks and validated manifest temporaries are reclaimable; malformed reserved-looking and unknown hidden entries remain counted without blocking unrelated recovery |
 | Manifest downgrade or field confusion | Permissive version probe followed by strict closed schema and version/layout/ID invariants |
@@ -58,8 +59,15 @@ policy.
 | Startup integration resolves altered code | Generated rc files resolve `quarters` through the active space PATH; the space-local bin directory is user-writable and therefore inside the same-UID trust boundary |
 | Shortcut replacement or deletion | Protected PATH directory, non-overwriting symlink creation and removal only of links with the closed Quarters-launcher target shape |
 | Host Git helper reuse | Generated config clears inherited credential helpers |
-| Shared SSH agent | Host socket is not inherited; `SSH_AUTH_SOCK` remains unset until reviewed private-agent management exists |
-| Runtime socket collision | Mode-0700 short runtime directory per UID and space |
+| Shared SSH agent | Host socket is never inherited; only an explicitly started, fully verified private socket is advertised |
+| Forged or replaced private agent | Atomic token-bearing record, live PID, current-user socket device/inode, kernel-reported peer PID and bounded SSH identities response must all agree |
+| Agent cleanup signals or unlinks the wrong target | Stop is limited to a fully verified active record; recovery removes only dead socketless records or exact stored socket identities and never follows links |
+| Agent startup failure or supervisor crash | Stable identity is required before spawn; failed spawned children are boundedly terminated and reaped; a surviving `starting` record is promoted only after full socket proof, otherwise ambiguous live state remains fail-closed |
+| OpenSSH ignores redirected HOME | Managed links force protected per-space config, a per-space user-known-hosts path and no default identity files; tool-specific parsing rejects competing `-F`, bare `ssh-add` and host-keychain import; host-tool resolution excludes relative directories |
+| Forged adapter context | Baseline adapters reopen the validated store and require the declared root, space and home to agree; protected OpenSSH config anchors are revalidated before invocation |
+| Managed command collision | Installation never replaces entries, validates every command-directory ancestor and reports exact links as stale when their launcher is unavailable; lifecycle copying omits only the closed managed-link shapes |
+| Runtime socket collision | Mode-0700 short runtime directory per UID and stable space identity |
+| Read-only status creates runtime state | Agent status uses a validation-only runtime lookup and reports unset without creating directories |
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
 | Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
@@ -87,6 +95,7 @@ policy.
 - authenticating artifact state against another process with the same UID
 - treating a free cooperative lease as proof that detached clone writers are absent
 - treating workspace directories or a stable space ID as containment or authorization
+- treating a private SSH agent as protection from another process with the same UID
 - remote MCP, OAuth, agent-triggered command execution or agent-triggered deletion
 
 ## Host and sudo escape
@@ -157,9 +166,51 @@ retired-tree cleanup failure does not undo the rollback. The error states that
 replacement completed, retains the cleanup tree under `.trash`, and directs the
 operator through bounded doctor and recovery inspection.
 
+Private-agent ownership is operational evidence, not a new principal. Another
+process with the same UID can read space files, connect to the socket, alter
+runtime state or signal the agent under ordinary host policy. The random token
+coordinates the Quarters helper handoff and prevents accidental record mixups;
+it is not an authorization secret against the real account. PID reuse cannot
+pass active verification while the original live socket device/inode,
+kernel-reported socket peer PID and SSH protocol endpoint remain required
+together. Stop repeats that complete socket proof immediately before signaling.
+Incomplete records intentionally prefer retained state and a blocked launch
+over speculative cleanup.
+
+Managed OpenSSH links improve default state selection, but users can bypass
+them with absolute executable paths, altered PATH entries or tools that invoke
+OpenSSH internally by absolute path. The forced config controls OpenSSH's own
+configuration lookup. The adapter also overrides the passwd-home-derived
+user-known-hosts path and disables default identity files; an explicit `-i`,
+agent key or absolute path remains an intentional escape. It cannot prevent
+access to any host file readable by the real UID.
+
+Nested Quarters launches retain the original host HOME, PATH and runtime
+backups instead of treating the outer Quarter as the host. This prevents
+adapter recursion and makes `quarters host` return to the real captured host
+state. Linux home-view is an explicit exception to baseline adapter context
+reopening because its mount intentionally hides the authoritative store; its
+adapter still validates protected config paths, but it is not an authority
+boundary and host escape remains disabled.
+
+Host-tool resolution canonicalizes candidates and rejects both the running
+Quarters device/inode and every candidate whose resolved basename is
+`quarters`; direct parent-child adapter recursion fails before another process
+is spawned. The basename rule matters in Linux home-view, where an original
+`$HOME/.local/bin` path can refer to a distinct runtime launcher copy after the
+home bind mount.
+The home-view launcher therefore installs a validated private runtime command
+set before mounting: one copied `quarters` executable and four relative
+OpenSSH links. OpenSSH-link collisions fail closed and are never replaced.
+
 MCP is not an authorization boundary against another process already running as
 the same account. A peer can invoke the same CLI or edit files it owns. The MCP
 controls limit accidental agent authority, protocol confusion, context
 injection and resource exhaustion; they do not create a new Unix principal.
+
+Rename recovery bounds successful filesystem mutations to 128 per pass but
+scans the complete marker namespace so retained ambiguous records cannot starve
+later actionable work. This is linear work controlled by the same UID, not a
+constant-time operation or a containment property.
 The 128-entry MCP status budget is applied after rollback rows are merged and
 also counts the separate retained-issue records.
