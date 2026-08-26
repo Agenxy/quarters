@@ -415,7 +415,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn canonical_digest_changes_for_bound_content() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn canonical_digest_changes_for_bound_content_and_mode() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let temporary = TempDir::new()?;
         fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700))?;
         fs::write(temporary.path().join("a"), b"one")?;
@@ -426,6 +426,10 @@ mod tests {
         let second = digest_home(temporary.path())?;
         assert_ne!(first.digest, second.digest);
         assert_eq!(first.counts.entries, 2);
+        fs::set_permissions(temporary.path().join("a"), fs::Permissions::from_mode(0o640))?;
+        let third = digest_home(temporary.path())?;
+        assert_ne!(second.digest, third.digest);
+        assert_eq!(second.counts, third.counts);
         Ok(())
     }
 
