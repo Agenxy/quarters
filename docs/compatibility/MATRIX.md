@@ -14,10 +14,14 @@ current host. It does not read credentials.
 |---|---:|---|---|
 | zsh | A | `HOME`, `ZDOTDIR`, `HISTFILE` | `/etc/zprofile` runs only with `--login` and may reorder PATH |
 | bash | A | `HOME`, `.bashrc` | system login profiles can still run |
+| Prompt context | B | validated `QUARTERS_PROMPT_PREFIX` plus `shell-init` | parent themes may need explicit ordering; marker is not proof of isolation |
+| Expanded workspace | A/C | HOME/XDG plus conventional personal directories | passwd-home, platform registration and absolute paths may remain host-bound |
+| Lifecycle clone | B/C | bounded native copy with explicit policy and atomic publication | detached writers unknown; selected metadata and embedded absolute paths are not transformed |
+| Private cleanup | C | iterative owner-checked removal with depth/count limits | mode-`000` recovery on Linux may require `/proc` for no-follow `fchmodat` emulation |
 | Git | B | `GIT_CONFIG_GLOBAL` | repository-local config still wins |
 | Git credentials | B/D | empty per-space helper | macOS Keychain is host-bound if a user adds that helper |
 | OpenSSH | C | per-space config used with `ssh -F` | macOS passwd home is unchanged; absolute invocations bypass adapters |
-| SSH agent | B | short per-space `SSH_AUTH_SOCK` | no agent is started automatically in this alpha |
+| SSH agent | D | none; host `SSH_AUTH_SOCK` is cleared | private-agent lifecycle is not implemented in this alpha |
 | GitHub CLI | B | `GH_CONFIG_DIR` | environment tokens require explicit `--inherit` |
 | tmux | B | `TMUX_TMPDIR` | host sessions are intentionally not visible |
 | GnuPG | B | `GNUPGHOME`, short runtime | external keychain or hardware identity remains host hardware |

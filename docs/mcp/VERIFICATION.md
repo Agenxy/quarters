@@ -18,10 +18,12 @@ The MCP adapter is acceptable only when all of these remain true.
 
 - all tools publish input and output schemas with closed parameter objects
 - successful and failed structured outputs validate against the published schema
+- profile and workspace creation, plus invalid layout rejection, pass under
+  both supported protocol families
 - incomplete outputs fail validation
 - the catalog contains only status, doctor and create
-- no tool accepts an executable, arguments, inherited variable, home-view flag,
-  root path or removal target
+- no tool accepts a clone source/destination, executable, arguments, inherited
+  variable, home-view flag, root path or removal target
 
 ## Hostile transport behavior
 

@@ -16,9 +16,13 @@ pub mod platform;
 
 pub use environment::{EnvironmentPlan, HostEnvironment, host_command_environment};
 pub use error::{ErrorKind, QuartersError, Result};
-pub use model::{SCHEMA_VERSION, Space, SpaceManifest, SpaceName};
+pub use model::{
+    LATEST_SCHEMA_VERSION, PROFILE_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS, Space, SpaceId, SpaceLayout,
+    SpaceManifest, SpaceName, WORKSPACE_SCHEMA_VERSION,
+};
 pub use platform::{Capabilities, CapabilityStatus};
-pub use probe::{CompatibilityTier, ToolProbe, tool_probes};
+pub use probe::{CompatibilityTier, ToolProbe, executable_matches, tool_probes};
+pub use store::lifecycle::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};
 pub use store::{LeaseState, SpaceInspection, SpaceLease, Store};
 pub use store_recovery::RecoverySummary;
 pub use text::{encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded};

@@ -11,6 +11,12 @@ pub(super) fn platform_capabilities() -> Capabilities {
     Capabilities {
         platform: "macos".to_owned(),
         environment_profile: true,
+        workspace_profile: CapabilityStatus {
+            available: true,
+            status: "experimental".to_owned(),
+            detail: "creates private macOS user-directory conventions; applications may still use host-bound APIs"
+                .to_owned(),
+        },
         core_foundation_home: true,
         home_view: CapabilityStatus {
             available: false,
@@ -38,6 +44,21 @@ pub(super) fn platform_extend_environment(values: &mut BTreeMap<OsString, OsStri
 
 pub(super) fn platform_runtime_base(_host: &HostEnvironment) -> PathBuf {
     PathBuf::from("/tmp")
+}
+
+pub(super) fn platform_workspace_directories() -> &'static [&'static str] {
+    &[
+        "Applications",
+        "Library/Application Support",
+        "Library/Caches",
+        "Library/Logs",
+        "Library/Preferences",
+        "Movies",
+    ]
+}
+
+pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
+    &["Library/Caches"]
 }
 
 pub(super) fn platform_enter_home_view(_space_home: &Path, _host_home: &Path) -> Result<()> {

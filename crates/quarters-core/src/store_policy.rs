@@ -6,7 +6,9 @@ use std::path::Path;
 
 use nix::unistd::Uid;
 
-use crate::{ErrorKind, QuartersError, Result, SpaceManifest};
+use crate::{
+    ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result, SpaceLayout, SpaceManifest, WORKSPACE_SCHEMA_VERSION,
+};
 
 pub(crate) fn validate_store_root(path: &Path, metadata: &fs::Metadata) -> Result<()> {
     let protected_from_other_writers = metadata.mode() & 0o022 == 0;
@@ -89,6 +91,7 @@ pub(crate) fn validate_shell(shell: &Path) -> Result<()> {
 }
 
 pub(crate) fn validate_stored_manifest(manifest: &SpaceManifest) -> Result<()> {
+    validate_manifest_layout(manifest)?;
     if manifest.authority_model != "host-account-state-profile" {
         return Err(QuartersError::new(
             ErrorKind::CorruptState,
@@ -108,6 +111,22 @@ pub(crate) fn validate_stored_manifest(manifest: &SpaceManifest) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn validate_manifest_layout(manifest: &SpaceManifest) -> Result<()> {
+    let valid = match manifest.schema_version {
+        PROFILE_SCHEMA_VERSION => manifest.layout.is_none() && manifest.space_id.is_none(),
+        WORKSPACE_SCHEMA_VERSION => manifest.layout == Some(SpaceLayout::Workspace) && manifest.space_id.is_some(),
+        _ => false,
+    };
+    if valid {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "space manifest layout and stable identity do not match its schema",
+    )
+    .with_hint("do not edit manifests by hand; use a compatible Quarters build to inspect this space"))
 }
 
 pub(crate) fn validate_removal_entry_name(name: &str) -> Result<()> {

@@ -38,6 +38,7 @@ The default root is `~/.quarters`:
   spaces/
     work/
       .quarters.json
+      .quarters-provenance.json  # clone destinations only
       .active
       home/
         .config/
@@ -52,11 +53,19 @@ The default root is `~/.quarters`:
 Creation builds a complete directory under `.creating-<name>-<unique>` on the
 same filesystem, syncs private files and publishes it with `rename()`. A schema
 marker and matching directory name are required when opening a space.
-Creation, recovery, lease acquisition and removal share the bounded root
-management lock. Rename losers
+Schema 1 remains the minimal `profile` layout and deliberately serializes no
+layout or stable-ID fields. Schema 2 is reserved for the explicit `workspace`
+layout and requires both `"layout": "workspace"` and a random 128-bit opaque
+ID. New readers accept both; unsupported versions and inconsistent field sets
+fail closed before a space becomes healthy. The ID is future lifecycle
+identity, not an authentication secret.
+Creation, lifecycle publication, recovery, lease acquisition and removal share
+the bounded root management lock. Rename losers
 clean their skeleton immediately; interrupted `.creating-*` state and
 `.retired-*` trash are counted by `doctor` and reclaimed only by the confirmed
-`recover` command after private-directory validation.
+`recover` command after private-directory validation. Recovery and ordinary
+removal retire exact targets under the lock, then restore owner access only
+inside the retired private tree and delete it after releasing the lock.
 
 Root-lock deadlines reflect the kind of work waiting: read-only observation
 waits up to 500 ms and reports activity as unknown when another operation is
@@ -100,13 +109,30 @@ This prevents accidental reuse of common and unknown credential variables. It
 does not stop a child from reading credentials directly from any host path its
 real account can access.
 
-`SSH_AUTH_SOCK` always points to a short per-space socket. It is intentionally
-not inherited. A missing per-space agent makes agent-backed SSH unavailable;
-explicit key paths in the per-space SSH config still work.
+`SSH_AUTH_SOCK` is intentionally not inherited and remains unset in the
+baseline. The alpha does not present a reserved path as an active private
+agent. Agent-backed SSH is unavailable until reviewed agent lifecycle
+management exists; explicit key paths in the per-space SSH config still work.
 
 The generated Git config starts with an empty credential helper. This resets
 helpers inherited from host or system policy before any per-space choice. It
 avoids silently sharing macOS Keychain credentials.
+
+Prompt context is computed only from the validated portable space name.
+`quarters shell-init zsh|bash` emits first-party, versioned snippets that
+prefix rather than replace the current prompt, so Git, virtualenv and theme
+state can remain visible. Newly created startup files resolve `quarters` at
+shell startup; existing startup files are never modified. Host escape clears
+all Quarters prompt variables.
+
+The optional `qts` or `q` shortcut is a managed symlink to the first
+`quarters` launcher on PATH, not to the currently running executable. Its
+directory must already be a protected host PATH directory. Installation never
+overwrites, and removal deletes only a symlink whose target is relative
+`quarters` or an absolute executable named `quarters`. Status distinguishes the
+current managed target, a relocated live launcher and a stale target. Every
+observed PATH match is reported. Parent-shell aliases and functions require the printed
+`type -a` check because a child cannot observe them.
 
 ## Process boundary
 
@@ -147,8 +173,8 @@ a retry may therefore report that the space already exists.
 
 The MCP capability surface is intentionally narrower than the CLI. It can
 inspect status, inspect capabilities and create a validated space. It cannot
-run commands, open shells, inherit host environment, request home views, change
-the bound root or delete data. Static resources are public-cacheable only under
+clone state, run commands, open shells, inherit host environment, request home
+views, change the bound root or delete data. Static resources are public-cacheable only under
 2026; status is private with a 500 ms TTL. Legacy responses omit 2026 cache and
 `resultType` fields.
 
@@ -175,10 +201,20 @@ config. Keychain, TCC, app containers and login services remain host-bound.
 Seatbelt is not part of the alpha's guarantee. `doctor` can report the deprecated
 `sandbox-exec` binary, but no confinement flag exists without a reviewed policy.
 
+Workspace layout additionally creates conventional personal directories plus
+`Applications`, `Movies` and selected `Library` state directories beneath the
+space home. No Launch Services, TCC, app-container or Finder registration is
+performed, and applications are free to ignore these paths.
+
 ### Linux
 
 The portable baseline matches macOS environment behavior without the
 CoreFoundation variable.
+
+Workspace layout creates the portable personal-directory set beneath the
+space home. It does not edit host `user-dirs.dirs`, register desktop services
+or imply that programs using passwd records have been redirected. Linux
+`--home-view` remains the separate opt-in compatibility mechanism.
 
 `--home-view` starts an internal Quarters child, creates a user namespace, maps
 the real UID and GID to the same numeric values, creates a private mount
@@ -207,17 +243,32 @@ security decision may use `current` as proof of process identity.
 Landlock is future work. The build does not equate namespace path changes with
 filesystem confinement.
 
-## Clone, snapshot, template and export contract
+## Lifecycle copy contract
 
-These workflows require a stronger transaction model than recursive copy:
+The alpha ships one bounded portable operation: `clone`. Preview and execution
+share a descriptor-relative walker rooted in already-open source and staging
+directories. It uses no-follow `openat`/`fstatat` operations, fixed entry/byte/
+depth/path limits, an exclusive cooperative source lease, private same-filesystem
+staging, fresh control files and one publication rename.
 
-- take an exclusive space lease
-- stop or prove quiescence of agents and daemons
-- omit runtime sockets and derived caches by declared policy
-- use platform clone/reflink support when available, with a correct copy
-  fallback
-- validate symlinks without following them outside the space
-- preserve mode and extended metadata deliberately
-- mark exports as private material and define a safe import format
+The default policy recreates derived cache roots empty. Sockets, FIFOs, devices
+and foreign-owned entries are omitted and counted. Regular hard links are copied
+independently. Safe relative symlinks retain their link text; absolute and
+lexically escaping links fail closed. User content is never listed in results.
+Cache roots match the declared home-relative component bytes exactly; the
+portable core does not infer case or Unicode aliases from filesystem behavior.
+The report counts preserved links into omitted cache roots. Links into omitted
+sockets, FIFOs, devices or foreign-owned entries may also dangle and are not
+separately counted.
+Arbitrary included state may contain credentials, so mutation requires an exact
+source-name confirmation and writes versioned provenance without source content.
 
-The alpha documents this contract and does not ship partial commands.
+The backend preserves file bytes and ordinary permission bits, but not
+timestamps, ACLs, xattrs, filesystem flags, set-ID/sticky bits, sparse extents or
+hard-link topology. Embedded absolute paths are copied without rewriting. A free
+cooperative lease cannot discover detached writers, so clone is not a live
+snapshot or quiescence proof.
+
+Platform clonefile/reflink acceleration, schema-1 stable IDs and the stronger
+requirements for templates, snapshots, export and rollback remain deferred.
+ADR 0003 records the accepted subset and unmet gates.

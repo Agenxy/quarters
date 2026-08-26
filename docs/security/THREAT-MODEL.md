@@ -32,7 +32,11 @@ policy.
 |---|---|
 | Path traversal through a name | Strict 1-32 character validated name type |
 | Partial creation | Same-filesystem temporary directory and atomic rename |
-| Abandoned internal state | Bounded doctor counts plus confirmed recovery under the store management lock |
+| Partial or redirected clone | Exclusive cooperative lease, descriptor-relative no-follow walk, private staging, fresh controls and atomic rename |
+| Clone leaks file inventory | Human and JSON results expose bounded aggregate classes and counts, never home paths or file content |
+| Clone silently duplicates credentials | Mutation requires exact source-name sensitive-state confirmation; preview and provenance declare the policy |
+| Manifest downgrade or field confusion | Permissive version probe followed by strict closed schema and version/layout/ID invariants |
+| Abandoned internal state | Bounded doctor counts; confirmed recovery retires entries under the management lock, then deletes outside it |
 | Wrong removal target | Manifest/name validation, exact confirmation, rename then delete |
 | Removal during a supervised entry | Shared lease held for the lifetime of the Quarters supervisor |
 | Activity lock denial | Read-only observation, management and supervisor acquisition have separate bounded deadlines and fail closed or report unknown as appropriate |
@@ -42,10 +46,14 @@ policy.
 | Symlinked or broadly accessible space anchors | No-follow type, ownership and private-mode validation for roots, homes, manifests and locks |
 | Damaged entry hides healthy siblings | Inspection reports each entry independently with machine-readable health |
 | Unsafe removal of damaged state | Removal requires the exact validated private root and activity lock, not a readable home or manifest |
+| Cleanup resource exhaustion | Iterative private cleanup refuses trees deeper than 256 levels or containing more than 131,072 descendant directories and leaves them recoverable for manual inspection |
 | Credential environment leakage | `env_clear()` plus safe allowlist; explicit values are redacted |
 | Profile override through explicit inheritance | `--inherit` rejects every Quarters-owned state variable |
+| Prompt-code injection | Prompt-expanded values come only from the validated ASCII name; roots and stored text never reach prompt expansion |
+| Startup integration resolves altered code | Generated rc files resolve `quarters` through the active space PATH; the space-local bin directory is user-writable and therefore inside the same-UID trust boundary |
+| Shortcut replacement or deletion | Protected PATH directory, non-overwriting symlink creation and removal only of links with the closed Quarters-launcher target shape |
 | Host Git helper reuse | Generated config clears inherited credential helpers |
-| Shared SSH agent | Per-space short `SSH_AUTH_SOCK`; host socket is not inherited |
+| Shared SSH agent | Host socket is not inherited; `SSH_AUTH_SOCK` remains unset until reviewed private-agent management exists |
 | Runtime socket collision | Mode-0700 short runtime directory per UID and space |
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
@@ -58,7 +66,7 @@ policy.
 | MCP request replay | Duplicate live IDs close the connection; legacy IDs are never reusable in-session |
 | Agent prompt injection from disk | Invalid entry names are bounded hex and detailed stored-entry errors are replaced on MCP surfaces |
 | Terminal or JSON presentation injection | Human and JSON stored text is escaped and bounded before emission |
-| Agent overreach | MCP has no exec, enter, host, inherit, home-view, root-selection or removal tool |
+| Agent overreach | MCP has no clone, exec, enter, host, inherit, home-view, root-selection or removal tool |
 | Remote attack surface | MCP transport is stdio-only; dependency gate rejects common HTTP/TLS server stacks |
 
 ## Explicit non-goals
@@ -71,6 +79,8 @@ policy.
 - discovering detached descendants or same-user servers after their Quarters supervisor exits
 - secure deletion from snapshots, backups or recovery media
 - crash-consistent live snapshot or export
+- treating a free cooperative lease as proof that detached clone writers are absent
+- treating workspace directories or a stable space ID as containment or authorization
 - remote MCP, OAuth, agent-triggered command execution or agent-triggered deletion
 
 ## Host and sudo escape
@@ -105,6 +115,19 @@ An operator-selected custom store root is trusted along with its ancestor
 directories; it must not be placed beneath a directory writable by another
 user. Quarters validates the selected root without claiming to secure or
 rewrite its ancestors.
+
+Clone copies arbitrary included state without interpreting or rewriting embedded
+absolute paths. Such paths can still read or mutate the source Quarter or host.
+Detached same-UID processes can change source files during a clone despite the
+exclusive cooperative lease. Descriptor identity checks reject replacements
+when any compared ownership, mode, topology, size or timestamp field changes.
+A same-type replacement can still pass if every field matches within the
+filesystem's timestamp granularity; held descriptors and no-follow opens still
+prevent path escape. Concurrent metadata changes before open abort the clone,
+but the portable copy is not a database-consistent snapshot. Skipped sockets,
+FIFOs, devices, foreign-owned entries and cache roots are reported by count.
+Timestamps, ACLs, xattrs, filesystem flags, special mode bits, sparse extents
+and hard-link topology are not preserved.
 
 MCP is not an authorization boundary against another process already running as
 the same account. A peer can invoke the same CLI or edit files it owns. The MCP

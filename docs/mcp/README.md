@@ -40,11 +40,14 @@ lifecycle request does.
 |---|---|---|
 | `quarters_status` | No | Bounded health and cooperative-lease observation for one or all spaces |
 | `quarters_doctor` | Conditional local preparation | Capability inventory; a named check prepares private runtime paths and validates the environment |
-| `quarters_create` | Yes | Atomically creates one private space using the captured default shell |
+| `quarters_create` | Yes | Atomically creates one private profile or expanded workspace using the captured default shell |
 
 Every parameter object rejects unknown fields. Space names use the core
 1–32-byte portable ASCII grammar. Tool output has a published JSON Schema and
 both structured and human-readable carriers.
+`quarters_create` accepts the optional closed `layout` value `profile` or
+`workspace`; omission means `profile`. Workspace creation returns its opaque
+stable ID. That ID is lifecycle metadata, not a credential or authority token.
 
 ## Resources
 
@@ -68,3 +71,5 @@ inspect status before retrying the same name.
 
 MCP cannot compensate for Quarters' baseline authority model: processes still
 run as the real account, and same-account malware can invoke the CLI directly.
+Clone remains a human CLI operation because it can duplicate arbitrary
+credential-bearing state; MCP exposes no clone source, destination or policy.

@@ -19,6 +19,7 @@ homepage = "https://github.com/Agenxy/quarters"
 clap = "=4.6.6"
 futures = "=0.3.34"
 fs4 = "=1.1.0"
+getrandom = "=0.4.3"
 jsonschema = { version = "=0.50.0", default-features = false }
 nix = "=0.31.3"
 proc-macro2 = "=1.0.107"

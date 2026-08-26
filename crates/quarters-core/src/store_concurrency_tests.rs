@@ -3,6 +3,7 @@
 #![allow(clippy::expect_used)]
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
@@ -107,5 +108,85 @@ fn concurrent_removals_report_one_success_and_one_absence() {
             .filter(|error| error.kind() == ErrorKind::NotFound)
             .count(),
         1
+    );
+}
+
+#[test]
+fn concurrent_recovery_tolerates_reclaiming_state() {
+    let (_temporary, store) = test_store();
+    store.recover().expect("initialize store");
+    for index in 0..16 {
+        let path = store.root.join(format!("spaces/.creating-stale-{index}"));
+        fs::create_dir(&path).expect("create stale entry");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).expect("protect stale entry");
+    }
+    let barrier = Arc::new(Barrier::new(3));
+    let handles = (0..2)
+        .map(|_| {
+            let store = store.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                store.recover()
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    for handle in handles {
+        handle.join().expect("recovery thread").expect("concurrent recovery");
+    }
+    assert_eq!(
+        store.recovery_summary().expect("inspect recovery"),
+        crate::RecoverySummary::default()
+    );
+}
+
+#[test]
+fn concurrent_same_destination_clones_publish_once_without_staging_leaks() {
+    let (_temporary, store) = test_store();
+    let source = store
+        .create(
+            SpaceName::parse("source").expect("valid name"),
+            PathBuf::from("/bin/sh"),
+        )
+        .expect("create source");
+    fs::write(source.home().join("payload"), vec![7_u8; 2 * 1_024 * 1_024]).expect("write payload");
+    let barrier = Arc::new(Barrier::new(3));
+    let handles = (0..2)
+        .map(|_| {
+            let store = store.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                store.clone_space(
+                    &SpaceName::parse("source").expect("valid source"),
+                    SpaceName::parse("copy").expect("valid destination"),
+                    false,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    let results = handles
+        .into_iter()
+        .map(|handle| handle.join().expect("clone thread"))
+        .collect::<Vec<_>>();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert!(
+        results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|error| { matches!(error.kind(), ErrorKind::AlreadyExists | ErrorKind::SpaceActive) })
+    );
+    assert!(
+        store
+            .open(&SpaceName::parse("copy").expect("valid destination"))
+            .is_ok()
+    );
+    let entries = fs::read_dir(store.root.join("spaces")).expect("read spaces");
+    assert!(
+        entries
+            .filter_map(std::result::Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().starts_with(".creating-"))
     );
 }

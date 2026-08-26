@@ -1,7 +1,8 @@
 //! Command dispatch.
 
 use crate::cli::{
-    Cli, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ProfileArgs, RecoverArgs, RemoveArgs, StatusArgs,
+    Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ProfileArgs, RecoverArgs, RemoveArgs,
+    StatusArgs,
 };
 use crate::{output, process};
 use quarters_core::{
@@ -11,6 +12,16 @@ use std::path::PathBuf;
 
 pub(crate) fn run(cli: Cli) -> Result<i32> {
     home_view_management_guard(&cli.command)?;
+    if let Command::ShellInit(arguments) = &cli.command {
+        passthrough_json_guard(cli.json)?;
+        print!("{}", crate::shell_init::script(arguments.shell));
+        return Ok(0);
+    }
+    if let Command::Shortcut(arguments) = &cli.command {
+        let (action, report) = crate::shortcut::run(arguments)?;
+        output::print_shortcut(action, &report, cli.json)?;
+        return Ok(0);
+    }
     let store = match cli.root {
         Some(root) => Store::new(root)?,
         None => Store::from_environment()?,
@@ -18,6 +29,7 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
     let host = HostEnvironment::capture();
     match cli.command {
         Command::Create(arguments) => create(&store, &host, arguments, cli.json),
+        Command::Clone(arguments) => clone_space(&store, &arguments, cli.json),
         Command::List => list(&store, cli.json),
         Command::Status(arguments) => status(&store, &arguments, cli.json),
         Command::Current => current(&store, cli.json),
@@ -30,6 +42,7 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         Command::Doctor(arguments) => doctor(&store, &host, &arguments, cli.json),
         Command::Rm(arguments) => remove(&store, &arguments, cli.json),
         Command::Recover(arguments) => recover(&store, &arguments, cli.json),
+        Command::ShellInit(_) | Command::Shortcut(_) => Ok(0),
         Command::Mcp => {
             passthrough_json_guard(cli.json)?;
             quarters_mcp::serve_stdio(store, host)?;
@@ -45,8 +58,29 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
 fn create(store: &Store, host: &HostEnvironment, arguments: CreateArgs, json: bool) -> Result<i32> {
     let name = SpaceName::parse(arguments.name)?;
     let shell = arguments.shell.unwrap_or_else(|| default_shell(host));
-    let space = store.create(name, shell)?;
+    let space = store.create_with_layout(name, shell, arguments.layout.into())?;
     output::print_created(&space, json)?;
+    Ok(0)
+}
+
+fn clone_space(store: &Store, arguments: &CloneArgs, json: bool) -> Result<i32> {
+    let source = SpaceName::parse(arguments.source.clone())?;
+    let destination = SpaceName::parse(arguments.destination.clone())?;
+    let report = if arguments.preview {
+        store.clone_plan(&source, &destination, arguments.include_cache)?
+    } else {
+        if arguments.confirm_sensitive_state.as_deref() != Some(source.as_str()) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm-sensitive-state must exactly repeat the source space name",
+            )
+            .with_hint(format!(
+                "run 'quarters clone {source} {destination} --preview', then execute with '--confirm-sensitive-state {source}'"
+            )));
+        }
+        store.clone_space(&source, destination, arguments.include_cache)?
+    };
+    output::print_clone(&report, json)?;
     Ok(0)
 }
 
@@ -90,7 +124,7 @@ fn status(store: &Store, arguments: &StatusArgs, json: bool) -> Result<i32> {
         })
         .collect::<Result<Vec<_>>>()?;
     let current = validated_current_space(store);
-    output::print_status(&statuses, current.as_deref(), json)?;
+    output::print_status(&statuses, current.as_deref(), &crate::shortcut::default_reports(), json)?;
     Ok(0)
 }
 
@@ -139,6 +173,7 @@ fn doctor(store: &Store, host: &HostEnvironment, arguments: &DoctorArgs, json: b
     output::print_doctor(
         &quarters_core::platform::capabilities(),
         &quarters_core::tool_probes(),
+        &crate::shortcut::default_reports(),
         space.as_ref(),
         lease_state,
         recovery.as_ref(),
@@ -227,7 +262,7 @@ fn home_view_management_guard(command: &Command) -> Result<()> {
     }
     if matches!(
         command,
-        Command::Current | Command::LinuxLaunch(_) | Command::Doctor(DoctorArgs { name: None })
+        Command::Current | Command::ShellInit(_) | Command::LinuxLaunch(_) | Command::Doctor(DoctorArgs { name: None })
     ) {
         return Ok(());
     }

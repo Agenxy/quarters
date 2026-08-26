@@ -85,6 +85,32 @@ pub(crate) fn lock_shared_bounded(file: &File, path: &Path) -> Result<()> {
     lock_bounded(file, path, LockMode::Shared, ACTIVE_LOCK_TIMEOUT, "space activity")
 }
 
+pub(crate) fn lock_exclusive_bounded_for_lifecycle(file: &File, path: &Path, name: &str) -> Result<()> {
+    let deadline = Instant::now() + ACTIVE_LOCK_TIMEOUT;
+    let mut attempt = 0_u32;
+    loop {
+        match try_lock(file, LockMode::Exclusive) {
+            Ok(()) => return Ok(()),
+            Err(fs4::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                thread::sleep(retry_delay(attempt));
+                attempt = attempt.saturating_add(1);
+            }
+            Err(fs4::TryLockError::WouldBlock) => {
+                return Err(QuartersError::new(
+                    ErrorKind::SpaceActive,
+                    format!("space '{name}' has a held cooperative lease"),
+                )
+                .with_hint(format!(
+                    "run 'quarters status {name}', exit supervised and detached processes, then retry"
+                )));
+            }
+            Err(fs4::TryLockError::Error(error)) => {
+                return Err(QuartersError::io("lock space for lifecycle operation", path, error));
+            }
+        }
+    }
+}
+
 fn lock_bounded(file: &File, path: &Path, mode: LockMode, timeout: Duration, label: &str) -> Result<()> {
     let deadline = Instant::now() + timeout;
     let mut attempt = 0_u32;

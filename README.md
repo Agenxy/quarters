@@ -1,4 +1,4 @@
-<img src="docs/icon.svg" width="72" height="72" alt="">
+<img src="https://raw.githubusercontent.com/Agenxy/quarters/main/docs/icon.svg" width="72" height="72" alt="">
 
 # Quarters
 
@@ -31,6 +31,10 @@ native process tree with a strict environment allowlist, redirects common
 user-state locations, isolates shell history and runtime sockets, and preserves
 the host UID, GID and permissions.
 
+The development line also provides previewed, bounded cloning for inactive
+spaces. It copies persistent state through a portable native transaction and
+reports every exclusion and preservation limit described below.
+
 Linux uses the same baseline. An experimental `--home-view` can additionally
 bind the space home over the real passwd home inside an unprivileged user and
 mount namespace. It is opt-in because distro policy can disable user
@@ -48,6 +52,9 @@ Cargo to build locally if host policy rejects them.
 ```sh
 cargo build --release
 target/release/quarters create work
+target/release/quarters create studio --layout workspace
+target/release/quarters clone studio experiment --preview
+target/release/quarters clone studio experiment --confirm-sensitive-state studio
 target/release/quarters exec work -- env
 target/release/quarters enter work
 ```
@@ -80,7 +87,9 @@ install path.
 
 | Command | Purpose |
 |---|---|
-| `create NAME` | Atomically create a private persistent space |
+| `create NAME [--layout profile\|workspace]` | Atomically create a minimal profile or expanded workspace |
+| `clone SOURCE DESTINATION --preview` | Validate and summarize a bounded clone without mutation |
+| `clone SOURCE DESTINATION --confirm-sensitive-state SOURCE` | Copy included persistent state into a new independent space |
 | `list` | List healthy and unhealthy space entries without hiding siblings |
 | `status [NAME]` | Observe whether Quarters' cooperative lease is free or held |
 | `current` | Print the current space or `host` |
@@ -90,7 +99,9 @@ install path.
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
 | `doctor [NAME]` | Inspect platform/tools; named form prepares and validates the baseline environment |
 | `rm NAME --confirm NAME` | Remove a space after exact-name confirmation and an inactive supervisor lease |
-| `recover --confirm stale-state` | Reclaim validated internal state left by an interrupted create or remove |
+| `recover --confirm stale-state` | Reclaim validated internal state left by an interrupted lifecycle operation |
+| `shell-init zsh\|bash` | Print composable prompt integration without editing shell files |
+| `shortcut status\|install\|remove [NAME]` | Inspect or manage a collision-safe short command; `qts` is recommended |
 | `mcp` | Serve the bounded local MCP adapter over standard input/output |
 
 Management and inspection commands accept `--json`. Pass-through commands do
@@ -123,10 +134,31 @@ accepts one literal visible directory-entry name while rejecting empty names
 and path separators. Dot-prefixed entries are internal recovery state and are
 never removal targets. A losing concurrent creation is cleaned automatically.
 `doctor` reports any interrupted creation or retirement residue by count;
-`recover --confirm stale-state` removes only those reserved, private-directory
-prefixes while holding the same bounded management lock as creation/removal.
+`recover --confirm stale-state` retires only those reserved, private-directory
+prefixes while holding the bounded management lock, then performs potentially
+large deletion after releasing it.
+Cleanup is iterative and fails closed beyond 256 directory levels or 131,072
+descendant directories. Such a retired tree is retained for exact-path manual
+inspection; Quarters does not partially guess at deletion. On Linux, restoring
+mode-`000` directories requires working no-follow `fchmodat` support, which may
+depend on `/proc` on older libc/kernel combinations.
 If recovery metadata is corrupt, `doctor` keeps reporting platform and tool
 capabilities while marking only recovery inspection unavailable.
+
+New space startup files compose a cyan `[q:NAME]` marker with the existing zsh
+or bash prompt when `quarters` resolves on `PATH`. Existing spaces are never
+rewritten; opt in from their `.zshrc` or `.bashrc` with the corresponding
+`eval "$(quarters shell-init zsh)"` or `eval "$(quarters shell-init bash)"`
+line. The marker is context, not proof of confinement.
+
+After installing `quarters` on the host PATH, `quarters shortcut install qts`
+can add the recommended shorthand to an existing, protected `~/.local/bin`
+that is already on PATH. It never replaces an entry. Use
+`quarters shortcut status qts` plus the printed `type -a qts` check before and
+after mutation; a child process cannot inspect aliases or functions in its
+parent shell. Status distinguishes `managed`, `relocated` and `stale` links;
+remove accepts only those closed Quarters-launcher shapes. `q` is available
+only when requested explicitly.
 
 ## MCP for local agents
 
@@ -147,9 +179,9 @@ network listener.
 ```
 
 The deliberately small tool surface is `quarters_status`, `quarters_doctor`
-and `quarters_create`. There is no MCP tool for entering a shell, executing a
-command, inheriting environment variables, selecting an arbitrary root or
-removing data. Agents can read `quarters://help`, `quarters://security` and the
+and `quarters_create`. There is no MCP tool for cloning, entering a shell,
+executing a command, inheriting environment variables, selecting an arbitrary
+root or removing data. Agents can read `quarters://help`, `quarters://security` and the
 private, short-lived `quarters://status` resource. Read the security resource
 before permitting mutations.
 
@@ -171,7 +203,8 @@ Quarters configures:
 - GitHub CLI, GnuPG, tmux, Cargo, npm and uv state locations
 - Codex, Claude Code and OpenCode config locations where those tools honor
   their documented or established environment contracts
-- an isolated `SSH_AUTH_SOCK` path
+- no inherited SSH-agent socket; `SSH_AUTH_SOCK` stays unset until reviewed
+  private-agent management exists
 - `CFFIXED_USER_HOME` on macOS as a best-effort CoreFoundation compatibility
   enhancement
 
@@ -180,6 +213,14 @@ pass any additional variable deliberately. Quarters never prints its value.
 Profile-owned variables such as `HOME`, `PATH`, `SSH_AUTH_SOCK`, XDG paths and
 `QUARTERS_*` cannot be inherited because Quarters computes them after the
 allowlist boundary.
+
+`--layout profile` is the schema-1 default and creates only the shell and CLI
+state surface. `--layout workspace` uses schema 2, assigns a random stable
+space ID and also creates private `Desktop`, `Documents`, `Downloads`, media,
+public and template directories. On macOS it adds conventional `Applications`
+and `Library` subdirectories. These are state-location conventions backed by
+HOME/XDG and platform adapters, not containment; applications may still use
+passwd-home, Keychain, TCC, app containers or absolute host paths.
 
 A custom `--root` is an operator-selected trust anchor. Put it beneath a
 directory that is owned by the current user and not writable by another user;
@@ -203,13 +244,38 @@ that were never inherited. It keeps the current working directory; use an
 explicit executable path if command lookup must not depend on the active
 space's launch context.
 
-## Why copy commands are not in this alpha
+## Clone scope and limits
 
-The product model includes clone, template and export workflows. Copying a live
-home can capture SQLite WALs, Unix sockets, agent state and partial writes, so
-this alpha does not expose a command that looks safe but is not. The intended
-transaction and quiescence contract is recorded in
-[the architecture](docs/architecture/ARCHITECTURE.md).
+`clone` creates a writable independent Quarter through the shared lifecycle
+transaction. Preview it first:
+
+```sh
+quarters clone work experiment --preview
+quarters clone work experiment --confirm-sensitive-state work
+```
+
+The exact-name confirmation is required because arbitrary included files may
+contain credentials, histories, tokens and private agent state. Derived cache
+roots are recreated empty unless `--include-cache` is selected. Runtime sockets,
+FIFOs, devices and foreign-owned entries are skipped and counted. Safe relative
+symlinks are preserved; absolute or lexically escaping links fail closed.
+Hard-linked files become independent files. Quarters counts preserved links
+into omitted cache roots; links into omitted sockets, FIFOs, devices or
+foreign-owned entries may also dangle and are not separately counted.
+Cache-root matching uses the documented home-relative spelling byte for byte;
+Quarters does not guess at filesystem-specific case or Unicode aliases.
+
+The portable backend preserves bytes and ordinary Unix permission bits. It
+reports timestamps, ACLs, extended attributes, filesystem flags, set-ID/sticky
+bits, sparse layout and hard-link relationships as not preserved. Embedded
+absolute paths are not rewritten and may still select source state.
+
+Clone holds Quarters' cooperative source lease exclusively, stages on the same
+filesystem and publishes with one rename. A free lease cannot discover detached
+writers, so clone is not a crash-consistent live snapshot. It does not add a
+security boundary: both spaces remain owned and reachable by the same host
+account. Template, snapshot, freeze, export and rollback remain unavailable
+until their additional consistency and recovery gates pass.
 
 ## Documentation
 
@@ -217,6 +283,11 @@ transaction and quiescence contract is recorded in
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Platform decision](docs/architecture/ADR-0001-PORTABLE-PROFILE-CORE.md)
 - [Agent-native MCP decision](docs/architecture/ADR-0002-AGENT-NATIVE-MCP.md)
+- [Lifecycle copy transaction](docs/architecture/ADR-0003-LIFECYCLE-COPY-TRANSACTION.md)
+- [Host inheritance and fork policy](docs/architecture/ADR-0004-INHERITANCE-AND-HOST-FORK.md)
+- [Private agent lifecycle](docs/architecture/ADR-0005-PRIVATE-AGENT-LIFECYCLE.md)
+- [Storage migration and runtime identity](docs/architecture/ADR-0006-STORAGE-MIGRATION-AND-RUNTIME-IDENTITY.md)
+- [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
 - [MCP guide](docs/mcp/README.md)
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Compatibility matrix](docs/compatibility/MATRIX.md)

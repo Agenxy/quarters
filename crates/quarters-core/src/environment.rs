@@ -156,6 +156,8 @@ pub fn host_command_environment() -> BTreeMap<OsString, Option<OsString>> {
         "QUARTERS_HOST_TMPDIR",
         "QUARTERS_HOST_XDG_RUNTIME_DIR",
         "QUARTERS_NO_HOST_ESCAPE",
+        "QUARTERS_PROMPT_NAME",
+        "QUARTERS_PROMPT_PREFIX",
         "QUARTERS_ROOT",
         "QUARTERS_SPACE",
         "QUARTERS_SPACE_HOME",
@@ -207,8 +209,15 @@ fn insert_profile_values(
     );
     values.insert("UV_TOOL_DIR".into(), local.join("share/uv/tools").into_os_string());
     values.insert("TMUX_TMPDIR".into(), runtime.join("tmux").into_os_string());
-    values.insert("SSH_AUTH_SOCK".into(), runtime.join("ssh-agent.sock").into_os_string());
     values.insert("QUARTERS_SPACE".into(), OsString::from(space.manifest().name.as_str()));
+    values.insert(
+        "QUARTERS_PROMPT_NAME".into(),
+        OsString::from(space.manifest().name.as_str()),
+    );
+    values.insert(
+        "QUARTERS_PROMPT_PREFIX".into(),
+        OsString::from(format!("[q:{}] ", space.manifest().name)),
+    );
     values.insert("QUARTERS_SPACE_ROOT".into(), space.root().as_os_str().to_owned());
     values.insert("QUARTERS_SPACE_HOME".into(), space.home().into_os_string());
     values.insert("QUARTERS_ROOT".into(), store_root(space).into_os_string());
