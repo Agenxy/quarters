@@ -1,13 +1,16 @@
 //! Command dispatch.
 
 use crate::cli::{
-    Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ProfileArgs, RecoverArgs, RemoveArgs,
-    StatusArgs,
+    ArtifactCreateArgs, ArtifactRemoveArgs, ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DoctorArgs,
+    EnterArgs, ExecArgs, ProfileArgs, RecoverArgs, RemoveArgs, RollbackArgs, SnapshotCommand, SnapshotCreateArgs,
+    SnapshotListArgs, StatusArgs, TemplateCommand, TemplateUseArgs,
 };
 use crate::{output, process};
 use quarters_core::{
-    EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, Result, Space, SpaceInspection, SpaceName, Store,
+    ArtifactInspection, ArtifactKind, ArtifactName, ArtifactOrigin, EnvironmentPlan, ErrorKind, HostEnvironment,
+    QuartersError, Result, SourceStatus, Space, SpaceInspection, SpaceName, Store,
 };
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 pub(crate) fn run(cli: Cli) -> Result<i32> {
@@ -30,6 +33,9 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
     match cli.command {
         Command::Create(arguments) => create(&store, &host, arguments, cli.json),
         Command::Clone(arguments) => clone_space(&store, &arguments, cli.json),
+        Command::Template(arguments) => template(&store, arguments.command, cli.json),
+        Command::Snapshot(arguments) => snapshot(&store, arguments.command, cli.json),
+        Command::Rollback(arguments) => rollback(&store, &arguments, cli.json),
         Command::List => list(&store, cli.json),
         Command::Status(arguments) => status(&store, &arguments, cli.json),
         Command::Current => current(&store, cli.json),
@@ -53,6 +59,173 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
             process::linux_launch(&arguments.space_home, &arguments.host_home, &arguments.command)
         }
     }
+}
+
+fn rollback(store: &Store, arguments: &RollbackArgs, json: bool) -> Result<i32> {
+    let target = SpaceName::parse(arguments.target.clone())?;
+    let snapshot = ArtifactName::parse(arguments.snapshot.clone())?;
+    let recovery = ArtifactName::parse(arguments.recovery_name.clone())?;
+    let include_cache = !arguments.exclude_recovery_cache;
+    let report = if arguments.preview {
+        store.rollback_plan(&target, &snapshot, &recovery, include_cache)?
+    } else {
+        if arguments.confirm_space.as_deref() != Some(target.as_str())
+            || arguments.confirm_replace_state.as_deref() != Some(target.as_str())
+        {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm-space and --confirm-replace-state must each exactly repeat the target space name",
+            ));
+        }
+        store.rollback_space(&target, &snapshot, &recovery, include_cache)?
+    };
+    output::print_rollback(&report, json)?;
+    Ok(0)
+}
+
+fn template(store: &Store, command: TemplateCommand, json: bool) -> Result<i32> {
+    match command {
+        TemplateCommand::Create(arguments) => create_artifact(store, ArtifactKind::Template, &arguments, json),
+        TemplateCommand::List => list_artifacts(store, ArtifactKind::Template, None, json),
+        TemplateCommand::Show(arguments) => show_artifact(store, ArtifactKind::Template, &arguments.name, json),
+        TemplateCommand::Use(arguments) => use_template(store, &arguments, json),
+        TemplateCommand::Rename(arguments) => rename_artifact(store, ArtifactKind::Template, &arguments, json),
+        TemplateCommand::Rm(arguments) => remove_artifact(store, ArtifactKind::Template, &arguments, json),
+    }
+}
+
+fn snapshot(store: &Store, command: SnapshotCommand, json: bool) -> Result<i32> {
+    match command {
+        SnapshotCommand::Create(arguments) => create_snapshot(store, &arguments, json),
+        SnapshotCommand::List(arguments) => list_snapshots(store, &arguments, json),
+        SnapshotCommand::Show(arguments) => show_artifact(store, ArtifactKind::Snapshot, &arguments.name, json),
+        SnapshotCommand::Verify(arguments) => {
+            let name = ArtifactName::parse(arguments.name)?;
+            let artifact = store.verify_artifact(ArtifactKind::Snapshot, &name)?;
+            output::print_artifact_verified(&artifact, json)?;
+            Ok(0)
+        }
+        SnapshotCommand::Rename(arguments) => rename_artifact(store, ArtifactKind::Snapshot, &arguments, json),
+        SnapshotCommand::Rm(arguments) => remove_artifact(store, ArtifactKind::Snapshot, &arguments, json),
+    }
+}
+
+fn create_artifact(store: &Store, kind: ArtifactKind, arguments: &ArtifactCreateArgs, json: bool) -> Result<i32> {
+    let source = SpaceName::parse(arguments.source.clone())?;
+    let name = ArtifactName::parse(arguments.name.clone())?;
+    let report = if arguments.preview {
+        store.artifact_plan(kind, &source, &name, arguments.include_cache)?
+    } else {
+        require_sensitive_confirmation(arguments.confirm_sensitive_state.as_deref(), &source)?;
+        store.create_artifact(kind, &source, name, arguments.include_cache, ArtifactOrigin::User)?
+    };
+    output::print_artifact_report(&report, json)?;
+    Ok(0)
+}
+
+fn create_snapshot(store: &Store, arguments: &SnapshotCreateArgs, json: bool) -> Result<i32> {
+    let source = SpaceName::parse(arguments.source.clone())?;
+    let name = ArtifactName::parse(arguments.name.clone())?;
+    let include_cache = !arguments.exclude_cache;
+    let report = if arguments.preview {
+        store.artifact_plan(ArtifactKind::Snapshot, &source, &name, include_cache)?
+    } else {
+        require_sensitive_confirmation(arguments.confirm_sensitive_state.as_deref(), &source)?;
+        store.create_artifact(
+            ArtifactKind::Snapshot,
+            &source,
+            name,
+            include_cache,
+            ArtifactOrigin::User,
+        )?
+    };
+    output::print_artifact_report(&report, json)?;
+    Ok(0)
+}
+
+fn use_template(store: &Store, arguments: &TemplateUseArgs, json: bool) -> Result<i32> {
+    let name = ArtifactName::parse(arguments.name.clone())?;
+    let destination = SpaceName::parse(arguments.destination.clone())?;
+    let report = if arguments.preview {
+        store.template_use_plan(&name, &destination, arguments.shell.clone())?
+    } else {
+        if arguments.confirm_sensitive_state.as_deref() != Some(name.as_str()) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm-sensitive-state must exactly repeat the template name",
+            ));
+        }
+        store.use_template(&name, &destination, arguments.shell.clone())?
+    };
+    output::print_template_use(&report, json)?;
+    Ok(0)
+}
+
+fn list_snapshots(store: &Store, arguments: &SnapshotListArgs, json: bool) -> Result<i32> {
+    let source = arguments
+        .source
+        .as_deref()
+        .map(|value| store.open(&SpaceName::parse(value.to_owned())?))
+        .transpose()?;
+    list_artifacts(store, ArtifactKind::Snapshot, source.as_ref(), json)
+}
+
+fn list_artifacts(store: &Store, kind: ArtifactKind, source: Option<&Space>, json: bool) -> Result<i32> {
+    let inspections = store
+        .inspect_artifacts(kind)?
+        .into_iter()
+        .filter(|inspection| match (source, inspection) {
+            (Some(source), ArtifactInspection::Healthy { artifact, .. }) => {
+                artifact.manifest().source_identity.matches(source)
+            }
+            (Some(_), ArtifactInspection::Unhealthy { .. }) => false,
+            (None, _) => true,
+        })
+        .collect::<Vec<_>>();
+    output::print_artifact_list(kind, &inspections, json)?;
+    Ok(0)
+}
+
+fn show_artifact(store: &Store, kind: ArtifactKind, raw_name: &str, json: bool) -> Result<i32> {
+    let name = ArtifactName::parse(raw_name.to_owned())?;
+    let artifact = store.open_artifact(kind, &name)?;
+    let source_status = match store.open(&artifact.manifest().source_identity.name) {
+        Ok(space) if artifact.manifest().source_identity.matches(&space) => SourceStatus::Present,
+        Ok(_) | Err(_) => SourceStatus::Orphaned,
+    };
+    output::print_artifact(&artifact, source_status, json)?;
+    Ok(0)
+}
+
+fn rename_artifact(store: &Store, kind: ArtifactKind, arguments: &ArtifactRenameArgs, json: bool) -> Result<i32> {
+    let previous = ArtifactName::parse(arguments.previous.clone())?;
+    let name = ArtifactName::parse(arguments.name.clone())?;
+    let report = store.rename_artifact(kind, &previous, &name)?;
+    output::print_artifact_mutation(&report, json)?;
+    Ok(0)
+}
+
+fn remove_artifact(store: &Store, kind: ArtifactKind, arguments: &ArtifactRemoveArgs, json: bool) -> Result<i32> {
+    let name = ArtifactName::parse(arguments.name.clone())?;
+    if arguments.confirm != arguments.name {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--confirm must exactly repeat the artifact name",
+        ));
+    }
+    let report = store.remove_artifact(kind, &name)?;
+    output::print_artifact_mutation(&report, json)?;
+    Ok(0)
+}
+
+fn require_sensitive_confirmation(confirmation: Option<&str>, source: &SpaceName) -> Result<()> {
+    if confirmation == Some(source.as_str()) {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::InvalidInput,
+        "--confirm-sensitive-state must exactly repeat the source space name",
+    ))
 }
 
 fn create(store: &Store, host: &HostEnvironment, arguments: CreateArgs, json: bool) -> Result<i32> {
@@ -85,11 +258,13 @@ fn clone_space(store: &Store, arguments: &CloneArgs, json: bool) -> Result<i32> 
 }
 
 fn list(store: &Store, json: bool) -> Result<i32> {
-    output::print_list(&store.inspect()?, json)?;
+    let rollbacks = store.rollback_inventory()?;
+    output::print_list(&store.inspect()?, &rollbacks.observations, &rollbacks.issues, json)?;
     Ok(0)
 }
 
 fn status(store: &Store, arguments: &StatusArgs, json: bool) -> Result<i32> {
+    let unfiltered = arguments.name.is_none();
     let inspections = arguments.name.as_deref().map_or_else(
         || store.inspect(),
         |name| {
@@ -105,7 +280,7 @@ fn status(store: &Store, arguments: &StatusArgs, json: bool) -> Result<i32> {
         })
         .collect::<Vec<_>>();
     let mut lease_states = store.lease_states(&healthy_spaces)?.into_iter();
-    let statuses = inspections
+    let mut statuses = inspections
         .into_iter()
         .map(|inspection| match inspection {
             SpaceInspection::Healthy(space) => lease_states
@@ -123,6 +298,38 @@ fn status(store: &Store, arguments: &StatusArgs, json: bool) -> Result<i32> {
             }),
         })
         .collect::<Result<Vec<_>>>()?;
+    if unfiltered {
+        let rollback_inventory = store.rollback_inventory()?;
+        let rollbacks = rollback_inventory.observations;
+        let rollback_issues = rollback_inventory.issues;
+        statuses.retain(|status| {
+            !rollbacks
+                .iter()
+                .any(|rollback| rollback.target.as_str() == status.name())
+                && !rollback_issues.iter().any(|issue| {
+                    issue
+                        .target
+                        .as_ref()
+                        .is_some_and(|target| target.as_str() == status.name())
+                })
+        });
+        let mut represented_issue_targets = rollbacks
+            .iter()
+            .map(|rollback| rollback.target.clone())
+            .collect::<BTreeSet<_>>();
+        statuses.extend(
+            rollbacks
+                .into_iter()
+                .map(|observation| output::StatusEntry::Rollback { observation }),
+        );
+        statuses.extend(rollback_issues.into_iter().filter_map(|issue| {
+            let target = issue.target.as_ref()?;
+            represented_issue_targets
+                .insert(target.clone())
+                .then_some(output::StatusEntry::RollbackIssue { issue })
+        }));
+        statuses.sort_by(|left, right| left.name().cmp(right.name()));
+    }
     let current = validated_current_space(store);
     output::print_status(&statuses, current.as_deref(), &crate::shortcut::default_reports(), json)?;
     Ok(0)
@@ -190,9 +397,32 @@ fn remove(store: &Store, arguments: &RemoveArgs, json: bool) -> Result<i32> {
             ),
         );
     }
+    let surviving = SpaceName::parse(arguments.name.clone())
+        .ok()
+        .and_then(|name| store.open(&name).ok())
+        .and_then(|space| {
+            Some((
+                surviving_artifacts(store, ArtifactKind::Template, &space).ok()?,
+                surviving_artifacts(store, ArtifactKind::Snapshot, &space).ok()?,
+            ))
+        });
     store.remove(&arguments.name)?;
-    output::print_removed(&arguments.name, json)?;
+    output::print_removed(&arguments.name, surviving, json)?;
     Ok(0)
+}
+
+fn surviving_artifacts(store: &Store, kind: ArtifactKind, space: &Space) -> Result<usize> {
+    Ok(store
+        .inspect_artifacts(kind)?
+        .into_iter()
+        .filter(|inspection| {
+            matches!(
+                inspection,
+                ArtifactInspection::Healthy { artifact, .. }
+                    if artifact.manifest().source_identity.matches(space)
+            )
+        })
+        .count())
 }
 
 fn recover(store: &Store, arguments: &RecoverArgs, json: bool) -> Result<i32> {

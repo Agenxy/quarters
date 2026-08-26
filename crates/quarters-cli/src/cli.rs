@@ -26,6 +26,12 @@ pub(crate) enum Command {
     Create(CreateArgs),
     /// Clone persistent state into a new independent space.
     Clone(CloneArgs),
+    /// Create and manage reusable named creation sources.
+    Template(TemplateArgs),
+    /// Create and manage named recovery points.
+    Snapshot(SnapshotArgs),
+    /// Replace a Quarter from a snapshot after capturing recovery.
+    Rollback(RollbackArgs),
     /// List each space entry, its health and its stored home.
     List,
     /// Report current and cooperative lease state for spaces.
@@ -90,6 +96,154 @@ pub(crate) struct CloneArgs {
     /// Copy derived cache contents instead of recreating cache roots empty.
     #[arg(long)]
     pub(crate) include_cache: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TemplateArgs {
+    #[command(subcommand)]
+    pub(crate) command: TemplateCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum TemplateCommand {
+    /// Capture a named creation source from an inactive Quarter.
+    Create(ArtifactCreateArgs),
+    /// List named templates and source status.
+    List,
+    /// Show one template and its integrity metadata.
+    Show(ArtifactNameArgs),
+    /// Create a fresh Quarter from a verified template.
+    Use(TemplateUseArgs),
+    /// Change a template's display name without moving content.
+    Rename(ArtifactRenameArgs),
+    /// Remove one whole template after exact-name confirmation.
+    Rm(ArtifactRemoveArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SnapshotArgs {
+    #[command(subcommand)]
+    pub(crate) command: SnapshotCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SnapshotCommand {
+    /// Capture a named recovery point from an inactive Quarter.
+    Create(SnapshotCreateArgs),
+    /// List snapshots, optionally for one exact current source identity.
+    List(SnapshotListArgs),
+    /// Show one snapshot and its integrity metadata.
+    Show(ArtifactNameArgs),
+    /// Recompute and compare one snapshot's canonical digest.
+    Verify(ArtifactNameArgs),
+    /// Change a snapshot's display name without moving content.
+    Rename(ArtifactRenameArgs),
+    /// Remove one whole snapshot after exact-name confirmation.
+    Rm(ArtifactRemoveArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ArtifactCreateArgs {
+    /// New artifact display name.
+    pub(crate) name: String,
+    /// Existing source Quarter.
+    #[arg(long = "from", value_name = "SPACE")]
+    pub(crate) source: String,
+    /// Validate and summarize without creating an artifact.
+    #[arg(long, conflicts_with = "confirm_sensitive_state")]
+    pub(crate) preview: bool,
+    /// Exactly repeat SPACE to acknowledge captured state may contain credentials.
+    #[arg(long, value_name = "SPACE")]
+    pub(crate) confirm_sensitive_state: Option<String>,
+    /// Include derived cache contents.
+    #[arg(long)]
+    pub(crate) include_cache: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SnapshotCreateArgs {
+    /// Existing source Quarter.
+    pub(crate) source: String,
+    /// New snapshot display name.
+    pub(crate) name: String,
+    /// Validate and summarize without creating a snapshot.
+    #[arg(long, conflicts_with = "confirm_sensitive_state")]
+    pub(crate) preview: bool,
+    /// Exactly repeat SPACE to acknowledge captured state may contain credentials.
+    #[arg(long, value_name = "SPACE")]
+    pub(crate) confirm_sensitive_state: Option<String>,
+    /// Omit derived cache contents from this recovery point.
+    #[arg(long)]
+    pub(crate) exclude_cache: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SnapshotListArgs {
+    /// Filter to the exact current identity of this Quarter.
+    pub(crate) source: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ArtifactNameArgs {
+    /// Artifact display name.
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TemplateUseArgs {
+    /// Template display name.
+    pub(crate) name: String,
+    /// New destination Quarter.
+    pub(crate) destination: String,
+    /// Validate and summarize without creating the destination.
+    #[arg(long, conflicts_with = "confirm_sensitive_state")]
+    pub(crate) preview: bool,
+    /// Exactly repeat TEMPLATE to acknowledge it may contain credentials.
+    #[arg(long, value_name = "TEMPLATE")]
+    pub(crate) confirm_sensitive_state: Option<String>,
+    /// Override the captured default shell.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) shell: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ArtifactRenameArgs {
+    /// Existing display name.
+    pub(crate) previous: String,
+    /// New display name.
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ArtifactRemoveArgs {
+    /// Artifact display name.
+    pub(crate) name: String,
+    /// Must exactly repeat NAME.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RollbackArgs {
+    /// Target Quarter whose identity will be retained.
+    pub(crate) target: String,
+    /// Snapshot display name to restore.
+    pub(crate) snapshot: String,
+    /// Name for the automatic pre-rollback recovery snapshot.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) recovery_name: String,
+    /// Validate all sources and bounds without creating or replacing state.
+    #[arg(long, conflicts_with_all = ["confirm_space", "confirm_replace_state"])]
+    pub(crate) preview: bool,
+    /// Exactly repeat SPACE to confirm the target.
+    #[arg(long, value_name = "SPACE")]
+    pub(crate) confirm_space: Option<String>,
+    /// Exactly repeat SPACE to acknowledge complete home replacement.
+    #[arg(long, value_name = "SPACE")]
+    pub(crate) confirm_replace_state: Option<String>,
+    /// Omit derived caches from the automatic recovery snapshot.
+    #[arg(long)]
+    pub(crate) exclude_recovery_cache: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

@@ -61,9 +61,11 @@ family receives no cache extensions.
 ## Deliberate limits
 
 The one-MiB frame ceiling, 32 response-lifetime request slots, 8,192 legacy-ID
-budget, 128-entry status ceiling and two blocking filesystem workers are
-security boundaries against accidental or hostile local peers. Exceeding them
-returns a bounded error or closes a protocol-abusing connection.
+budget, 128-entry combined status ceiling and two blocking filesystem workers
+are security boundaries against accidental or hostile local peers. The status
+ceiling counts both space rows and retained rollback-issue records after they
+are merged. Exceeding a boundary returns a bounded error or closes a
+protocol-abusing connection.
 
 Cancellation suppresses the response but does not abort a blocking filesystem
 transaction. In particular, a cancelled create may still complete atomically;

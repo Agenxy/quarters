@@ -11,7 +11,8 @@ use crate::{
     WORKSPACE_SCHEMA_VERSION,
 };
 use fs4::FileExt;
-use std::fs::{self, File};
+use std::fs::{self, DirBuilder, File};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 impl Store {
@@ -35,6 +36,7 @@ impl Store {
     pub fn create_with_layout(&self, name: SpaceName, default_shell: PathBuf, layout: SpaceLayout) -> Result<Space> {
         self.ensure_layout()?;
         validate_shell(&default_shell)?;
+        self.ensure_no_rollback_target(&name)?;
         let destination = self.space_path(&name);
         if entry_exists(&destination)? {
             return Err(QuartersError::new(
@@ -61,6 +63,7 @@ impl Store {
                 return Err(error);
             }
         };
+        self.ensure_no_rollback_target(&SpaceName::parse(requested_name.clone())?)?;
         reject_publish_collision(&destination, &temporary, &requested_name)?;
         if let Err(error) = fs::remove_file(&creation_lock_path) {
             let failure = QuartersError::io("remove creation marker", &creation_lock_path, error);
@@ -203,6 +206,47 @@ fn private_directories() -> &'static [&'static str] {
         ".local/state/shell",
         ".ssh",
     ]
+}
+
+pub(super) fn ensure_directory_skeleton(home: &Path, layout: SpaceLayout) -> Result<()> {
+    for relative in private_directories() {
+        ensure_directory_if_absent(&home.join(relative))?;
+    }
+    if layout == SpaceLayout::Workspace {
+        for relative in workspace_directories()
+            .iter()
+            .copied()
+            .chain(crate::platform::workspace_directories().iter().copied())
+        {
+            ensure_directory_if_absent(&home.join(relative))?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_directory_if_absent(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_dir() && metadata.uid() == nix::unistd::Uid::current().as_raw() {
+                return Ok(());
+            }
+            Err(QuartersError::new(
+                ErrorKind::CorruptState,
+                format!(
+                    "template skeleton path is not a current-user directory: {}",
+                    path.display()
+                ),
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut builder = DirBuilder::new();
+            builder.recursive(true).mode(0o700);
+            builder
+                .create(path)
+                .map_err(|error| QuartersError::io("create template directory skeleton", path, error))
+        }
+        Err(error) => Err(QuartersError::io("inspect template directory skeleton", path, error)),
+    }
 }
 
 fn create_shell_files(home: &Path) -> Result<()> {

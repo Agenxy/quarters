@@ -301,6 +301,42 @@ async fn untrusted_entry_text_is_hex_encoded_for_agent_consumers() -> Result<(),
     Ok(())
 }
 
+#[tokio::test]
+async fn rollback_issues_share_the_mcp_status_entry_budget() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("quarters");
+    let spaces = root.join("spaces");
+    std::fs::create_dir_all(&spaces)?;
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
+    std::fs::set_permissions(&spaces, std::fs::Permissions::from_mode(0o700))?;
+    for value in 0_u128..129 {
+        let marker = spaces.join(format!(".rollback-{value:032x}.json"));
+        std::fs::write(&marker, b"")?;
+        std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    let (server_io, client_io) = tokio::io::duplex(32 * 1_024);
+    let server_task = spawn_server(root, server_io)?;
+    let client = TestClient
+        .serve_with_lifecycle(
+            client_io,
+            ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await?;
+    let status = call(&client, "quarters_status", json!({})).await?;
+    assert_eq!(status.is_error, Some(true));
+    assert_eq!(structured(&status)?["code"], "resource_limit");
+    let resource = client
+        .read_resource(ReadResourceRequestParams::new("quarters://status"))
+        .await;
+    assert!(matches!(resource, Err(rmcp::service::ServiceError::McpError(_))));
+    client.cancel().await?;
+    server_task.await??;
+    Ok(())
+}
+
 async fn exercise_legacy_offer(proposed: &str) -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let (server_io, client_io) = tokio::io::duplex(32 * 1_024);

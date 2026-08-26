@@ -61,3 +61,8 @@ transaction; it will not change the stable ID or silently edit user content.
 
 The visible internal directories remain in this alpha. That is intentional:
 changing them safely is a release sequence, not a cosmetic rename.
+
+The additive `.templates` and `.snapshots` roots introduced by ADR 0008 are
+older-reader-opaque artifact catalogs. They are not evidence that the future
+authoritative `spaces` to `.spaces` and `trash` to `.trash` migration has begun,
+and they do not participate in the dual-layout ambiguity check.

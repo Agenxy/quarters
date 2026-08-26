@@ -6,6 +6,14 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.3 — unreleased
 
+- Add named, verifiable templates and snapshots with create, list, show,
+  verify, use, rename and removal lifecycles, stable JSON contracts and private
+  content-addressed manifests.
+- Add guarded whole-space rollback with mandatory automatic recovery snapshots,
+  exact confirmations, durable three-state publication and idempotent
+  interruption recovery.
+- Extend doctor and confirmed recovery to bounded artifact staging, manifest
+  temporaries and rollback state without removing unknown hidden entries.
 - Add previewed, transaction-safe `clone` for inactive spaces, with explicit
   sensitive-state confirmation, descriptor-relative traversal, bounded resource
   limits, counted cache/runtime exclusions, fresh controls and atomic publish.

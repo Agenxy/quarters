@@ -58,7 +58,49 @@ still unknown. It is an atomic independent copy, not a live database snapshot or
 containment boundary. Embedded absolute paths are copied unchanged and may still
 point at the source.
 
-## 4. Add an optional short command
+## 4. Create a template, snapshot and guarded rollback
+
+Capture reusable stationery after reviewing the preview:
+
+```sh
+quarters template create studio-clean --from studio --preview
+quarters template create studio-clean --from studio --confirm-sensitive-state studio
+quarters template use studio-clean new-studio --preview
+quarters template use studio-clean new-studio --confirm-sensitive-state studio-clean
+```
+
+Templates omit derived caches unless `--include-cache` is explicit and create a
+fresh space identity. They can contain credentials; Quarters does not guess at
+a safe scrub policy.
+
+Create and independently verify a recovery point:
+
+```sh
+quarters snapshot create studio before-change --preview
+quarters snapshot create studio before-change --confirm-sensitive-state studio
+quarters snapshot verify before-change
+```
+
+Snapshots include caches by default. To restore one, first preview the selected
+snapshot and the required automatic recovery capture:
+
+```sh
+quarters rollback studio before-change --recovery-name before-rollback --preview
+quarters rollback studio before-change --recovery-name before-rollback \
+  --confirm-space studio --confirm-replace-state studio
+```
+
+Rollback replaces the complete home and retains the target identity. It is not
+a merge or same-UID security boundary. If power loss interrupts publication,
+`quarters doctor` reports `abort`, `restore-old` or `complete-new`; inspect that
+decision before running `quarters recover --confirm stale-state`.
+
+If a rollback attempt fails after its automatic recovery snapshot is created,
+that snapshot is deliberately retained. Inspect it, then retry with a new
+`--recovery-name`; alternatively verify and explicitly remove the retained
+snapshot before reusing the old name.
+
+## 5. Add an optional short command
 
 Install Quarters first. When `~/.local/bin` is already on the host PATH:
 
@@ -74,7 +116,7 @@ check matters because a child cannot see aliases and functions defined only in
 its parent shell. Remove only the managed link with
 `quarters shortcut remove qts`. The shorter `q` name is opt-in.
 
-## 5. Prove state separation
+## 6. Prove state separation
 
 ```sh
 target/release/quarters exec clean -- sh -c 'printf "%s\n" "$HOME" "$QUARTERS_SPACE"'
@@ -85,7 +127,7 @@ git config --global user.name
 The last command runs on the host and should retain the host value. File
 permissions and access are still those of the same account.
 
-## 6. Enter the shell
+## 7. Enter the shell
 
 ```sh
 target/release/quarters enter clean
@@ -113,7 +155,7 @@ target/release/quarters enter clean --login
 
 Host system profiles can run in login mode.
 
-## 7. Pass a variable deliberately
+## 8. Pass a variable deliberately
 
 The baseline does not inherit arbitrary variables:
 
@@ -124,7 +166,7 @@ MY_SETTING=present target/release/quarters exec clean --inherit MY_SETTING -- en
 
 `env clean --inherit MY_SETTING` shows the value as redacted.
 
-## 8. Use host state explicitly
+## 9. Use host state explicitly
 
 Inside a baseline shell:
 
@@ -135,7 +177,7 @@ quarters host -- sh -c 'printf "%s\n" "$HOME"'
 This restores host path variables only. It does not restore blocked credential
 variables. Exit the space when you need the exact original host environment.
 
-## 9. Remove the space
+## 10. Remove the space
 
 Exit every process launched in the space, inspect the name, then run:
 
@@ -157,7 +199,7 @@ of those removal anchors is invalid.
 For an invalid stored name, obtain the exact value from `quarters --json list`.
 Removal accepts one literal entry name but never a path, `.` or `..`.
 
-## 10. Connect a local agent
+## 11. Connect a local agent
 
 Build or install Quarters, then configure the agent host to run the absolute
 binary path with the single `mcp` argument. Quarters communicates only over the
