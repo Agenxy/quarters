@@ -12,6 +12,7 @@ keywords = ["environment", "profile", "shell", "userspace"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+blake3.workspace = true
 fs4.workspace = true
 getrandom.workspace = true
 nix = { workspace = true, features = ["dir", "fs", "mount", "sched", "user"] }

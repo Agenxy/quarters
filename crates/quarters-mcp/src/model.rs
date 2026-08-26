@@ -1,6 +1,8 @@
 //! Stable MCP presentation types.
 
-use quarters_core::{CompatibilityTier, ErrorKind, QuartersError, ToolProbe, escape_untrusted_text_bounded};
+use quarters_core::{
+    CompatibilityTier, ErrorKind, QuartersError, RollbackIssue, ToolProbe, escape_untrusted_text_bounded,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -47,6 +49,9 @@ pub(crate) struct SpaceView {
     pub(crate) name: String,
     /// `healthy` only when every trusted control anchor validates.
     pub(crate) health: String,
+    /// Optional transitional state, absent for ordinary entries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) state: Option<String>,
     /// Whether the name passed the portable grammar or is untrusted directory data.
     pub(crate) name_trust: String,
     /// UTF-8 fidelity of the directory-entry name.
@@ -81,6 +86,29 @@ pub(crate) struct StatusData {
     pub(crate) current_space: Option<String>,
     /// Independently validated entries.
     pub(crate) spaces: Vec<SpaceView>,
+    /// Retained markers that cannot be recovered automatically.
+    pub(crate) rollback_issues: Vec<RollbackIssueView>,
+}
+
+/// Bounded agent-safe view of one retained rollback issue.
+#[derive(Debug, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RollbackIssueView {
+    pub(crate) marker: String,
+    pub(crate) target: Option<String>,
+    pub(crate) code: String,
+    pub(crate) message: String,
+}
+
+impl From<&RollbackIssue> for RollbackIssueView {
+    fn from(issue: &RollbackIssue) -> Self {
+        Self {
+            marker: issue.marker.clone(),
+            target: issue.target.as_ref().map(ToString::to_string),
+            code: issue.code.clone(),
+            message: escape_untrusted_text_bounded(&issue.message, 512),
+        }
+    }
 }
 
 /// One platform capability.

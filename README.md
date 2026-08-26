@@ -31,9 +31,11 @@ native process tree with a strict environment allowlist, redirects common
 user-state locations, isolates shell history and runtime sockets, and preserves
 the host UID, GID and permissions.
 
-The development line also provides previewed, bounded cloning for inactive
-spaces. It copies persistent state through a portable native transaction and
-reports every exclusion and preservation limit described below.
+The development line also provides bounded cloning, reusable templates,
+verifiable named snapshots and guarded rollback for inactive spaces. Each
+credential-bearing mutation has a preview and exact confirmation. Rollback
+first captures an automatic recovery snapshot and uses a durable three-state
+transaction that `doctor` can explain and `recover` can finish safely.
 
 Linux uses the same baseline. An experimental `--home-view` can additionally
 bind the space home over the real passwd home inside an unprivileged user and
@@ -55,6 +57,8 @@ target/release/quarters create work
 target/release/quarters create studio --layout workspace
 target/release/quarters clone studio experiment --preview
 target/release/quarters clone studio experiment --confirm-sensitive-state studio
+target/release/quarters template create clean-room --from studio --preview
+target/release/quarters snapshot create studio before-change --preview
 target/release/quarters exec work -- env
 target/release/quarters enter work
 ```
@@ -67,7 +71,9 @@ git config --global user.name "Work identity"
 quarters current
 ```
 
-Install the current checkout with `make install`. The command is placed under
+Install the current checkout with `make install`. Building from source requires
+a current Rust toolchain plus a working C compiler and assembler for optimized
+BLAKE3. The command is placed under
 `~/.local/bin` by default. The checkout is the unreleased alpha.3 development
 line. The latest public release is alpha.2, currently available through these
 verified channels:
@@ -90,6 +96,10 @@ install path.
 | `create NAME [--layout profile\|workspace]` | Atomically create a minimal profile or expanded workspace |
 | `clone SOURCE DESTINATION --preview` | Validate and summarize a bounded clone without mutation |
 | `clone SOURCE DESTINATION --confirm-sensitive-state SOURCE` | Copy included persistent state into a new independent space |
+| `template create\|list\|show\|use\|rename\|rm` | Manage reusable, integrity-checked creation sources |
+| `snapshot create\|list\|show\|verify\|rename\|rm` | Manage named, integrity-checked recovery points |
+| `rollback SPACE SNAPSHOT --recovery-name NAME --preview` | Verify replacement and automatic recovery capture without mutation |
+| `rollback SPACE SNAPSHOT --recovery-name NAME --confirm-space SPACE --confirm-replace-state SPACE` | Capture recovery, then replace the complete home while retaining space identity |
 | `list` | List healthy and unhealthy space entries without hiding siblings |
 | `status [NAME]` | Observe whether Quarters' cooperative lease is free or held |
 | `current` | Print the current space or `host` |
@@ -244,7 +254,7 @@ that were never inherited. It keeps the current working directory; use an
 explicit executable path if command lookup must not depend on the active
 space's launch context.
 
-## Clone scope and limits
+## Lifecycle scope and limits
 
 `clone` creates a writable independent Quarter through the shared lifecycle
 transaction. Preview it first:
@@ -270,12 +280,21 @@ reports timestamps, ACLs, extended attributes, filesystem flags, set-ID/sticky
 bits, sparse layout and hard-link relationships as not preserved. Embedded
 absolute paths are not rewritten and may still select source state.
 
-Clone holds Quarters' cooperative source lease exclusively, stages on the same
-filesystem and publishes with one rename. A free lease cannot discover detached
-writers, so clone is not a crash-consistent live snapshot. It does not add a
-security boundary: both spaces remain owned and reachable by the same host
-account. Template, snapshot, freeze, export and rollback remain unavailable
-until their additional consistency and recovery gates pass.
+Clone and artifact capture hold Quarters' cooperative source lease exclusively,
+stage on the same filesystem and publish with one rename. A free lease cannot
+discover detached writers, so neither clone nor a named snapshot is
+crash-consistent. Templates omit derived caches by default; snapshots include
+them by default. Artifact content is bound to a canonical BLAKE3 digest and
+verified before use, but the digest is not authentication against another
+process with the same UID.
+
+Rollback never merges in place. It verifies that the snapshot belongs to the
+exact target generation, creates and verifies the required automatic recovery
+snapshot, stages the replacement, preserves the target identity, and publishes
+through durable `prepared`, `retired` and `published` states. The visible state
+is old, new, or explicitly `rollback_in_progress`; `doctor` reports the exact
+recovery action. This still adds no containment boundary. Freeze, export,
+encryption and live space rename remain unavailable.
 
 ## Documentation
 
@@ -288,6 +307,7 @@ until their additional consistency and recovery gates pass.
 - [Private agent lifecycle](docs/architecture/ADR-0005-PRIVATE-AGENT-LIFECYCLE.md)
 - [Storage migration and runtime identity](docs/architecture/ADR-0006-STORAGE-MIGRATION-AND-RUNTIME-IDENTITY.md)
 - [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
+- [Lifecycle artifacts and rollback](docs/architecture/ADR-0008-LIFECYCLE-ARTIFACTS-AND-ROLLBACK.md)
 - [MCP guide](docs/mcp/README.md)
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Compatibility matrix](docs/compatibility/MATRIX.md)

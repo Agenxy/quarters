@@ -1,5 +1,6 @@
 //! Atomic private storage for spaces.
 
+pub(crate) mod artifact;
 mod create;
 mod layout;
 pub(crate) mod lifecycle;
@@ -233,6 +234,11 @@ impl Store {
     /// Returns an error when the name is absent or the store layout itself
     /// cannot be inspected.
     pub fn inspect_named(&self, name: &SpaceName) -> Result<SpaceInspection> {
+        self.ensure_no_rollback_target(name)?;
+        self.inspect_named_without_rollback(name)
+    }
+
+    pub(crate) fn inspect_named_without_rollback(&self, name: &SpaceName) -> Result<SpaceInspection> {
         let Some(spaces_root) = self.existing_spaces_root()? else {
             return Err(space_not_found(name.as_str()));
         };
@@ -264,6 +270,9 @@ impl Store {
     /// operation fails.
     pub fn remove(&self, name: &str) -> Result<()> {
         validate_removal_entry_name(name)?;
+        if let Ok(validated_name) = SpaceName::parse(name.to_owned()) {
+            self.ensure_no_rollback_target(&validated_name)?;
+        }
         let Some(spaces_root) = self.existing_spaces_root()? else {
             return Err(space_not_found(name));
         };
@@ -281,6 +290,19 @@ impl Store {
     }
 
     fn open_path(path: PathBuf) -> Result<Space> {
+        let expected_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| QuartersError::new(ErrorKind::CorruptState, "space directory name is not valid UTF-8"))?
+            .to_owned();
+        Self::open_path_with_expected_name(path, &expected_name)
+    }
+
+    pub(crate) fn open_relocated_path(path: PathBuf, expected_name: &SpaceName) -> Result<Space> {
+        Self::open_path_with_expected_name(path, expected_name.as_str())
+    }
+
+    fn open_path_with_expected_name(path: PathBuf, expected_name: &str) -> Result<Space> {
         let manifest_path = path.join(MANIFEST_FILE);
         validate_space_anchors(&path)?;
         let bytes = read_private_file(&manifest_path)?;
@@ -309,8 +331,7 @@ impl Store {
             .with_source(error)
         })?;
         validate_stored_manifest(&manifest)?;
-        let expected_name = path.file_name().and_then(|value| value.to_str());
-        if expected_name != Some(manifest.name.as_str()) {
+        if expected_name != manifest.name.as_str() {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 "space directory and manifest names differ",

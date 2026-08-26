@@ -111,6 +111,260 @@ fn clone_requires_exact_sensitive_state_confirmation() -> Result<(), Box<dyn Err
 }
 
 #[test]
+fn template_lifecycle_is_verified_and_scriptable() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "source")?;
+    std::fs::write(temporary.path().join("spaces/source/home/proof"), b"template-state")?;
+
+    let preview = run(quarters(temporary.path()).args([
+        "--json",
+        "template",
+        "create",
+        "starter",
+        "--from",
+        "source",
+        "--preview",
+    ]))?;
+    let preview: Value = serde_json::from_slice(&preview.stdout)?;
+    assert_eq!(preview["command"], "template.create");
+    assert_eq!(preview["result"]["mode"], "preview");
+    assert!(!temporary.path().join(".templates").exists());
+
+    run(quarters(temporary.path()).args([
+        "template",
+        "create",
+        "starter",
+        "--from",
+        "source",
+        "--confirm-sensitive-state",
+        "source",
+    ]))?;
+    let used = run(quarters(temporary.path()).args([
+        "--json",
+        "template",
+        "use",
+        "starter",
+        "copy",
+        "--confirm-sensitive-state",
+        "starter",
+    ]))?;
+    let used: Value = serde_json::from_slice(&used.stdout)?;
+    assert_eq!(used["command"], "template.use");
+    assert_eq!(used["result"]["destination"], "copy");
+    assert_eq!(
+        std::fs::read(temporary.path().join("spaces/copy/home/proof"))?,
+        b"template-state"
+    );
+
+    run(quarters(temporary.path()).args(["template", "rename", "starter", "stationery"]))?;
+    let shown = run(quarters(temporary.path()).args(["--json", "template", "show", "stationery"]))?;
+    let shown: Value = serde_json::from_slice(&shown.stdout)?;
+    assert_eq!(shown["result"]["manifest"]["name"], "stationery");
+    run(quarters(temporary.path()).args(["template", "rm", "stationery", "--confirm", "stationery"]))?;
+    Ok(())
+}
+
+#[test]
+fn artifact_list_escapes_unhealthy_filesystem_metadata() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+    let temporary = TempDir::new()?;
+    let root = temporary.path();
+    let templates = root.join(".templates");
+    std::fs::DirBuilder::new().mode(0o700).create(&templates)?;
+    let hostile = templates.join("bad\u{1b}[2Jartifact");
+    std::fs::DirBuilder::new().mode(0o700).create(&hostile)?;
+    std::fs::set_permissions(&hostile, std::fs::Permissions::from_mode(0o700))?;
+
+    let human = run(quarters(root).args(["template", "list"]))?;
+    assert!(!human.stdout.contains(&0x1b));
+    let text = String::from_utf8(human.stdout)?;
+    assert!(text.contains("bad\\u{1b}[2Jartifact"));
+
+    let json = run(quarters(root).args(["--json", "template", "list"]))?;
+    assert!(!json.stdout.contains(&0x1b));
+    let value: Value = serde_json::from_slice(&json.stdout)?;
+    assert_eq!(value["result"][0]["id_encoding"], "escaped_bounded");
+    Ok(())
+}
+
+#[test]
+fn snapshot_creation_verification_and_filtering_are_truthful() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "work")?;
+    std::fs::write(temporary.path().join("spaces/work/home/state"), b"before")?;
+    run(quarters(temporary.path()).args([
+        "snapshot",
+        "create",
+        "work",
+        "before",
+        "--confirm-sensitive-state",
+        "work",
+        "--exclude-cache",
+    ]))?;
+
+    let verified = run(quarters(temporary.path()).args(["--json", "snapshot", "verify", "before"]))?;
+    let verified: Value = serde_json::from_slice(&verified.stdout)?;
+    assert_eq!(verified["command"], "snapshot.verify");
+    assert_eq!(verified["result"]["verified"], true);
+    let listed = run(quarters(temporary.path()).args(["--json", "snapshot", "list", "work"]))?;
+    let listed: Value = serde_json::from_slice(&listed.stdout)?;
+    assert_eq!(listed["result"].as_array().map(Vec::len), Some(1));
+    assert_eq!(listed["result"][0]["source_status"], "present");
+    Ok(())
+}
+
+#[test]
+fn rollback_restores_snapshot_and_preserves_automatic_recovery() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "work")?;
+    let state = temporary.path().join("spaces/work/home/state");
+    std::fs::write(&state, b"before")?;
+    run(quarters(temporary.path()).args([
+        "snapshot",
+        "create",
+        "work",
+        "before",
+        "--confirm-sensitive-state",
+        "work",
+    ]))?;
+    std::fs::write(&state, b"after")?;
+
+    let preview = run(quarters(temporary.path()).args([
+        "--json",
+        "rollback",
+        "work",
+        "before",
+        "--recovery-name",
+        "pre-rollback",
+        "--preview",
+    ]))?;
+    let preview: Value = serde_json::from_slice(&preview.stdout)?;
+    assert_eq!(preview["result"]["mode"], "preview");
+    assert_eq!(std::fs::read(&state)?, b"after");
+
+    let rolled_back = run(quarters(temporary.path()).args([
+        "--json",
+        "rollback",
+        "work",
+        "before",
+        "--recovery-name",
+        "pre-rollback",
+        "--confirm-space",
+        "work",
+        "--confirm-replace-state",
+        "work",
+    ]))?;
+    let rolled_back: Value = serde_json::from_slice(&rolled_back.stdout)?;
+    assert_eq!(rolled_back["result"]["mode"], "execute");
+    assert_eq!(std::fs::read(&state)?, b"before");
+    let recovery = run(quarters(temporary.path()).args(["--json", "snapshot", "show", "pre-rollback"]))?;
+    let recovery: Value = serde_json::from_slice(&recovery.stdout)?;
+    assert_eq!(recovery["result"]["manifest"]["origin"], "automatic-rollback-recovery");
+    Ok(())
+}
+
+#[test]
+fn interrupted_and_malformed_rollbacks_share_one_target_row() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "work")?;
+    let spaces = temporary.path().join("spaces");
+    let manifest: Value = serde_json::from_slice(&std::fs::read(spaces.join("work/.quarters.json"))?)?;
+    let id = "11111111111111111111111111111111";
+    let staging_entry = format!(".rollback-staging-{id}");
+    let staging = spaces.join(&staging_entry);
+    std::fs::create_dir(&staging)?;
+    std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o700))?;
+    let marker = serde_json::json!({
+        "schema_version": 1,
+        "transaction_id": id,
+        "state": "prepared",
+        "target": "work",
+        "target_identity": {
+            "schema_version": manifest["schema_version"],
+            "name": "work",
+            "created_unix_ms": manifest["created_unix_ms"],
+        },
+        "staging_entry": staging_entry,
+        "retired_entry": format!(".rolled-back-{id}"),
+        "snapshot_id": "22222222222222222222222222222222",
+        "recovery_snapshot_id": "33333333333333333333333333333333",
+    });
+    let marker_path = spaces.join(format!(".rollback-{id}.json"));
+    std::fs::write(&marker_path, serde_json::to_vec_pretty(&marker)?)?;
+    std::fs::set_permissions(&marker_path, std::fs::Permissions::from_mode(0o600))?;
+    let issue_id = "44444444444444444444444444444444";
+    let issue_marker = serde_json::json!({
+        "schema_version": 1,
+        "transaction_id": issue_id,
+        "state": "prepared",
+        "target": "work",
+        "target_identity": {
+            "schema_version": manifest["schema_version"],
+            "name": "work",
+            "created_unix_ms": manifest["created_unix_ms"],
+        },
+        "staging_entry": ".wrong-staging",
+        "retired_entry": ".wrong-retired",
+        "snapshot_id": "55555555555555555555555555555555",
+        "recovery_snapshot_id": "66666666666666666666666666666666",
+    });
+    let issue_path = spaces.join(format!(".rollback-{issue_id}.json"));
+    std::fs::write(&issue_path, serde_json::to_vec_pretty(&issue_marker)?)?;
+    std::fs::set_permissions(&issue_path, std::fs::Permissions::from_mode(0o600))?;
+
+    let listed = run(quarters(temporary.path()).args(["--json", "list"]))?;
+    let listed: Value = serde_json::from_slice(&listed.stdout)?;
+    assert_eq!(listed["result"].as_array().map(Vec::len), Some(1));
+    assert_eq!(listed["result"][0]["name"], "work");
+    assert_eq!(listed["result"][0]["state"], "rollback_in_progress");
+
+    let status = run(quarters(temporary.path()).args(["--json", "status"]))?;
+    let status: Value = serde_json::from_slice(&status.stdout)?;
+    assert_eq!(status["result"]["spaces"].as_array().map(Vec::len), Some(1));
+    assert_eq!(status["result"]["spaces"][0]["state"], "rollback_in_progress");
+    Ok(())
+}
+
+#[test]
+fn human_list_shows_a_target_known_rollback_issue_without_spaces() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = TempDir::new()?;
+    let spaces = temporary.path().join("spaces");
+    std::fs::create_dir(&spaces)?;
+    std::fs::set_permissions(&spaces, std::fs::Permissions::from_mode(0o700))?;
+    let id = "11111111111111111111111111111111";
+    let marker = serde_json::json!({
+        "schema_version": 1,
+        "transaction_id": id,
+        "state": "prepared",
+        "target": "ghost",
+        "target_identity": {
+            "schema_version": 1,
+            "name": "ghost",
+            "created_unix_ms": 1,
+        },
+        "staging_entry": ".wrong-staging",
+        "retired_entry": ".wrong-retired",
+        "snapshot_id": "22222222222222222222222222222222",
+        "recovery_snapshot_id": "33333333333333333333333333333333",
+    });
+    let marker_path = spaces.join(format!(".rollback-{id}.json"));
+    std::fs::write(&marker_path, serde_json::to_vec(&marker)?)?;
+    std::fs::set_permissions(&marker_path, std::fs::Permissions::from_mode(0o600))?;
+
+    let listed = run(quarters(temporary.path()).arg("list"))?;
+    let output = String::from_utf8(listed.stdout)?;
+    assert!(output.contains("ghost"));
+    assert!(output.contains("rollback"));
+    assert!(!output.contains("No spaces yet"));
+    Ok(())
+}
+
+#[test]
 fn clone_human_output_names_the_exact_symlink_count_scope() -> Result<(), Box<dyn Error>> {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;

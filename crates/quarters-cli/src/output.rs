@@ -1,13 +1,21 @@
 //! Human and machine output contracts.
 
+mod artifacts;
+
+pub(crate) use artifacts::{
+    print_artifact, print_artifact_list, print_artifact_mutation, print_artifact_report, print_artifact_verified,
+    print_rollback, print_template_use,
+};
+
 use crate::shortcut::{ShortcutAction, ShortcutReport};
 use clap::error::Error as ClapError;
 use quarters_core::{
-    Capabilities, CloneMode, CloneReport, LeaseState, QuartersError, RecoverySummary, Space, SpaceInspection, ToolProbe,
+    Capabilities, CloneMode, CloneReport, LeaseState, QuartersError, RecoverySummary, RollbackIssue,
+    RollbackObservation, Space, SpaceInspection, ToolProbe,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 const OUTPUT_SCHEMA_VERSION: u32 = 1;
@@ -87,23 +95,59 @@ pub(crate) fn print_recovered(summary: &RecoverySummary, json_output: bool) -> q
         return print_success("recover", summary, true);
     }
     println!(
-        "Recovered {} unfinished creation(s) and {} retired entry(s); {} creation(s) remain active",
-        summary.unfinished_creations, summary.retired_entries, summary.active_creations
+        "Recovered {} unfinished space creation(s), {} retired space entry(s), {} rollback transaction(s), {} artifact creation(s), {} artifact deletion(s), and {} manifest temporary file(s); {} rollback issue(s), {} space and {} artifact creation(s) remain",
+        summary.unfinished_creations,
+        summary.retired_entries,
+        summary.rollback_transactions,
+        summary.unfinished_artifact_creations,
+        summary.reclaiming_artifacts,
+        summary.artifact_manifest_temps,
+        summary.rollback_issues.len(),
+        summary.active_creations,
+        summary.active_artifact_creations
     );
     Ok(())
 }
 
-pub(crate) fn print_list(inspections: &[SpaceInspection], json_output: bool) -> quarters_core::Result<()> {
-    let values: Vec<Value> = inspections.iter().map(inspection_value).collect();
+pub(crate) fn print_list(
+    inspections: &[SpaceInspection],
+    rollbacks: &[RollbackObservation],
+    rollback_issues: &[RollbackIssue],
+    json_output: bool,
+) -> quarters_core::Result<()> {
+    let visible = inspections.iter().filter(|inspection| {
+        !rollbacks
+            .iter()
+            .any(|rollback| rollback.target.as_str() == inspection.name())
+            && !rollback_issues.iter().any(|issue| {
+                issue
+                    .target
+                    .as_ref()
+                    .is_some_and(|target| target.as_str() == inspection.name())
+            })
+    });
+    let mut values: Vec<Value> = visible.clone().map(inspection_value).collect();
+    values.extend(rollbacks.iter().map(rollback_space_value));
+    let mut represented_issue_targets = rollbacks
+        .iter()
+        .map(|rollback| rollback.target.clone())
+        .collect::<BTreeSet<_>>();
+    values.extend(rollback_issues.iter().filter_map(|issue| {
+        let target = issue.target.as_ref()?;
+        represented_issue_targets
+            .insert(target.clone())
+            .then(|| rollback_issue_space_value(issue))
+            .flatten()
+    }));
     if json_output {
         return print_success("list", &values, true);
     }
-    if inspections.is_empty() {
+    if inspections.is_empty() && rollbacks.is_empty() && rollback_issues.iter().all(|issue| issue.target.is_none()) {
         println!("No spaces yet. Create one with: quarters create <name>");
         return Ok(());
     }
     println!("NAME                             HEALTH     LAYOUT     HOME");
-    for inspection in inspections {
+    for inspection in visible {
         match inspection {
             SpaceInspection::Healthy(space) => {
                 println!(
@@ -125,6 +169,27 @@ pub(crate) fn print_list(inspections: &[SpaceInspection], json_output: bool) -> 
             }
         }
     }
+    for rollback in rollbacks {
+        println!("{:<32} {:<10} {:<10} -", rollback.target, "rollback", "unknown");
+        println!(
+            "  issue: rollback {} is in progress; doctor reports recovery action {:?}",
+            rollback.state, rollback.action
+        );
+    }
+    let mut represented_issue_targets = rollbacks
+        .iter()
+        .map(|rollback| rollback.target.clone())
+        .collect::<BTreeSet<_>>();
+    for issue in rollback_issues {
+        let Some(target) = &issue.target else {
+            continue;
+        };
+        if !represented_issue_targets.insert(target.clone()) {
+            continue;
+        }
+        println!("{target:<32} {:<10} {:<10} -", "rollback", "unknown");
+        println!("  issue: {}", escape_for_human(&issue.message));
+    }
     Ok(())
 }
 
@@ -138,6 +203,26 @@ pub(crate) enum StatusEntry {
         name_was_lossy: bool,
         error: QuartersError,
     },
+    Rollback {
+        observation: RollbackObservation,
+    },
+    RollbackIssue {
+        issue: RollbackIssue,
+    },
+}
+
+impl StatusEntry {
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Healthy { space, .. } => space.manifest().name.as_str(),
+            Self::Unhealthy { name, .. } => name,
+            Self::Rollback { observation } => observation.target.as_str(),
+            Self::RollbackIssue { issue } => issue
+                .target
+                .as_ref()
+                .map_or(issue.marker.as_str(), quarters_core::SpaceName::as_str),
+        }
+    }
 }
 
 pub(crate) fn print_status(
@@ -242,6 +327,17 @@ pub(crate) fn print_doctor(
                 "active_creations": summary.active_creations,
                 "unfinished_creations": summary.unfinished_creations,
                 "retired_entries": summary.retired_entries,
+                "rollback_transactions": summary.rollback_transactions,
+                "rollbacks": summary.rollbacks,
+                "rollback_issues": summary.rollback_issues,
+                "active_artifact_creations": summary.active_artifact_creations,
+                "unfinished_artifact_creations": summary.unfinished_artifact_creations,
+                "reclaiming_artifacts": summary.reclaiming_artifacts,
+                "artifact_manifest_temps": summary.artifact_manifest_temps,
+                "orphaned_artifacts": summary.orphaned_artifacts,
+                "template_logical_bytes": summary.template_logical_bytes,
+                "snapshot_logical_bytes": summary.snapshot_logical_bytes,
+                "unknown_entries_at_least": summary.unknown_entries_at_least,
             })
         },
     );
@@ -259,6 +355,18 @@ pub(crate) fn print_doctor(
     if json_output {
         return print_success("doctor", &result, true);
     }
+    print_doctor_human(capabilities, tools, shortcuts, space, lease_state, recovery);
+    Ok(())
+}
+
+fn print_doctor_human(
+    capabilities: &Capabilities,
+    tools: &[ToolProbe],
+    shortcuts: &[ShortcutReport],
+    space: Option<&Space>,
+    lease_state: Option<LeaseState>,
+    recovery: std::result::Result<&RecoverySummary, &QuartersError>,
+) {
     println!("Quarters doctor");
     println!("  Platform       {}", capabilities.platform);
     println!("  Baseline       available (HOME and user-state profile)");
@@ -277,10 +385,46 @@ pub(crate) fn print_doctor(
     println!("  Authority      {}", capabilities.authority_boundary);
     match recovery {
         Ok(summary) => println!(
-            "  Recovery       {} active, {} unfinished, {} retired",
-            summary.active_creations, summary.unfinished_creations, summary.retired_entries
+            "  Recovery       {} space active, {} space unfinished, {} retired; {} artifact active, {} artifact unfinished, {} reclaiming, {} manifest temp",
+            summary.active_creations,
+            summary.unfinished_creations,
+            summary.retired_entries,
+            summary.active_artifact_creations,
+            summary.unfinished_artifact_creations,
+            summary.reclaiming_artifacts,
+            summary.artifact_manifest_temps
         ),
         Err(error) => println!("  Recovery       unavailable: {}", escape_for_human(error.message())),
+    }
+    if let Ok(summary) = recovery {
+        println!(
+            "  Artifacts      {} orphaned; {} template bytes, {} snapshot bytes; {} unknown hidden entries retained",
+            summary.orphaned_artifacts,
+            summary.template_logical_bytes,
+            summary.snapshot_logical_bytes,
+            summary.unknown_entries_at_least
+        );
+        for rollback in &summary.rollbacks {
+            println!(
+                "  Rollback       {} [{}] -> {:?}",
+                rollback.target, rollback.state, rollback.action
+            );
+        }
+        for issue in &summary.rollback_issues {
+            println!(
+                "  Rollback issue {} target={} [{}]: {}",
+                entry_name_for_human(&issue.marker),
+                issue
+                    .target
+                    .as_ref()
+                    .map_or("unknown", quarters_core::SpaceName::as_str),
+                issue.code,
+                escape_for_human(&issue.message)
+            );
+            if let Some(hint) = &issue.hint {
+                println!("    Next          {}", escape_for_human(hint));
+            }
+        }
     }
     for shortcut in shortcuts {
         println!(
@@ -314,7 +458,6 @@ pub(crate) fn print_doctor(
             println!("  limitation: {limitation}");
         }
     }
-    Ok(())
 }
 
 pub(crate) fn print_shortcut(
@@ -346,11 +489,33 @@ pub(crate) fn print_shortcut(
     Ok(())
 }
 
-pub(crate) fn print_removed(name: &str, json_output: bool) -> quarters_core::Result<()> {
+pub(crate) fn print_removed(
+    name: &str,
+    surviving_artifacts: Option<(usize, usize)>,
+    json_output: bool,
+) -> quarters_core::Result<()> {
+    let (surviving_templates, surviving_snapshots) = surviving_artifacts.unzip();
     if json_output {
-        return print_success("rm", &json!({ "removed": safe_json_text(name, 64) }), true);
+        return print_success(
+            "rm",
+            &json!({
+                "removed": safe_json_text(name, 64),
+                "surviving_templates": surviving_templates,
+                "surviving_snapshots": surviving_snapshots,
+                "artifacts_cascade_removed": false,
+            }),
+            true,
+        );
     }
     println!("Removed {}", escape_for_human(name));
+    if let Some((surviving_templates, surviving_snapshots)) = surviving_artifacts
+        && (surviving_templates > 0 || surviving_snapshots > 0)
+    {
+        println!(
+            "  Kept {surviving_templates} template(s) and {surviving_snapshots} snapshot(s) from this exact space generation."
+        );
+        println!("  Remove those artifacts separately with their exact confirmed commands.");
+    }
     Ok(())
 }
 
@@ -435,6 +600,14 @@ fn status_value(status: &StatusEntry, current: Option<&str>) -> Value {
             "current": current == Some(name.as_str()),
             "error": inspection_error_value(error),
         }),
+        StatusEntry::Rollback { observation } => rollback_space_value(observation),
+        StatusEntry::RollbackIssue { issue } => rollback_issue_space_value(issue).unwrap_or_else(|| {
+            json!({
+                "name": issue.marker,
+                "health": "unhealthy",
+                "state": "rollback_issue",
+            })
+        }),
     }
 }
 
@@ -464,7 +637,72 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
             );
             print_inspection_issue(error);
         }
+        StatusEntry::Rollback { observation } => {
+            let is_current = current == Some(observation.target.as_str());
+            println!(
+                "{:<32} {:<10} {:<10} {:<8} {:<8} -",
+                observation.target,
+                "rollback",
+                "unknown",
+                "held",
+                if is_current { "yes" } else { "no" }
+            );
+            println!(
+                "  issue: rollback {} is in progress; doctor reports recovery action {:?}",
+                observation.state, observation.action
+            );
+        }
+        StatusEntry::RollbackIssue { issue } => {
+            let name = issue
+                .target
+                .as_ref()
+                .map_or(issue.marker.as_str(), quarters_core::SpaceName::as_str);
+            println!(
+                "{:<32} {:<10} {:<10} {:<8} {:<8} -",
+                entry_name_for_human(name),
+                "rollback",
+                "unknown",
+                "unknown",
+                "no"
+            );
+            println!("  issue: {}", escape_for_human(&issue.message));
+        }
     }
+}
+
+fn rollback_space_value(observation: &RollbackObservation) -> Value {
+    json!({
+        "name": observation.target.as_str(),
+        "health": "unhealthy",
+        "state": "rollback_in_progress",
+        "layout": null,
+        "space_id": null,
+        "lease_state": "held",
+        "rollback": observation,
+        "error": {
+            "kind": "space_active",
+            "message": format!("space '{}' has a rollback in progress", observation.target),
+            "hint": "run 'quarters doctor' to inspect the durable recovery action",
+        },
+    })
+}
+
+fn rollback_issue_space_value(issue: &RollbackIssue) -> Option<Value> {
+    let target = issue.target.as_ref()?;
+    Some(json!({
+        "name": target.as_str(),
+        "health": "unhealthy",
+        "state": "rollback_issue",
+        "layout": null,
+        "space_id": null,
+        "lease_state": "unknown",
+        "rollback_issue": issue,
+        "error": {
+            "kind": issue.code,
+            "message": issue.message,
+            "hint": issue.hint,
+        },
+    }))
 }
 
 fn print_inspection_issue(error: &QuartersError) {

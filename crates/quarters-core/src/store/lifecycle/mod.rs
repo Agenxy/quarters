@@ -10,3 +10,4 @@ mod tests;
 
 pub(crate) use cleanup::remove_tree_restoring_owner_access;
 pub use policy::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};
+pub(crate) use walk::{WalkControl, walk_home};

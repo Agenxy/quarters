@@ -11,6 +11,11 @@ targets = [
 [advisories]
 ignore = []
 
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
 [licenses]
 allow = [
     "Apache-2.0",

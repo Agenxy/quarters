@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use quarters_core::{
-    EnvironmentPlan, ErrorKind, HostEnvironment, LeaseState, QuartersError, Space, SpaceInspection, SpaceName, Store,
+    EnvironmentPlan, ErrorKind, HostEnvironment, LeaseState, QuartersError, RollbackObservation, Space,
+    SpaceInspection, SpaceName, Store,
 };
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -19,7 +20,9 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::Semaphore;
 
-use crate::model::{CapabilityView, CreateData, Diagnostic, DoctorData, ProbeView, SpaceView, StatusData};
+use crate::model::{
+    CapabilityView, CreateData, Diagnostic, DoctorData, ProbeView, RollbackIssueView, SpaceView, StatusData,
+};
 use crate::output::{ToolSuccess, failure, success};
 use crate::params::{CreateParams, DoctorParams, MAX_STATUS_ENTRIES, StatusParams};
 use crate::resources;
@@ -67,6 +70,7 @@ impl QuartersMcp {
     }
 
     fn status_data(&self, raw_name: Option<&str>) -> quarters_core::Result<StatusData> {
+        let unfiltered = raw_name.is_none();
         let inspections = if let Some(raw_name) = raw_name {
             let name = SpaceName::parse(raw_name.to_owned())?;
             vec![self.store.inspect_named(&name)?]
@@ -100,11 +104,42 @@ impl QuartersMcp {
             };
             spaces.push(lease_state);
         }
+        let mut rollback_issues = Vec::new();
+        if unfiltered {
+            let rollback_inventory = self.store.rollback_inventory()?;
+            let rollbacks = rollback_inventory.observations;
+            let issues = rollback_inventory.issues;
+            spaces.retain(|space| {
+                !rollbacks.iter().any(|rollback| rollback.target.as_str() == space.name)
+                    && !issues.iter().any(|issue| {
+                        issue
+                            .target
+                            .as_ref()
+                            .is_some_and(|target| target.as_str() == space.name)
+                    })
+            });
+            spaces.extend(rollbacks.iter().map(Self::view_rollback));
+            let mut represented_targets = rollbacks
+                .iter()
+                .map(|rollback| rollback.target.clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            spaces.extend(issues.iter().filter_map(|issue| {
+                let target = issue.target.as_ref()?;
+                represented_targets
+                    .insert(target.clone())
+                    .then(|| Self::view_rollback_issue(issue))
+                    .flatten()
+            }));
+            rollback_issues = issues.iter().map(RollbackIssueView::from).collect();
+            spaces.sort_by(|left, right| left.name.cmp(&right.name));
+            enforce_status_budget(spaces.len(), rollback_issues.len())?;
+        }
         Ok(StatusData {
             observation_scope: "quarters-cooperative-lease".to_owned(),
             detached_processes: "unknown".to_owned(),
             current_space,
             spaces,
+            rollback_issues,
         })
     }
 
@@ -122,6 +157,7 @@ impl QuartersMcp {
                 current: current_space == Some(name.as_str()),
                 name: quarters_core::encode_untrusted_text_hex_bounded(&name, 64),
                 health: "unhealthy".to_owned(),
+                state: None,
                 name_trust: "untrusted_directory_entry".to_owned(),
                 name_encoding: if name_was_lossy {
                     "lossy_replacement_hex".to_owned()
@@ -137,6 +173,51 @@ impl QuartersMcp {
                 issue: Some(Diagnostic::for_unhealthy_entry(&error)),
             }),
         }
+    }
+
+    fn view_rollback(observation: &RollbackObservation) -> SpaceView {
+        let error = QuartersError::new(
+            ErrorKind::SpaceActive,
+            format!("space '{}' has a rollback in progress", observation.target),
+        );
+        SpaceView {
+            name: observation.target.as_str().to_owned(),
+            health: "unhealthy".to_owned(),
+            state: Some("rollback_in_progress".to_owned()),
+            name_trust: "validated_manifest_name".to_owned(),
+            name_encoding: "utf8".to_owned(),
+            home: None,
+            created_unix_ms: None,
+            default_shell: None,
+            layout: None,
+            space_id: None,
+            lease_state: None,
+            current: false,
+            issue: Some(Diagnostic::from(&error)),
+        }
+    }
+
+    fn view_rollback_issue(issue: &quarters_core::RollbackIssue) -> Option<SpaceView> {
+        let target = issue.target.as_ref()?;
+        Some(SpaceView {
+            name: target.as_str().to_owned(),
+            health: "unhealthy".to_owned(),
+            state: Some("rollback_issue".to_owned()),
+            name_trust: "validated_manifest_name".to_owned(),
+            name_encoding: "utf8".to_owned(),
+            home: None,
+            created_unix_ms: None,
+            default_shell: None,
+            layout: None,
+            space_id: None,
+            lease_state: None,
+            current: false,
+            issue: Some(Diagnostic {
+                code: issue.code.clone(),
+                message: quarters_core::escape_untrusted_text_bounded(&issue.message, 512),
+                retryable: false,
+            }),
+        })
     }
 
     fn doctor_data(&self, raw_name: Option<&str>) -> quarters_core::Result<DoctorData> {
@@ -181,6 +262,17 @@ impl QuartersMcp {
             )?,
         })
     }
+}
+
+fn enforce_status_budget(space_entries: usize, rollback_issues: usize) -> quarters_core::Result<()> {
+    if space_entries.saturating_add(rollback_issues) <= MAX_STATUS_ENTRIES {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::ResourceLimit,
+        format!("the complete MCP status contains more than {MAX_STATUS_ENTRIES} entries"),
+    )
+    .with_hint("inspect one exact space by name, or use the human CLI outside an MCP transcript"))
 }
 
 #[tool_router]
@@ -365,6 +457,7 @@ fn view_space(space: &Space, lease_state: LeaseState, current_space: Option<&str
     Ok(SpaceView {
         name: space.manifest().name.as_str().to_owned(),
         health: "healthy".to_owned(),
+        state: None,
         name_trust: "validated_space_name".to_owned(),
         name_encoding: "utf8_validated".to_owned(),
         home: Some(quarters_core::escape_untrusted_text_bounded(

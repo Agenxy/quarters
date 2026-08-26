@@ -35,6 +35,11 @@ policy.
 | Partial or redirected clone | Exclusive cooperative lease, descriptor-relative no-follow walk, private staging, fresh controls and atomic rename |
 | Clone leaks file inventory | Human and JSON results expose bounded aggregate classes and counts, never home paths or file content |
 | Clone silently duplicates credentials | Mutation requires exact source-name sensitive-state confirmation; preview and provenance declare the policy |
+| Artifact content changes after capture | Canonical whole-tree BLAKE3 verification binds stored paths, types, ordinary modes, content, link targets and counts before every use |
+| Artifact digest is mistaken for authentication | Output and documentation state that another same-UID process can alter both content and manifest |
+| Partial rollback replaces only some state | Complete staging, verified automatic recovery snapshot and durable prepared/retired/published transaction; recursive merge is forbidden |
+| Crash leaves a target apparently absent | Atomic marker publication and exact filesystem tuples produce bounded actions; malformed or ambiguous markers preserve every tree, become itemized issues, block only a known named target and do not stop unrelated recovery |
+| Recovery deletes an unrelated path | Only private exact-form generated IDs, free creation locks and validated manifest temporaries are reclaimable; malformed reserved-looking and unknown hidden entries remain counted without blocking unrelated recovery |
 | Manifest downgrade or field confusion | Permissive version probe followed by strict closed schema and version/layout/ID invariants |
 | Abandoned internal state | Bounded doctor counts; confirmed recovery retires entries under the management lock, then deletes outside it |
 | Wrong removal target | Manifest/name validation, exact confirmation, rename then delete |
@@ -79,6 +84,7 @@ policy.
 - discovering detached descendants or same-user servers after their Quarters supervisor exits
 - secure deletion from snapshots, backups or recovery media
 - crash-consistent live snapshot or export
+- authenticating artifact state against another process with the same UID
 - treating a free cooperative lease as proof that detached clone writers are absent
 - treating workspace directories or a stable space ID as containment or authorization
 - remote MCP, OAuth, agent-triggered command execution or agent-triggered deletion
@@ -116,20 +122,44 @@ directories; it must not be placed beneath a directory writable by another
 user. Quarters validates the selected root without claiming to secure or
 rewrite its ancestors.
 
-Clone copies arbitrary included state without interpreting or rewriting embedded
+Clone, template and snapshot capture copy arbitrary included state without interpreting or rewriting embedded
 absolute paths. Such paths can still read or mutate the source Quarter or host.
 Detached same-UID processes can change source files during a clone despite the
 exclusive cooperative lease. Descriptor identity checks reject replacements
 when any compared ownership, mode, topology, size or timestamp field changes.
 A same-type replacement can still pass if every field matches within the
 filesystem's timestamp granularity; held descriptors and no-follow opens still
-prevent path escape. Concurrent metadata changes before open abort the clone,
+prevent path escape. Concurrent metadata changes before open, after open or
+after read abort the copy,
 but the portable copy is not a database-consistent snapshot. Skipped sockets,
 FIFOs, devices, foreign-owned entries and cache roots are reported by count.
 Timestamps, ACLs, xattrs, filesystem flags, special mode bits, sparse extents
 and hard-link topology are not preserved.
 
+Rollback provides recoverable publication, not containment or a global process
+freeze. A detached same-UID writer can continue using the retired inode or
+change newly published state. Rollback therefore preserves a verified automatic
+recovery artifact, reports detached writers as unknown and exposes old, new or
+marked-in-progress visibility rather than claiming atomic exchange.
+
+An exact, valid rollback marker with a filesystem tuple outside the documented
+state table is intentionally non-automatic: Quarters preserves all paths,
+reports the marker and observed tuple, and leaves that transaction for an
+operator to reconcile while continuing unrelated recovery. Normal operations
+on unrelated named spaces remain available. A malformed exact marker is also
+retained and itemized but cannot be attributed to a target safely.
+A failed rollback attempt may already have published its automatic recovery
+snapshot; retry with a new `--recovery-name`, or verify and explicitly remove
+the preserved snapshot before reusing its name.
+
+Once the replacement is published and its marker is removed, a subsequent
+retired-tree cleanup failure does not undo the rollback. The error states that
+replacement completed, retains the cleanup tree under `.trash`, and directs the
+operator through bounded doctor and recovery inspection.
+
 MCP is not an authorization boundary against another process already running as
 the same account. A peer can invoke the same CLI or edit files it owns. The MCP
 controls limit accidental agent authority, protocol confusion, context
 injection and resource exhaustion; they do not create a new Unix principal.
+The 128-entry MCP status budget is applied after rollback rows are merged and
+also counts the separate retained-issue records.

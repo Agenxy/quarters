@@ -16,13 +16,30 @@ const MANAGEMENT_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const OBSERVATION_LOCK_TIMEOUT: Duration = Duration::from_millis(500);
 static RETRY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// Non-cloneable ownership token for a store-wide mutation lease.
+pub(crate) struct ManagementGuard {
+    _file: File,
+}
+
+/// Non-cloneable ownership token for a store-wide observation lease.
+pub(crate) struct ObservationGuard {
+    _file: File,
+}
+
+/// Non-cloneable ownership token for one space lifecycle lease.
+pub(crate) struct LifecycleLease {
+    _file: File,
+}
+
 impl Store {
-    pub(crate) fn observation_guard(&self) -> Result<File> {
+    pub(crate) fn observation_guard(&self) -> Result<ObservationGuard> {
         self.root_guard(OBSERVATION_LOCK_TIMEOUT)
+            .map(|file| ObservationGuard { _file: file })
     }
 
-    pub(crate) fn management_guard(&self) -> Result<File> {
+    pub(crate) fn management_guard(&self) -> Result<ManagementGuard> {
         self.root_guard(MANAGEMENT_LOCK_TIMEOUT)
+            .map(|file| ManagementGuard { _file: file })
     }
 
     fn root_guard(&self, timeout: Duration) -> Result<File> {
@@ -85,7 +102,14 @@ pub(crate) fn lock_shared_bounded(file: &File, path: &Path) -> Result<()> {
     lock_bounded(file, path, LockMode::Shared, ACTIVE_LOCK_TIMEOUT, "space activity")
 }
 
-pub(crate) fn lock_exclusive_bounded_for_lifecycle(file: &File, path: &Path, name: &str) -> Result<()> {
+pub(crate) fn acquire_lifecycle_lease(space: &Space, name: &str) -> Result<LifecycleLease> {
+    let path = space.lock_path();
+    let file = open_private_lock(&path)?;
+    lock_exclusive_bounded_for_lifecycle(&file, &path, name)?;
+    Ok(LifecycleLease { _file: file })
+}
+
+fn lock_exclusive_bounded_for_lifecycle(file: &File, path: &Path, name: &str) -> Result<()> {
     let deadline = Instant::now() + ACTIVE_LOCK_TIMEOUT;
     let mut attempt = 0_u32;
     loop {

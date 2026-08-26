@@ -1,6 +1,6 @@
 # ADR 0003: One transaction primitive for lifecycle copies
 
-Status: accepted for bounded portable clone; broader lifecycle gates remain open
+Status: accepted for portable clone and artifact copy; export and acceleration gates remain open
 
 ## Context
 
@@ -84,8 +84,12 @@ than claiming preservation and exposes no MCP clone authority.
 Device nodes and foreign-UID entries require privilege or a second account and
 therefore have classification coverage but no unprivileged filesystem fixture.
 
-These gates remain explicitly unmet: clonefile/reflink equivalence, schema-1
-stable identity, managed-agent or detached-process quiescence, immutable
-templates/snapshots, authenticated export and rollback recovery after forced
-replacement failure. Quarters therefore exposes `clone` but still no freeze,
-snapshot, template, export or rollback command.
+Template and snapshot creation now use a creation-source walker that omits and
+counts unsafe source entries, while published-artifact verification rejects any
+such entry. Both modes compare metadata before open, after open and after read.
+Named lifecycle artifacts and deterministic rollback recovery are accepted in
+ADR 0008.
+
+Remaining gates are clonefile/reflink semantic equivalence, schema-1 stable-ID
+migration, managed-agent or detached-process quiescence, filesystem
+immutability flags, authenticated export and enforceable freeze.

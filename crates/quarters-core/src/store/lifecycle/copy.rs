@@ -8,7 +8,7 @@ use super::policy::{CloneMode, CloneReport};
 use super::walk::test_support::TestMutation;
 use super::walk::{WalkControl, walk_home};
 use crate::store::create::{acquire_creation_lock, write_manifest};
-use crate::store_lock::lock_exclusive_bounded_for_lifecycle;
+use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease};
 use crate::store_policy::{validate_shell, validate_stored_manifest};
 use crate::text::escape_untrusted_text_bounded_bytes;
 use crate::{ErrorKind, QuartersError, Result, Space, SpaceId, SpaceManifest, SpaceName, Store};
@@ -17,8 +17,8 @@ use std::fs::{self, File};
 use std::path::PathBuf;
 
 use crate::store::{
-    create_private_dir, entry_exists, epoch_millis, open_private_lock, space_not_found, sync_directory,
-    sync_parent_directory, validate_space_anchors, write_private_file,
+    create_private_dir, entry_exists, epoch_millis, space_not_found, sync_directory, sync_parent_directory,
+    validate_space_anchors, write_private_file,
 };
 
 impl Store {
@@ -218,6 +218,8 @@ impl CloneControl {
         #[cfg(not(test))]
         let _ = self;
         WalkControl {
+            artifact_source: false,
+            recreate_cache_roots: true,
             #[cfg(test)]
             abort_mid_copy: self.abort == Some(LifecycleAbort::MidCopy),
             #[cfg(test)]
@@ -260,7 +262,7 @@ impl CloneControl {
 struct CloneSetup {
     source: Space,
     source_manifest: SpaceManifest,
-    _activity_lock: File,
+    _activity_lock: LifecycleLease,
     mode: CloneMode,
     destination: SpaceName,
     staging: Option<Staging>,
@@ -289,9 +291,9 @@ impl CloneSetup {
         let management = store.management_guard()?;
         let source_space = store.open(source)?;
         validate_shell(&source_space.manifest().default_shell)?;
-        let activity_lock = open_private_lock(&source_space.lock_path())?;
-        lock_exclusive_bounded_for_lifecycle(&activity_lock, &source_space.lock_path(), source.as_str())?;
+        let activity_lock = acquire_lifecycle_lease(&source_space, source.as_str())?;
         let destination_path = store.space_path(destination);
+        store.ensure_no_rollback_target(destination)?;
         reject_destination(&destination_path, destination.as_str())?;
         let staging = if mode == CloneMode::Execute {
             Some(prepare_staging(store, destination, destination_path)?)
@@ -407,6 +409,7 @@ fn publish(store: &Store, setup: &CloneSetup, manifest: &SpaceManifest, control:
                 .with_hint("inspect the source Quarter and retry"),
         );
     }
+    store.ensure_no_rollback_target(&manifest.name)?;
     reject_destination(&staging.destination, manifest.name.as_str())?;
     #[cfg(test)]
     control.abort_before_publish()?;

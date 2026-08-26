@@ -22,7 +22,7 @@ use std::path::{Component, Path};
 
 use support::{child_path, directory_names};
 
-pub(super) fn walk_home(
+pub(crate) fn walk_home(
     source_home: &Path,
     destination_home: Option<&Path>,
     report: &mut CloneReport,
@@ -33,17 +33,44 @@ pub(super) fn walk_home(
         .map(|path| open_root(path, "open staging home"))
         .transpose()?;
     let mut walker = Walker::new(report, control);
-    walker.walk_directory(source, destination, &[], 0)?;
+    let _root_post_read = walker.walk_directory(source, destination, &[], 0)?;
     walker.finish();
     Ok(())
 }
 
-#[derive(Default)]
-pub(super) struct WalkControl {
+pub(crate) struct WalkControl {
+    pub(crate) artifact_source: bool,
+    pub(crate) recreate_cache_roots: bool,
     #[cfg(test)]
     pub(super) abort_mid_copy: bool,
     #[cfg(test)]
     pub(super) mutation: Option<test_support::TestMutation>,
+}
+
+impl Default for WalkControl {
+    fn default() -> Self {
+        Self {
+            artifact_source: false,
+            recreate_cache_roots: true,
+            #[cfg(test)]
+            abort_mid_copy: false,
+            #[cfg(test)]
+            mutation: None,
+        }
+    }
+}
+
+impl WalkControl {
+    pub(crate) fn for_artifact() -> Self {
+        Self {
+            artifact_source: true,
+            recreate_cache_roots: false,
+            #[cfg(test)]
+            abort_mid_copy: false,
+            #[cfg(test)]
+            mutation: None,
+        }
+    }
 }
 
 struct Walker<'a> {
@@ -53,14 +80,11 @@ struct Walker<'a> {
     symlinks_by_cache_root: BTreeMap<Vec<OsString>, u64>,
     buffered_entries: u64,
     current_uid: u32,
-    #[cfg(test)]
     control: &'a WalkControl,
 }
 
 impl<'a> Walker<'a> {
     fn new(report: &'a mut CloneReport, control: &'a WalkControl) -> Self {
-        #[cfg(not(test))]
-        let _ = control;
         let mut cache_roots = vec![vec![OsString::from(".cache")]];
         cache_roots.extend(
             crate::platform::derived_cache_directories()
@@ -74,7 +98,6 @@ impl<'a> Walker<'a> {
             symlinks_by_cache_root: BTreeMap::new(),
             buffered_entries: 0,
             current_uid: Uid::current().as_raw(),
-            #[cfg(test)]
             control,
         }
     }
@@ -85,7 +108,7 @@ impl<'a> Walker<'a> {
         destination: Option<Dir>,
         relative: &[OsString],
         depth: u32,
-    ) -> Result<()> {
+    ) -> Result<FileStat> {
         let accounted = self.report.counts.entries.saturating_add(self.buffered_entries);
         let available = self.report.limits.entries.saturating_sub(accounted);
         let names = directory_names(&mut source, relative, available, accounted, self.report.limits.entries)?;
@@ -129,7 +152,7 @@ impl<'a> Walker<'a> {
         if let Some(destination) = destination {
             apply_directory_mode(&destination, directory_mode(&source, relative)?, relative)?;
         }
-        Ok(())
+        fstat(&source).map_err(|error| nix_error("recheck source directory", relative, error))
     }
 
     fn visit_directory(
@@ -141,6 +164,16 @@ impl<'a> Walker<'a> {
         depth: u32,
         metadata: &FileStat,
     ) -> Result<()> {
+        if self.control.artifact_source && metadata.st_mode & 0o500 != 0o500 {
+            return Err(QuartersError::new(
+                ErrorKind::CorruptState,
+                format!(
+                    "artifact source directory is not owner-readable and traversable at {}",
+                    relative_text(path)
+                ),
+            )
+            .with_hint("grant the owner read and execute permission on this directory, then retry"));
+        }
         let next_depth = depth.saturating_add(1);
         if next_depth > self.report.limits.depth {
             return Err(limit_error(
@@ -155,7 +188,10 @@ impl<'a> Walker<'a> {
             .map(|parent| create_directory_at(parent, name, path))
             .transpose()?;
         self.report.counts.directories += 1;
-        self.walk_directory(source, destination, path, next_depth)
+        let post_read = self.walk_directory(source, destination, path, next_depth)?;
+        verify_identity(metadata, &post_read, SFlag::S_IFDIR, path)?;
+        let linked = entry_metadata(source_parent, name, path)?;
+        verify_identity(metadata, &linked, SFlag::S_IFDIR, path)
     }
 
     fn visit_file(
@@ -180,7 +216,7 @@ impl<'a> Walker<'a> {
         if let Some(mutation) = &self.control.mutation {
             mutation.apply_after_open_if_selected(path)?;
         }
-        let actual = if let Some(parent) = destination_parent {
+        let (actual, post_read) = if let Some(parent) = destination_parent {
             copy_regular(
                 source,
                 parent,
@@ -190,8 +226,12 @@ impl<'a> Walker<'a> {
                 path,
             )?
         } else {
-            expected_length
+            let post_read = fstat(&source).map_err(|error| nix_error("recheck source file", path, error))?;
+            (expected_length, post_read)
         };
+        verify_identity(metadata, &post_read, SFlag::S_IFREG, path)?;
+        let linked = entry_metadata(source_parent, name, path)?;
+        verify_identity(metadata, &linked, SFlag::S_IFREG, path)?;
         self.add_logical_bytes(actual, path)?;
         self.report.counts.files += 1;
         if metadata.st_nlink > 1 {
@@ -302,7 +342,9 @@ impl<'a> Walker<'a> {
     fn exclude_cache(&mut self, destination: Option<&Dir>, name: &OsStr, path: &[OsString]) -> Result<()> {
         self.report.exclusions.cache_roots += 1;
         self.excluded_cache_roots.insert(path.to_vec());
-        if let Some(parent) = destination {
+        if self.control.recreate_cache_roots
+            && let Some(parent) = destination
+        {
             create_empty_cache(parent, name, path)?;
         }
         Ok(())
@@ -395,7 +437,7 @@ fn copy_regular(
     source_mode: Mode,
     report: &CloneReport,
     path: &[OsString],
-) -> Result<u64> {
+) -> Result<(u64, FileStat)> {
     let destination = openat(
         destination_parent,
         name,
@@ -409,7 +451,8 @@ fn copy_regular(
     fchmod(&destination, source_mode & Mode::from_bits_truncate(0o777))
         .map_err(|error| nix_error("apply staging file mode", path, error))?;
     fsync(&destination).map_err(|error| nix_error("sync staging file", path, error))?;
-    Ok(copied)
+    let post_read = fstat(&source).map_err(|error| nix_error("recheck source file", path, error))?;
+    Ok((copied, post_read))
 }
 
 fn copy_bounded(source: &mut File, destination: &mut File, report: &CloneReport, path: &[OsString]) -> Result<u64> {

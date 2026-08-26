@@ -174,3 +174,82 @@ The final Codex session checked callable tools, MCP resources and MCP resource
 templates. No Dibs server or Dibs tool surface was available, so registration
 or agent messaging could not be performed from this session. Work continued
 without treating that integration as a blocker.
+
+## Lifecycle artifacts and rollback review, 2026-08-25
+
+### Before implementation
+
+Claude Opus 5 reviewed
+[`LIFECYCLE-ARTIFACTS-IMPLEMENTATION-PLAN.md`](LIFECYCLE-ARTIFACTS-IMPLEMENTATION-PLAN.md)
+at maximum effort in read-only mode. It confirmed that named templates,
+verifiable portable snapshots and guarded rollback are worth building and
+feasible without VM or container semantics, subject to Quarters' existing
+same-account and detached-writer boundaries.
+
+Four adversarial passes returned `VERDICT: BLOCK` while the proposal still had
+format or recovery contradictions. The review forced the design to add bounded
+artifact deletion, a byte-level canonical digest grammar, explicit lock-owner
+tokens, a three-state rollback contract, strict creation-versus-verification
+walker modes, reclaimable pre-marker staging, operation-specific cache policy,
+continuous coordination across both rollback renames, compatibility behavior
+for older binaries and a closed recovery namespace.
+
+The fifth pass re-read the complete amended plan and current implementation and
+returned `VERDICT: APPROVE`. Its remaining precision findings were folded into
+the approved plan before production code changed: ordered creation-lock removal,
+platform-bound rollback, surviving-artifact disclosure on space removal, exact
+MCP rollback state, every durable marker-state write, independent recovery
+budgets, shared post-read race hardening, the ADR 0006 gate clarification and
+doctor disclosure before whole-home recovery.
+
+Approval authorizes implementation; it is not a ship verdict. Claude remained
+read-only and executed no local acceptance gates.
+
+### Implementation and security acceptance
+
+Two initial maximum-effort implementation passes returned `VERDICT: BLOCK`.
+They found fail-closed behavior that was too broad around malformed rollback
+markers, non-atomic first-marker publication, duplicate transitional rows,
+uncounted retired trees, coupled recovery budgets and retry-ordering defects.
+The implementation now itemizes ambiguous markers, preserves unrelated space
+availability, publishes marker updates through a private temporary file plus
+rename and parent sync, uses non-cloneable lock tokens, retains every ambiguous
+tree and keeps recovery families independently bounded.
+
+Codex Security scan `20226dd7-5764-4ffe-b7b0-923294850dfb` reported one
+low-severity terminal-injection path in artifact diagnostics. Output now escapes
+untrusted IDs and messages in both human and JSON carriers, with a regression
+test. Its two non-reportable correctness observations also led to relocated-root
+recovery support and retry-safe recovery ordering. The scan workbench could not
+be updated because its remediation action token was unavailable; the exact fix
+was reproduced and verified locally.
+
+A subsequent complete Opus 5 pass reproduced an MCP status-budget bypass:
+rollback rows appended after the 128-space check could produce hundreds of
+agent-context entries. It also found an incorrect empty-list message,
+post-commit cleanup wording and artifact-catalog marker rescanning. All four
+were repaired. The combined MCP budget now applies after rollback rows and
+retained issues are merged; 128 entries succeed and 129 fail closed on both the
+tool and resource paths. Catalog source status parses marker inventory once,
+and cleanup failures after publication explicitly report that rollback already
+completed.
+
+The next maximum-effort pass returned `VERDICT: SHIP` after live hostile probes.
+Its two low-severity notes were also closed: actionable and malformed markers
+for one target collapse to one list/status row, and the final marker-directory
+sync uses the same post-commit diagnostic. A final narrow Opus 5 pass tested
+those exact repairs, returned `VERDICT: SHIP` with no findings and left the
+repository unchanged.
+
+### Final lifecycle-artifacts evidence
+
+- 157 Rust tests across core, CLI, MCP and compatibility suites
+- warnings-as-errors formatting, Clippy, rustdoc and structural ceilings
+- Cargo advisory, license and source policy plus npm checks and audit
+- hostile MCP probes at the 128/129 combined-entry boundary
+- live forced post-commit cleanup failure with recovery-state verification
+- malformed, ambiguous, duplicate and mixed rollback-marker probes
+
+Linux-only home-view and non-UTF-8-entry paths remain CI-gated rather than
+executed on this macOS host. Dibs registration was unavailable to the read-only
+Opus sessions, so these reviews were not recorded on the board.

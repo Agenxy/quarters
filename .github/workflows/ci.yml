@@ -45,6 +45,24 @@ jobs:
       - name: Audit locked dependencies
         run: cargo audit --deny warnings
 
+  linux-musl:
+    name: Linux x86_64 musl
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          rustup target add x86_64-unknown-linux-musl
+      - name: Build static release
+        run: cargo build --locked --workspace --release --target x86_64-unknown-linux-musl
+      - name: Test musl target
+        run: cargo test --locked --workspace --all-targets --target x86_64-unknown-linux-musl
+
   dependency-policy:
     name: Dependency licences and sources
     runs-on: ubuntu-24.04
@@ -57,4 +75,4 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           rust-version: "1.97.1"
-          command: check licenses sources
+          command: check

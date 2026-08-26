@@ -48,6 +48,8 @@ The default root is `~/.quarters`:
         .ssh/config
         .gnupg/
   trash/
+  .templates/<artifact-id>/{.quarters-artifact.json,home/}
+  .snapshots/<artifact-id>/{.quarters-artifact.json,home/}
 ```
 
 Creation builds a complete directory under `.creating-<name>-<unique>` on the
@@ -243,9 +245,10 @@ security decision may use `current` as proof of process identity.
 Landlock is future work. The build does not equate namespace path changes with
 filesystem confinement.
 
-## Lifecycle copy contract
+## Lifecycle copy and artifact contract
 
-The alpha ships one bounded portable operation: `clone`. Preview and execution
+Clone, template capture, snapshot capture, template use and rollback share a
+bounded portable copy engine. Preview and execution
 share a descriptor-relative walker rooted in already-open source and staging
 directories. It uses no-follow `openat`/`fstatat` operations, fixed entry/byte/
 depth/path limits, an exclusive cooperative source lease, private same-filesystem
@@ -266,9 +269,22 @@ source-name confirmation and writes versioned provenance without source content.
 The backend preserves file bytes and ordinary permission bits, but not
 timestamps, ACLs, xattrs, filesystem flags, set-ID/sticky bits, sparse extents or
 hard-link topology. Embedded absolute paths are copied without rewriting. A free
-cooperative lease cannot discover detached writers, so clone is not a live
-snapshot or quiescence proof.
+cooperative lease cannot discover detached writers, so these copies are not
+live database snapshots or quiescence proof.
 
-Platform clonefile/reflink acceleration, schema-1 stable IDs and the stronger
-requirements for templates, snapshots, export and rollback remain deferred.
-ADR 0003 records the accepted subset and unmet gates.
+Published templates and snapshots use opaque 128-bit physical IDs and strict
+manifests. A canonical BLAKE3 stream binds stored paths, types, ordinary modes,
+file bytes, symlink targets and terminal counts. Every consuming operation
+verifies the complete artifact. Integrity detects change but does not
+authenticate against another process with the same UID.
+
+Rollback verifies exact source identity, captures an automatic recovery
+snapshot, and replaces the complete target home while preserving its controls.
+A durable `prepared`/`retired`/`published` marker permits deterministic
+recovery. Readers report `rollback_in_progress`; recovery never guesses from an
+ambiguous filesystem tuple. Artifact and rollback staging are included in the
+bounded `doctor`/confirmed `recover` contract.
+
+Platform clonefile/reflink acceleration, schema-1 stable IDs, export,
+encryption, live freeze and live space rename remain deferred. ADR 0003 records
+the copy boundary; ADR 0008 defines lifecycle artifacts and rollback.
