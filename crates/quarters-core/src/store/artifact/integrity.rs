@@ -301,7 +301,7 @@ impl Verifier {
     }
 
     fn hash_mode(&mut self, raw_mode: nix::libc::mode_t) {
-        let mode = u32::from(raw_mode & 0o777);
+        let mode = normalized_mode(raw_mode);
         self.hasher.update(&mode.to_be_bytes());
     }
 
@@ -313,6 +313,16 @@ impl Verifier {
         self.hasher.update(&self.counts.symlinks.to_be_bytes());
         self.hasher.update(&self.counts.logical_bytes.to_be_bytes());
     }
+}
+
+#[cfg(target_os = "linux")]
+fn normalized_mode(raw_mode: nix::libc::mode_t) -> u32 {
+    raw_mode & 0o777
+}
+
+#[cfg(target_os = "macos")]
+fn normalized_mode(raw_mode: nix::libc::mode_t) -> u32 {
+    u32::from(raw_mode & 0o777)
 }
 
 fn raw_path(path: &[OsString]) -> Result<Vec<u8>> {
