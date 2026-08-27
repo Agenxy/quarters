@@ -56,7 +56,37 @@ rename refuses to orphan those name-bound artifacts. Recreate the artifacts
 from the upgraded space and intentionally remove the legacy copies before
 renaming, or retain the original display name.
 
-## 3. Clone a space safely
+## 3. Fork selected host shell state
+
+To begin with familiar shell settings, preview the closed `shell` policy. The
+preview reads only metadata into its output and creates no destination:
+
+```sh
+quarters --json create familiar --from-host shell --preview
+```
+
+Review the paths, exclusions, transformations, conflict flags and optional
+presets marked ineligible because they were linked or unsafe. Then pass the
+exact returned `plan_digest`:
+
+```sh
+quarters create familiar --from-host shell --confirm-plan DIGEST
+```
+
+If `.zshrc` or `.bashrc` is selected, it conflicts with Quarters' generated
+prompt startup file. Repeat the preview with `--replace-generated`, review the
+new digest, and confirm that exact plan. Add a non-sensitive regular file with
+`--from-host-path .customrc`; credentials, histories, directories, links and
+broadly writable files are refused when their path or type is recognizable.
+Selected file contents are not inspected and may still embed secrets; the
+preview reports this explicitly.
+
+Creation never evaluates copied startup code. Entering the new Quarter may do
+so, and the process retains the real account's access to absolute host paths.
+This workflow protects originals from ordinary redirected writes; it is not a
+sandbox or a trust transition.
+
+## 4. Clone a space safely
 
 Preview the included state and exclusions without creating anything:
 
@@ -80,7 +110,7 @@ still unknown. It is an atomic independent copy, not a live database snapshot or
 containment boundary. Embedded absolute paths are copied unchanged and may still
 point at the source.
 
-## 4. Create a template, snapshot and guarded rollback
+## 5. Create a template, snapshot and guarded rollback
 
 Capture reusable stationery after reviewing the preview:
 
@@ -122,7 +152,7 @@ that snapshot is deliberately retained. Inspect it, then retry with a new
 `--recovery-name`; alternatively verify and explicitly remove the retained
 snapshot before reusing the old name.
 
-## 5. Add an optional short command
+## 6. Add an optional short command
 
 Install Quarters first. When `~/.local/bin` is already on the host PATH:
 
@@ -138,7 +168,7 @@ check matters because a child cannot see aliases and functions defined only in
 its parent shell. Remove only the managed link with
 `quarters shortcut remove qts`. The shorter `q` name is opt-in.
 
-## 6. Prove state separation
+## 7. Prove state separation
 
 New spaces place a managed Quarters launcher and OpenSSH adapters first on
 their private PATH. Inspect them, then start the private agent only if this
@@ -167,7 +197,7 @@ git config --global user.name
 The last command runs on the host and should retain the host value. File
 permissions and access are still those of the same account.
 
-## 7. Enter the shell
+## 8. Enter the shell
 
 ```sh
 target/release/quarters enter clean
@@ -195,7 +225,7 @@ target/release/quarters enter clean --login
 
 Host system profiles can run in login mode.
 
-## 8. Pass a variable deliberately
+## 9. Pass a variable deliberately
 
 The baseline does not inherit arbitrary variables:
 
@@ -206,7 +236,7 @@ MY_SETTING=present target/release/quarters exec clean --inherit MY_SETTING -- en
 
 `env clean --inherit MY_SETTING` shows the value as redacted.
 
-## 9. Use host state explicitly
+## 10. Use host state explicitly
 
 Inside a baseline shell:
 
@@ -217,7 +247,7 @@ quarters host -- sh -c 'printf "%s\n" "$HOME"'
 This restores host path variables only. It does not restore blocked credential
 variables. Exit the space when you need the exact original host environment.
 
-## 10. Remove the space
+## 11. Remove the space
 
 Exit every process launched in the space, inspect the name, then run:
 
@@ -241,7 +271,7 @@ Quarters also fails closed when the root or activity lock is invalid.
 For an invalid stored name, obtain the exact value from `quarters --json list`.
 Removal accepts one literal entry name but never a path, `.` or `..`.
 
-## 11. Connect a local agent
+## 12. Connect a local agent
 
 Build or install Quarters, then configure the agent host to run the absolute
 binary path with the single `mcp` argument. Quarters communicates only over the
@@ -249,8 +279,9 @@ host-provided standard input/output pipes.
 
 Ask the agent to read `quarters://security` before using a mutating tool. It can
 inspect, run doctor and create a space. It cannot enter that space, execute a
-command, clone state, pass host credentials or remove anything. Use the human
-CLI for those operations after reviewing their authority implications.
+command, clone or fork host state, pass host credentials or remove anything.
+Use the human CLI for those operations after reviewing their authority
+implications.
 
 The create tool accepts an optional closed `layout` value of `profile` or
 `workspace` under both supported protocol revisions.

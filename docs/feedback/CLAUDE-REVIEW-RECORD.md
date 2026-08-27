@@ -450,3 +450,45 @@ Local evidence on this checkpoint:
 - `cargo audit --deny warnings`: pass
 - `x86_64-unknown-linux-musl` all-targets core check: pass
 - `git diff --check`: pass
+
+## Host-fork implementation review, 2026-08-26
+
+Claude Code 2.1.233 ran the latest Opus 5 in safe, read-only mode against the
+complete host-fork implementation. Its first substantive pass returned
+`VERDICT: REPAIR REQUIRED` for two issues: symlink-managed optional dotfiles
+made the entire shell preset unusable, and the accepted ADR named security
+invariants without direct adversarial evidence.
+
+Optional preset links and unsafe entries are now content-free, digest-bound
+`ineligible` rows; the same path explicitly requested remains a hard error.
+Tests directly exercise missing explicit presets, case-folded sensitive paths,
+hard links, FIFOs, writable files and homes, absolute and parent paths,
+per-file, total-byte and explicit-path limits, a HOME beneath the store, and a
+source truncation after staging with no destination or residue. Unit evidence
+covers duplicate filesystem identity and the sensitive-path classifier.
+
+The repair also states that selected file contents remain uninspected and may
+embed secrets. Copied zsh and bash interactive startup files receive a constant
+tail that reasserts the private history path before prompt integration.
+Human and JSON previews expose the complete bounded selected, absent and
+ineligible path sets without content or content-derived hashes. MCP retains its
+three-tool catalog and rejects a `from_host` create parameter.
+
+Opus rechecked every carried finding and returned `VERDICT: SHIP`. A final
+delta-only pass then verified exact human path disclosure, stable symbolic-link
+reasoning, portable POSIX mode checks and Linux pidfd lint repairs. Its verdict
+for the final source tree was again:
+
+> VERDICT: SHIP
+
+Final local evidence on the reviewed checkpoint:
+
+- `make check`: 220 Rust tests and 4 typed npm launcher tests
+- warnings-as-errors Clippy and rustdoc, formatting and structural ceilings
+- `cargo deny check` and `cargo audit --deny warnings`: pass; only the approved
+  transitive `syn` 2/3 duplication warning remains
+- Rust 1.97.1 `x86_64-unknown-linux-musl` all-targets core Clippy with warnings
+  denied: pass
+- release-installed macOS host fork: content-free preview, exact confirmation,
+  interactive zsh execution, private history, provenance and status all pass
+- `git diff --check`: pass

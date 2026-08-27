@@ -114,8 +114,7 @@ impl SignalTarget {
 
     pub(super) fn terminate(&self) -> Result<()> {
         match rustix::process::pidfd_send_signal(&self.pidfd, rustix::process::Signal::TERM) {
-            Ok(()) => Ok(()),
-            Err(rustix::io::Errno::SRCH) => Ok(()),
+            Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
             Err(error) => Err(
                 QuartersError::new(ErrorKind::System, "could not stop the verified private agent").with_source(error),
             ),
@@ -309,7 +308,9 @@ mod linux_tests {
             .arg("30")
             .spawn()
             .expect("spawn orphan target");
-        fs::write(path, format!("{}\n", child.id())).expect("publish orphan PID");
+        let child_id = child.id();
+        std::mem::forget(child);
+        fs::write(path, format!("{child_id}\n")).expect("publish orphan PID");
     }
 
     #[test]

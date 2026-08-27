@@ -37,6 +37,16 @@ credential-bearing mutation has a preview and exact confirmation. Rollback
 first captures an automatic recovery snapshot and uses a durable three-state
 transaction that `doctor` can explain and `recover` can finish safely.
 
+A previewed host fork can seed a new Quarter with a closed set of shell startup
+files plus explicitly named regular files. Its confirmation digest binds the
+source generations and policy; credentials, history, cache, runtime and agent
+stores are excluded by path. Selected file contents are deliberately
+uninspected and may themselves contain secrets. Creation never evaluates copied
+startup code, but entering the resulting Quarter may do so. This is a
+convenience and review boundary, not containment from the host account.
+Unsafe optional preset entries are reported as ineligible; an explicitly named
+unsafe path is an error.
+
 New spaces have opaque stable identities, recoverable display-name changes,
 managed OpenSSH invocation adapters and an explicit private SSH-agent
 lifecycle. The socket enters a child environment only after process liveness,
@@ -63,6 +73,7 @@ Cargo to build locally if host policy rejects them.
 cargo build --release
 target/release/quarters create work
 target/release/quarters create studio --layout workspace
+target/release/quarters create familiar --from-host shell --preview
 target/release/quarters clone studio experiment --preview
 target/release/quarters clone studio experiment --confirm-sensitive-state studio
 target/release/quarters template create clean-room --from studio --preview
@@ -102,6 +113,8 @@ install path.
 | Command | Purpose |
 |---|---|
 | `create NAME [--layout profile\|workspace]` | Atomically create a minimal profile or expanded workspace |
+| `create NAME --from-host shell --preview` | Review selected host shell files without reading them into output or creating a space |
+| `create NAME --from-host shell --confirm-plan DIGEST` | Atomically create only the exact metadata-bound host-fork plan |
 | `clone SOURCE DESTINATION --preview` | Validate and summarize a bounded clone without mutation |
 | `clone SOURCE DESTINATION --confirm-sensitive-state SOURCE` | Copy included persistent state into a new independent space |
 | `upgrade NAME --preview\|--confirm NAME` | Assign stable identity to an inactive legacy profile |

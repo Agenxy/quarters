@@ -169,6 +169,23 @@ Shortcut-spelled CLI and MCP launchers are canonicalized before managed-command
 installation, so creation through `qts` still records the stable `quarters`
 executable.
 
+### Host-fork transaction
+
+`create --from-host shell` is a separate file-selection authority from child
+environment inheritance. Preview anchors the host `HOME` with a protected
+directory descriptor and opens each closed-preset or explicit regular file one
+component at a time with no-follow semantics. Credentials, directories,
+history, runtime and caches are outside this policy.
+
+The confirmation digest binds the request and every observed source and parent
+directory generation. Execution recomputes that plan, keeps the exact source
+descriptors open through a bounded copy, checks them again, then reopens each
+path and compares its generation before atomic publication. A generated startup
+file is replaced only when `--replace-generated` was part of the preview. The
+private provenance file stores selection metadata and exclusions, not source
+contents or secret-derived hashes. This narrows accidental state selection; it
+does not restrict the authority of the resulting same-UID process.
+
 ## Process boundary
 
 `enter` and `exec` spawn the requested native executable directly. No shell is

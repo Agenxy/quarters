@@ -365,8 +365,50 @@ fn require_sensitive_confirmation(confirmation: Option<&str>, source: &SpaceName
 }
 
 fn create(store: &Store, host: &HostEnvironment, arguments: CreateArgs, json: bool) -> Result<i32> {
-    let name = SpaceName::parse(arguments.name)?;
+    let name = SpaceName::parse(arguments.name.clone())?;
     let shell = arguments.shell.unwrap_or_else(|| default_shell(host));
+    if let Some(policy) = arguments.from_host {
+        let report = if arguments.preview {
+            store.host_fork_plan(
+                host,
+                &name,
+                &shell,
+                arguments.layout.into(),
+                quarters_core::HostForkOptions {
+                    policy: policy.into(),
+                    explicit_paths: &arguments.from_host_path,
+                    replace_generated: arguments.replace_generated,
+                },
+            )?
+        } else {
+            let digest = arguments.confirm_plan.as_deref().ok_or_else(|| {
+                QuartersError::new(
+                    ErrorKind::InvalidInput,
+                    "host fork requires --preview or --confirm-plan DIGEST",
+                )
+                .with_hint(format!(
+                    "run 'quarters create {name} --from-host shell --preview' first"
+                ))
+            })?;
+            store.create_from_host(
+                host,
+                &name,
+                shell,
+                arguments.layout.into(),
+                quarters_core::HostForkOptions {
+                    policy: policy.into(),
+                    explicit_paths: &arguments.from_host_path,
+                    replace_generated: arguments.replace_generated,
+                },
+                digest,
+            )?
+        };
+        if !arguments.preview {
+            install_created_commands(store, &name)?;
+        }
+        output::print_host_fork(&report, json)?;
+        return Ok(0);
+    }
     let space = store.create_with_layout(name.clone(), shell, arguments.layout.into())?;
     install_created_commands(store, &name)?;
     output::print_created(&space, json)?;

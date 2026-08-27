@@ -3,6 +3,7 @@
 ## Assets
 
 - host credentials, histories and CLI configuration
+- integrity and confidentiality of host files considered for a host-fork plan
 - state in one Quarters space that should not be selected accidentally by
   another space
 - host files reachable by the real Unix account
@@ -35,6 +36,11 @@ policy.
 | Partial or redirected clone | Exclusive cooperative lease, descriptor-relative no-follow walk, private staging, fresh controls and atomic rename |
 | Clone leaks file inventory | Human and JSON results expose bounded aggregate classes and counts, never home paths or file content |
 | Clone silently duplicates credentials | Mutation requires exact source-name sensitive-state confirmation; preview and provenance declare the policy |
+| Host fork imports broad or known sensitive paths | Closed shell preset, explicit regular-file allowlist, case-insensitive credential/history/cache path denylist, file/count/size bounds and no directory recursion; output admits selected contents are uninspected |
+| Host fork follows a swapped source path | Protected absolute HOME anchor, descriptor-relative no-follow component walk, retained source descriptors and pre-publication path-generation verification; linked presets are digest-bound ineligible entries |
+| Preview approves different host state | Domain-separated digest binds destination policy, home and traversed-directory identities, file metadata, missing presets and replacement choice; any observed change requires a new preview |
+| Copied startup content runs during creation | Source bytes are never evaluated; copy is native descriptor I/O and acceptance uses an execution sentinel |
+| Generated startup state is overwritten silently | Conflicts fail until `--replace-generated` is included in a new preview and therefore in a new digest |
 | Artifact content changes after capture | Canonical whole-tree BLAKE3 verification binds stored paths, types, ordinary modes, content, link targets and counts before every use |
 | Artifact digest is mistaken for authentication | Output and documentation state that another same-UID process can alter both content and manifest |
 | Partial rollback replaces only some state | Complete staging, verified automatic recovery snapshot and durable prepared/retired/published transaction; recursive merge is forbidden |
@@ -79,7 +85,7 @@ policy.
 | MCP request replay | Duplicate live IDs close the connection; legacy IDs are never reusable in-session |
 | Agent prompt injection from disk | Invalid entry names are bounded hex and detailed stored-entry errors are replaced on MCP surfaces |
 | Terminal or JSON presentation injection | Human and JSON stored text is escaped and bounded before emission |
-| Agent overreach | MCP has no clone, exec, enter, host, inherit, home-view, root-selection or removal tool |
+| Agent overreach | MCP has no clone, host-fork, exec, enter, host, inherit, home-view, root-selection or removal tool |
 | Remote attack surface | MCP transport is stdio-only; dependency gate rejects common HTTP/TLS server stacks |
 
 ## Explicit non-goals
@@ -96,6 +102,7 @@ policy.
 - treating a free cooperative lease as proof that detached clone writers are absent
 - treating workspace directories or a stable space ID as containment or authorization
 - treating a private SSH agent as protection from another process with the same UID
+- treating host-fork preview or provenance as authentication against the same UID
 - remote MCP, OAuth, agent-triggered command execution or agent-triggered deletion
 
 ## Host and sudo escape
@@ -130,6 +137,18 @@ An operator-selected custom store root is trusted along with its ancestor
 directories; it must not be placed beneath a directory writable by another
 user. Quarters validates the selected root without claiming to secure or
 rewrite its ancestors.
+
+Host fork copies selected startup files as untrusted data. Creation does not
+run them, but a later interactive shell may. The metadata digest detects the
+changes Quarters observes between preview and publication; it is not a MAC and
+cannot stop another process with the same UID from modifying both source and
+destination state. This phase rejects credentials and directories rather than
+claiming a general host-home clone. Startup and explicit files can still embed
+secrets because Quarters does not inspect or redact their contents. It preserves
+file bytes but intentionally normalizes destination permissions and appends a
+constant state-and-prompt tail to zsh and bash interactive startup files. The
+tail reasserts Quarters' history path, but startup code can still perform
+arbitrary host-account reads and writes before it runs.
 
 Clone, template and snapshot capture copy arbitrary included state without interpreting or rewriting embedded
 absolute paths. Such paths can still read or mutate the source Quarter or host.

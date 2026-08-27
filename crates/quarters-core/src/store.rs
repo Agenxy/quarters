@@ -2,6 +2,7 @@
 
 pub(crate) mod artifact;
 mod create;
+mod host_fork;
 mod layout;
 pub(crate) mod lifecycle;
 mod remove;
@@ -9,6 +10,7 @@ mod rename;
 pub(crate) mod scan;
 mod upgrade;
 
+pub use host_fork::{HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport};
 pub(crate) use layout::StoreLayout;
 pub use rename::SpaceRenameReport;
 pub use upgrade::SpaceUpgradeReport;

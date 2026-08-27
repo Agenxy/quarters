@@ -53,10 +53,13 @@ impl Store {
         let staging_identity = StagingIdentity::capture(&temporary, &creation_lock)?;
         drop(setup_observation);
         let requested_name = name.as_str().to_owned();
-        if let Err(error) = populate_space(&temporary, name, default_shell, layout) {
-            let _cleanup = staging_identity.cleanup(&temporary);
-            return Err(error);
-        }
+        let _manifest = match populate_space(&temporary, name, default_shell, layout) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                let _cleanup = staging_identity.cleanup(&temporary);
+                return Err(error);
+            }
+        };
         let publication = (|| {
             staging_identity.verify(&temporary, &creation_lock_path)?;
             let observation = self.management_guard()?;
@@ -141,7 +144,12 @@ fn reject_publish_collision(destination: &Path, name: &str) -> Result<()> {
     }
 }
 
-fn populate_space(root: &Path, name: SpaceName, default_shell: PathBuf, layout: SpaceLayout) -> Result<()> {
+pub(super) fn populate_space(
+    root: &Path,
+    name: SpaceName,
+    default_shell: PathBuf,
+    layout: SpaceLayout,
+) -> Result<SpaceManifest> {
     let home = root.join("home");
     create_private_dir(&home)?;
     for relative in private_directories() {
@@ -171,7 +179,8 @@ fn populate_space(root: &Path, name: SpaceName, default_shell: PathBuf, layout: 
         default_shell,
         authority_model: "host-account-state-profile".to_owned(),
     };
-    write_manifest(root, &manifest)
+    write_manifest(root, &manifest)?;
+    Ok(manifest)
 }
 
 fn workspace_directories() -> &'static [&'static str] {

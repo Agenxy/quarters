@@ -6,6 +6,12 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.3 — unreleased
 
+- Add previewed, digest-confirmed host shell forking with descriptor-anchored
+  no-follow source selection, strict credential exclusions, bounded explicit
+  files, generation revalidation, private provenance and atomic publication.
+- Require a distinct `--replace-generated` plan before replacing generated
+  startup files; creation never evaluates copied content and MCP deliberately
+  receives no host-fork authority.
 - Give every newly created profile and workspace an opaque schema-3 identity;
   add an atomic legacy-profile upgrade and recoverable display-name rename
   without breaking existing snapshot binding.

@@ -86,6 +86,40 @@ pub(crate) struct CreateArgs {
     /// User-directory layout to create.
     #[arg(long, value_enum, default_value_t = CreateLayout::Profile)]
     pub(crate) layout: CreateLayout,
+
+    /// Preview or import a closed set of host-owned state.
+    #[arg(long, value_enum)]
+    pub(crate) from_host: Option<CreateHostPolicy>,
+
+    /// Add one explicit regular file beneath host HOME (maximum 32).
+    #[arg(long, value_name = "RELATIVE_PATH", requires = "from_host")]
+    pub(crate) from_host_path: Vec<PathBuf>,
+
+    /// Validate and print the exact metadata-bound host-fork plan.
+    #[arg(long, requires = "from_host", conflicts_with = "confirm_plan")]
+    pub(crate) preview: bool,
+
+    /// Execute only the exact 64-hex digest returned by preview.
+    #[arg(long, value_name = "DIGEST", requires = "from_host", conflicts_with = "preview")]
+    pub(crate) confirm_plan: Option<String>,
+
+    /// Replace generated files selected by the confirmed plan.
+    #[arg(long, requires = "from_host")]
+    pub(crate) replace_generated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CreateHostPolicy {
+    /// Selected startup and editing convention files; no credentials or history.
+    Shell,
+}
+
+impl From<CreateHostPolicy> for quarters_core::HostForkPolicy {
+    fn from(value: CreateHostPolicy) -> Self {
+        match value {
+            CreateHostPolicy::Shell => Self::Shell,
+        }
+    }
 }
 
 #[derive(Debug, Args)]

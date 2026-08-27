@@ -14,6 +14,6 @@ starts a shell or command. `quarters_doctor` reads
 platform and tool compatibility; when given a space name, it also constructs
 the environment and may create private runtime directories.
 
-This MCP server intentionally exposes no clone authority, arbitrary process
-execution, shell entry, host escape, credential inheritance, deletion or remote
-network listener. Use the human CLI for those explicit operations.
+This MCP server intentionally exposes no clone or host-fork authority, arbitrary
+process execution, shell entry, host escape, credential inheritance, deletion
+or remote network listener. Use the human CLI for those explicit operations.

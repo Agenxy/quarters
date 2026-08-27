@@ -145,6 +145,64 @@ pub(crate) fn print_created(space: &Space, json_output: bool) -> quarters_core::
     Ok(())
 }
 
+pub(crate) fn print_host_fork(report: &quarters_core::HostForkReport, json_output: bool) -> quarters_core::Result<()> {
+    if json_output {
+        return print_success("create", report, true);
+    }
+    println!(
+        "{} {} from host {} policy",
+        if report.mode == quarters_core::HostForkMode::Preview {
+            "Host-fork preview for"
+        } else {
+            "Created"
+        },
+        report.destination,
+        match report.policy {
+            quarters_core::HostForkPolicy::Shell => "shell",
+        }
+    );
+    println!("  Plan       {}", report.plan_digest);
+    println!(
+        "  Selected   {} files, {} logical bytes",
+        report.file_count, report.logical_bytes
+    );
+    println!("  Missing    {} optional preset files", report.absent.len());
+    println!("  Ineligible {} optional preset files", report.ineligible.len());
+    for file in &report.files {
+        println!(
+            "  File       {} ({} bytes, {}, {})",
+            path_for_human(&file.path),
+            file.bytes,
+            file.category,
+            file.transformation
+        );
+    }
+    for entry in &report.ineligible {
+        println!("  Refused    {} ({})", path_for_human(&entry.path), entry.reason);
+    }
+    for path in &report.absent {
+        println!("  Absent     {}", path_for_human(path));
+    }
+    println!(
+        "  Conflicts  {} generated files{}",
+        report.files.iter().filter(|file| file.generated_conflict).count(),
+        if report.replace_generated {
+            " (approved)"
+        } else {
+            " (not approved)"
+        }
+    );
+    println!("  Warning    {}", report.warning);
+    println!("  Boundary   {}", report.authority_boundary);
+    if report.mode == quarters_core::HostForkMode::Preview {
+        println!(
+            "  Next       repeat the same options with --confirm-plan {}",
+            report.plan_digest
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn print_clone(report: &CloneReport, json_output: bool) -> quarters_core::Result<()> {
     if json_output {
         return print_success("clone", report, true);

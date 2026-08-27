@@ -16,6 +16,7 @@ current host. It does not read credentials.
 | bash | A | `HOME`, `.bashrc` | system login profiles can still run |
 | Prompt context | B | validated `QUARTERS_PROMPT_PREFIX` plus `shell-init` | parent themes may need explicit ordering; marker is not proof of isolation |
 | Expanded workspace | A/C | HOME/XDG plus conventional personal directories | passwd-home, platform registration and absolute paths may remain host-bound |
+| Host shell fork | B/C | previewed descriptor-anchored selection, digest confirmation and atomic publication | entering may execute copied startup code; credentials, history and directories remain excluded |
 | Lifecycle clone | B/C | bounded native copy with explicit policy and atomic publication | detached writers unknown; selected metadata and embedded absolute paths are not transformed |
 | Named templates | B/C | canonical BLAKE3-verified portable copy plus fresh destination controls | arbitrary state may contain credentials; embedded paths are not rewritten |
 | Named snapshots | B/C | immutable-by-interface recovery point with whole-tree verification | cooperative lease cannot prove detached writers are absent |

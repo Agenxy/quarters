@@ -504,6 +504,7 @@ fn assert_catalog(tools: &rmcp::model::ListToolsResult, modern: bool) -> Result<
             assert!(validator.is_valid(&json!({"name": "agent_1", "layout": "workspace"})));
             assert!(!validator.is_valid(&json!({"name": "../escape"})));
             assert!(!validator.is_valid(&json!({"name": "agent_1", "layout": "container"})));
+            assert!(!validator.is_valid(&json!({"name": "agent_1", "from_host": "shell"})));
         }
     }
     Ok(())

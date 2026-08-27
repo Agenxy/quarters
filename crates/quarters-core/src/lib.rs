@@ -34,6 +34,9 @@ pub use store::artifact::{
     RollbackObservation, RollbackRecoveryAction, RollbackReport, SourceIdentity, SourceStatus, TemplateUseReport,
 };
 pub use store::lifecycle::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};
-pub use store::{LeaseState, SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store};
+pub use store::{
+    HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport, LeaseState,
+    SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store,
+};
 pub use store_recovery::RecoverySummary;
 pub use text::{encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded};
