@@ -1,7 +1,8 @@
 .DEFAULT_GOAL := help
 QUARTERS_INSTALL_ROOT ?= $(HOME)/.local
+LAUNCHER_DIR := $(CURDIR)/packaging/npm/quarters-cli
 
-.PHONY: help format check test quality npm-check dependencies docs install
+.PHONY: help format check test quality launcher-check dependencies docs install
 
 help:
 	@printf '%s\n' \
@@ -11,7 +12,7 @@ help:
 	  '  make check    Run the complete local quality suite' \
 	  '  make test     Run all tests' \
 	  '  make quality  Enforce structural ceilings' \
-	  '  make npm-check  Check the typed npm launcher' \
+	  '  make launcher-check  Check the typed npm launcher with Bun' \
 	  '  make dependencies  Audit advisories, licences and sources' \
 	  '  make docs     Build warning-free API documentation' \
 	  '  make install  Install quarters under ~/.local/bin'
@@ -19,15 +20,12 @@ help:
 format:
 	cargo fmt --all
 
-check:
+check: launcher-check
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --all-features
 	cargo test --workspace --all-targets
 	cargo run --quiet -p quarters-quality -- check
 	RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
-	npm ci --ignore-scripts --prefix packaging/npm/quarters-cli
-	npm run check --prefix packaging/npm/quarters-cli
-	npm audit --audit-level high --prefix packaging/npm/quarters-cli
 
 test:
 	cargo test --workspace --all-targets
@@ -35,10 +33,10 @@ test:
 quality:
 	cargo run --quiet -p quarters-quality -- check
 
-npm-check:
-	npm ci --ignore-scripts --prefix packaging/npm/quarters-cli
-	npm run check --prefix packaging/npm/quarters-cli
-	npm audit --audit-level high --prefix packaging/npm/quarters-cli
+launcher-check:
+	cd '$(LAUNCHER_DIR)' && bun install --frozen-lockfile --ignore-scripts
+	cd '$(LAUNCHER_DIR)' && bun run check
+	cd '$(LAUNCHER_DIR)' && bun audit --audit-level high
 
 dependencies:
 	cargo deny check

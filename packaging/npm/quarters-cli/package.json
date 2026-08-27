@@ -3,6 +3,7 @@
   "version": "0.1.0-alpha.3",
   "description": "Persistent alternate user-state profiles for native processes",
   "license": "Apache-2.0",
+  "packageManager": "bun@1.3.14",
   "type": "module",
   "bin": {
     "quarters": "dist/src/quarters.js"
@@ -43,8 +44,9 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "check": "tsc --project tsconfig.json --noEmit && npm test",
-    "prepack": "npm run build",
-    "test": "npm run build && node --test dist/test/*.test.js"
+    "check": "bun run typecheck && bun run test",
+    "prepack": "bun run build",
+    "test": "bun run build && node --test dist/test/*.test.js",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
   }
 }

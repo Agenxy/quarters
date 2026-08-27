@@ -92,10 +92,12 @@ quarters current
 
 Install the current checkout with `make install`. Building from source requires
 a current Rust toolchain plus a working C compiler and assembler for optimized
-BLAKE3. The command is placed under
-`~/.local/bin` by default. The checkout is the unreleased alpha.3 development
-line. The latest public release is alpha.2, currently available through these
-verified channels:
+BLAKE3. The complete repository gate and typed npm launcher development also
+require Bun 1.3.14 and Node.js 26.2.0. npm remains the package registry,
+artifact-publication tool and global-install surface. The command is placed
+under `~/.local/bin` by default. The checkout is the unreleased alpha.3
+development line. The latest public release is alpha.2, currently available
+through these verified channels:
 
 ```sh
 brew install agenxy/tap/quarters

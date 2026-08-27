@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.3 — unreleased
 
+- Pin Bun 1.3.14 as the typed npm launcher's development package manager and
+  lockfile owner, rename its local gate to `make launcher-check`, and retain
+  npm as the consumer installation, artifact packaging and publication surface.
 - Add previewed, digest-confirmed host shell forking with descriptor-anchored
   no-follow source selection, strict credential exclusions, bounded explicit
   files, generation revalidation, private provenance and atomic publication.
