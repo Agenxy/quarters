@@ -57,6 +57,14 @@ pub(super) fn verified_socket_identity(path: &Path, expected_pid: u32) -> Result
             "the private agent socket did not return a bounded SSH identities response",
         ));
     }
+    let payload_length = usize::try_from(declared - 1).map_err(|error| {
+        QuartersError::new(ErrorKind::CorruptState, "the private agent response length is invalid").with_source(error)
+    })?;
+    let mut payload = vec![0_u8; payload_length];
+    stream
+        .read_exact(&mut payload)
+        .map_err(|error| QuartersError::io("read complete SSH-agent response", path, error))?;
+    validate_identities_payload(&payload)?;
     let after = socket_metadata(path)?;
     if before.ino() != after.ino() || before.dev() != after.dev() {
         return Err(QuartersError::new(
@@ -68,6 +76,62 @@ pub(super) fn verified_socket_identity(path: &Path, expected_pid: u32) -> Result
         device: after.dev(),
         inode: after.ino(),
     })
+}
+
+fn validate_identities_payload(payload: &[u8]) -> Result<()> {
+    let mut cursor = PayloadCursor::new(payload);
+    let identities = cursor.read_u32()?;
+    for _ in 0..identities {
+        cursor.read_string()?;
+        cursor.read_string()?;
+    }
+    if cursor.is_empty() {
+        return Ok(());
+    }
+    Err(invalid_identities_payload())
+}
+
+struct PayloadCursor<'a> {
+    remaining: &'a [u8],
+}
+
+impl<'a> PayloadCursor<'a> {
+    const fn new(bytes: &'a [u8]) -> Self {
+        Self { remaining: bytes }
+    }
+
+    fn read_u32(&mut self) -> Result<u32> {
+        let bytes = self.take(4)?;
+        Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn read_string(&mut self) -> Result<()> {
+        let length = usize::try_from(self.read_u32()?).map_err(|error| {
+            QuartersError::new(ErrorKind::CorruptState, "the private agent response length is invalid")
+                .with_source(error)
+        })?;
+        self.take(length).map(|_| ())
+    }
+
+    fn take(&mut self, length: usize) -> Result<&'a [u8]> {
+        let (taken, remaining) = self
+            .remaining
+            .split_at_checked(length)
+            .ok_or_else(invalid_identities_payload)?;
+        self.remaining = remaining;
+        Ok(taken)
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.remaining.is_empty()
+    }
+}
+
+fn invalid_identities_payload() -> QuartersError {
+    QuartersError::new(
+        ErrorKind::CorruptState,
+        "the private agent socket returned a malformed SSH identities payload",
+    )
 }
 
 pub(super) fn recoverable_disconnected_socket(path: &Path, expected: SocketIdentity) -> Result<bool> {
@@ -185,4 +249,18 @@ fn validate_socket(path: &Path, metadata: &fs::Metadata) -> Result<()> {
         ErrorKind::CorruptState,
         format!("invalid private SSH-agent socket {}: {issue}", path.display()),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identities_payload_requires_complete_exact_framing() {
+        assert!(validate_identities_payload(&[0, 0, 0, 0]).is_ok());
+        assert!(validate_identities_payload(&[0, 0, 0]).is_err());
+        assert!(validate_identities_payload(&[0, 0, 0, 0, 0]).is_err());
+        assert!(validate_identities_payload(&[0, 0, 0, 1]).is_err());
+        assert!(validate_identities_payload(&[0, 0, 0, 1, 0, 0, 0, 1, 42, 0, 0, 0, 0]).is_ok());
+    }
 }

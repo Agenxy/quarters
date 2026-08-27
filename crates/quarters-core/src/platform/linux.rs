@@ -7,7 +7,9 @@ use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{Gid, Uid, getgroups};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 pub(super) fn platform_capabilities() -> Capabilities {
@@ -54,7 +56,7 @@ pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
 }
 
 pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
-    validate_home_view_paths(space_home, host_home)?;
+    let (space_descriptor, host_descriptor) = validate_home_view_paths(space_home, host_home)?;
     ensure_no_extra_groups()?;
     let uid = Uid::current().as_raw();
     let gid = Gid::current().as_raw();
@@ -73,15 +75,34 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> R
     unshare(CloneFlags::CLONE_NEWNS).map_err(|error| namespace_error("create a mount namespace", error))?;
     mount::<str, str, str, str>(None, "/", None, MsFlags::MS_REC | MsFlags::MS_PRIVATE, None)
         .map_err(|error| namespace_error("make mounts private", error))?;
+    let space_descriptor_path = descriptor_path(&space_descriptor);
+    let host_descriptor_path = descriptor_path(&host_descriptor);
     mount(
-        Some(space_home),
-        host_home,
+        Some(&space_descriptor_path),
+        &host_descriptor_path,
         None::<&str>,
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
     )
     .map_err(|error| namespace_error("bind the space home over the passwd home", error))?;
-    std::env::set_current_dir(host_home).map_err(|error| QuartersError::io("enter the mounted home", host_home, error))
+    std::env::set_current_dir(host_home)
+        .map_err(|error| QuartersError::io("enter the mounted home", host_home, error))?;
+    verify_current_directory(&space_descriptor)
+}
+
+fn verify_current_directory(space_descriptor: &File) -> Result<()> {
+    let expected = space_descriptor
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect the space home descriptor", Path::new("."), error))?;
+    let actual = fs::metadata(".")
+        .map_err(|error| QuartersError::io("inspect the mounted current directory", Path::new("."), error))?;
+    if expected.dev() == actual.dev() && expected.ino() == actual.ino() {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "the mounted current directory does not match the requested space home",
+    ))
 }
 
 fn user_namespace_status() -> CapabilityStatus {
@@ -141,26 +162,46 @@ fn read_boolean_sysctl(path: &str) -> Option<bool> {
     fs::read_to_string(path).ok().map(|value| value.trim() == "1")
 }
 
-fn validate_home_view_paths(space_home: &Path, host_home: &Path) -> Result<()> {
-    if !space_home.is_absolute() || !space_home.is_dir() {
-        return Err(QuartersError::new(
-            ErrorKind::InvalidInput,
-            "space home must be an existing absolute directory",
-        ));
-    }
-    if !host_home.is_absolute() || !host_home.is_dir() {
-        return Err(QuartersError::new(
-            ErrorKind::InvalidInput,
-            "host home must be an existing absolute directory",
-        ));
-    }
+fn validate_home_view_paths(space_home: &Path, host_home: &Path) -> Result<(File, File)> {
     if space_home == host_home {
         return Err(QuartersError::new(
             ErrorKind::InvalidInput,
             "space and host home paths must differ",
         ));
     }
-    Ok(())
+    let space = open_owned_home_directory(space_home, "space")?;
+    let host = open_owned_home_directory(host_home, "account")?;
+    Ok((space, host))
+}
+
+fn open_owned_home_directory(path: &Path, label: &str) -> Result<File> {
+    if !path.is_absolute() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            format!("{label} home must be an existing absolute directory"),
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(nix::libc::O_CLOEXEC | nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW);
+    let file = options
+        .open(path)
+        .map_err(|error| QuartersError::io("open home-view directory", path, error))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect home-view directory", path, error))?;
+    if metadata.is_dir() && metadata.uid() == Uid::current().as_raw() {
+        return Ok(file);
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        format!("{label} home is not a current-user directory"),
+    ))
+}
+
+fn descriptor_path(file: &File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
 
 fn write_namespace_map(path: &Path, contents: String) -> Result<()> {

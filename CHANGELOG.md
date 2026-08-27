@@ -42,6 +42,20 @@ compatibility notes will be called out here.
   batches beyond the inspection ceiling.
 - Recognize and re-key the released pre-alpha.4 runtime-directory spelling,
   refusing multiple candidate trees rather than abandoning or merging state.
+- Bind Linux home-view launch to descriptor-validated passwd and space homes,
+  then verify the post-mount current directory before executing the child.
+- Retain generation-safe process handles while stopping private agents: pidfd
+  signalling and readiness polling on Linux, and start-time revalidation on
+  macOS; removal proves agent absence even when a space home is damaged.
+- Bind creation, copy, rollback, template and removal cleanup to retained
+  filesystem generations; preserve replacement trees and shortcut links rather
+  than deleting pathnames that changed during a transaction.
+- Separate protocol result ceilings from 131,072-entry filesystem work budgets
+  across space, artifact, rename and recovery scans; ordinary spaces no longer
+  consume rollback-marker limits.
+- Validate the complete SSH-agent identities response, every persisted launcher
+  ancestor, and effective executable access; clean partial private registry
+  temporaries without following replacements.
 
 - Add named, verifiable templates and snapshots with create, list, show,
   verify, use, rename and removal lifecycles, stable JSON contracts and private

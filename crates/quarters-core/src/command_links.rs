@@ -91,13 +91,13 @@ pub fn inspect_command_links(space: &Space) -> Result<CommandLinkReport> {
 fn install_command_links(space: &Space, executable: &Path) -> Result<CommandLinkReport> {
     let directory = space.home().join(".local/bin");
     validate_command_directory(space)?;
-    validate_launcher(executable)?;
+    let launcher = validate_command_launcher(executable)?;
     let before = inspect_command_links(space)?;
     ensure_installable(&before)?;
     let mut created = Vec::new();
     if before.launcher.state == CommandLinkState::Absent {
         let path = directory.join("quarters");
-        created.push(create_link(executable, &path)?);
+        created.push(create_link(&launcher, &path)?);
     }
     for entry in &before.tools {
         if entry.state == CommandLinkState::Absent {
@@ -286,16 +286,55 @@ fn validate_directory(path: &Path) -> Result<()> {
     ))
 }
 
-fn validate_launcher(path: &Path) -> Result<()> {
-    let metadata =
-        fs::symlink_metadata(path).map_err(|error| QuartersError::io("inspect Quarters launcher", path, error))?;
-    if path.is_absolute() && path.file_name() == Some(OsStr::new("quarters")) && safe_launcher_metadata(&metadata) {
-        return Ok(());
+/// Validate an executable before persisting it as a managed launcher target.
+///
+/// # Errors
+///
+/// Returns an error when the file or an ancestor is replaceable by another
+/// OS principal under ordinary Unix mode-bit authority.
+pub fn validate_command_launcher(path: &Path) -> Result<PathBuf> {
+    let canonical =
+        fs::canonicalize(path).map_err(|error| QuartersError::io("resolve Quarters launcher", path, error))?;
+    let metadata = fs::symlink_metadata(&canonical)
+        .map_err(|error| QuartersError::io("inspect Quarters launcher", &canonical, error))?;
+    if !canonical.is_absolute()
+        || canonical.file_name() != Some(OsStr::new("quarters"))
+        || !safe_launcher_metadata(&metadata)
+    {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "the running executable cannot be installed as a stable Quarters launcher",
+        ));
     }
-    Err(QuartersError::new(
-        ErrorKind::Unsupported,
-        "the running executable cannot be installed as a stable Quarters launcher",
-    ))
+    validate_launcher_ancestors(&canonical)?;
+    Ok(canonical)
+}
+
+fn validate_launcher_ancestors(path: &Path) -> Result<()> {
+    let current_uid = nix::unistd::Uid::current().as_raw();
+    let Some(parent) = path.parent() else {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "the Quarters launcher has no parent directory",
+        ));
+    };
+    for ancestor in parent.ancestors() {
+        let metadata = fs::symlink_metadata(ancestor)
+            .map_err(|error| QuartersError::io("inspect Quarters launcher ancestor", ancestor, error))?;
+        let uid = metadata.uid();
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || (uid != 0 && uid != current_uid)
+            || metadata.permissions().mode() & 0o022 != 0
+        {
+            return Err(QuartersError::new(
+                ErrorKind::Unsupported,
+                format!("the Quarters launcher has an unsafe ancestor: {}", ancestor.display()),
+            )
+            .with_hint("install Quarters beneath directories that no other OS principal can replace"));
+        }
+    }
+    Ok(())
 }
 
 fn safe_launcher_metadata(metadata: &fs::Metadata) -> bool {
@@ -403,5 +442,19 @@ mod tests {
                 .iter()
                 .all(|entry| entry.state == CommandLinkState::Managed)
         );
+    }
+
+    #[test]
+    fn launcher_below_a_writable_ancestor_is_rejected() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let unsafe_directory = temporary.path().join("shared");
+        fs::create_dir(&unsafe_directory).expect("create shared directory");
+        fs::set_permissions(&unsafe_directory, fs::Permissions::from_mode(0o777)).expect("make ancestor writable");
+        let executable = unsafe_directory.join("quarters");
+        fs::write(&executable, b"quarters test executable").expect("write launcher");
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).expect("protect launcher");
+
+        let error = validate_command_launcher(&executable).expect_err("writable ancestor must fail");
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
     }
 }

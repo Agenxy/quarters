@@ -4,7 +4,9 @@ pub(crate) mod artifact;
 mod create;
 mod layout;
 pub(crate) mod lifecycle;
+mod remove;
 mod rename;
+pub(crate) mod scan;
 mod upgrade;
 
 pub(crate) use layout::StoreLayout;
@@ -12,14 +14,11 @@ pub use rename::SpaceRenameReport;
 pub use upgrade::SpaceUpgradeReport;
 
 use crate::store_lock::lock_shared_bounded;
-use crate::store_policy::{
-    validate_private_dir, validate_private_file, validate_removal_entry_name, validate_stored_manifest,
-};
+use crate::store_policy::{validate_private_dir, validate_private_file, validate_stored_manifest};
 use crate::{
     ErrorKind, LATEST_SCHEMA_VERSION, PROFILE_SCHEMA_VERSION, QuartersError, Result, SUPPORTED_SCHEMA_VERSIONS, Space,
     SpaceManifest, SpaceName,
 };
-use fs4::FileExt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -206,8 +205,10 @@ impl Store {
         let entries =
             fs::read_dir(&spaces_root).map_err(|error| QuartersError::io("read spaces", &spaces_root, error))?;
         let mut inspections = Vec::new();
+        let mut scan = scan::ScanBudget::new("the spaces directory");
         for entry in entries {
             let entry = entry.map_err(|error| QuartersError::io("read a space entry", &spaces_root, error))?;
+            scan.observe()?;
             let file_name = entry.file_name();
             if file_name.to_string_lossy().starts_with('.') {
                 continue;
@@ -217,7 +218,7 @@ impl Store {
             {
                 return Err(QuartersError::new(
                     ErrorKind::ResourceLimit,
-                    format!("the store contains more than {maximum} visible space entries"),
+                    format!("the store contains more than {maximum} visible spaces"),
                 )
                 .with_hint("inspect one exact space by name, or use the human CLI outside an MCP transcript"));
             }
@@ -267,47 +268,6 @@ impl Store {
         Ok(SpaceLease { _file: file })
     }
 
-    /// Remove an inactive space using rename-then-delete.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the space is active or an exact filesystem
-    /// operation fails.
-    pub fn remove(&self, name: &str) -> Result<()> {
-        validate_removal_entry_name(name)?;
-        let host = crate::HostEnvironment::capture();
-        let removable_space = if let Ok(validated_name) = SpaceName::parse(name.to_owned()) {
-            self.ensure_no_rename_target(&validated_name)?;
-            self.ensure_no_rollback_target(&validated_name)?;
-            self.ensure_no_agent_for_removal(&validated_name, &host)?;
-            self.open(&validated_name).ok()
-        } else {
-            None
-        };
-        let Some(spaces_root) = self.existing_spaces_root()? else {
-            return Err(space_not_found(name));
-        };
-        let retired = {
-            let _observation = self.management_guard()?;
-            retire_space(self, &spaces_root, name)?
-        };
-        let recovery_hint = "the space was retired from use; run 'quarters doctor' and recover validated stale state";
-        lifecycle::remove_tree_restoring_owner_access(&retired).map_err(|error| error.with_hint(recovery_hint))?;
-        sync_parent_directory(&retired).map_err(|error| {
-            error.with_hint(format!(
-                "space '{name}' was removed, but directory durability could not be confirmed; inspect status before retrying"
-            ))
-        })?;
-        if let Some(space) = removable_space {
-            crate::platform::remove_runtime_directory(&space, &host).map_err(|error| {
-                error.with_hint(format!(
-                    "space '{name}' was removed, but its exact private runtime directory was retained for inspection"
-                ))
-            })?;
-        }
-        Ok(())
-    }
-
     fn open_path(path: PathBuf) -> Result<Space> {
         let expected_name = path
             .file_name()
@@ -322,40 +282,18 @@ impl Store {
     }
 
     fn open_path_with_expected_name(path: PathBuf, expected_name: &str) -> Result<Space> {
-        let manifest_path = path.join(MANIFEST_FILE);
         validate_space_anchors(&path)?;
-        let bytes = read_private_file(&manifest_path)?;
-        let header: ManifestHeader = serde_json::from_slice(&bytes).map_err(|error| {
-            QuartersError::new(
-                ErrorKind::CorruptState,
-                format!("space manifest header is invalid at {}", manifest_path.display()),
-            )
-            .with_source(error)
-        })?;
-        if !SUPPORTED_SCHEMA_VERSIONS.contains(&header.schema_version) {
-            return Err(QuartersError::new(
-                ErrorKind::CorruptState,
-                format!(
-                    "space uses schema {}, but this build supports schemas {} through {}",
-                    header.schema_version, PROFILE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION
-                ),
-            )
-            .with_hint("upgrade Quarters before opening this space; do not delete or rewrite its manifest"));
-        }
-        let manifest: SpaceManifest = serde_json::from_slice(&bytes).map_err(|error| {
-            QuartersError::new(
-                ErrorKind::CorruptState,
-                format!("space manifest is invalid at {}", manifest_path.display()),
-            )
-            .with_source(error)
-        })?;
-        validate_stored_manifest(&manifest)?;
-        if expected_name != manifest.name.as_str() {
-            return Err(QuartersError::new(
-                ErrorKind::CorruptState,
-                "space directory and manifest names differ",
-            ));
-        }
+        let manifest = read_validated_manifest(&path, expected_name)?;
+        Ok(Space::new(path, manifest))
+    }
+
+    pub(crate) fn open_identity_for_removal(&self, name: &SpaceName) -> Result<Space> {
+        let Some(spaces_root) = self.existing_spaces_root()? else {
+            return Err(space_not_found(name.as_str()));
+        };
+        let path = spaces_root.join(name.as_str());
+        validate_removal_anchors(&path)?;
+        let manifest = read_validated_manifest(&path, name.as_str())?;
         Ok(Space::new(path, manifest))
     }
 
@@ -371,34 +309,41 @@ impl Store {
     }
 }
 
-fn retire_space(store: &Store, spaces_root: &Path, name: &str) -> Result<PathBuf> {
-    let space_path = spaces_root.join(name);
-    let metadata = match fs::symlink_metadata(&space_path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(space_not_found(name)),
-        Err(error) => return Err(QuartersError::io("inspect removal target", &space_path, error)),
-    };
-    validate_private_dir(&space_path, &metadata)?;
-    let lock_path = space_path.join(".active");
-    let file = open_private_lock(&lock_path)?;
-    <File as FileExt>::try_lock(&file).map_err(|error| match error {
-        fs4::TryLockError::WouldBlock => QuartersError::new(
-            ErrorKind::SpaceActive,
-            format!("space '{name}' has a held cooperative lease"),
+fn read_validated_manifest(path: &Path, expected_name: &str) -> Result<SpaceManifest> {
+    let manifest_path = path.join(MANIFEST_FILE);
+    let bytes = read_private_file(&manifest_path)?;
+    let header: ManifestHeader = serde_json::from_slice(&bytes).map_err(|error| {
+        QuartersError::new(
+            ErrorKind::CorruptState,
+            format!("space manifest header is invalid at {}", manifest_path.display()),
         )
-        .with_hint(format!(
-            "run 'quarters status {name}', exit supervised and detached processes, then retry"
-        )),
-        fs4::TryLockError::Error(error) => QuartersError::io("lock space for removal", &lock_path, error),
+        .with_source(error)
     })?;
-    let trash_root = store.layout().trash_root().to_path_buf();
-    create_private_dir(&trash_root)?;
-    let retired = trash_root.join(format!(".retired-{}", unique_suffix()?));
-    fs::rename(&space_path, &retired).map_err(|error| QuartersError::io("retire space", &space_path, error))?;
-    let recovery_hint = "the space was retired from use; run 'quarters doctor' and recover validated stale state";
-    sync_parent_directory(&space_path).map_err(|error| error.with_hint(recovery_hint))?;
-    sync_parent_directory(&retired).map_err(|error| error.with_hint(recovery_hint))?;
-    Ok(retired)
+    if !SUPPORTED_SCHEMA_VERSIONS.contains(&header.schema_version) {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            format!(
+                "space uses schema {}, but this build supports schemas {} through {}",
+                header.schema_version, PROFILE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION
+            ),
+        )
+        .with_hint("upgrade Quarters before opening this space; do not delete or rewrite its manifest"));
+    }
+    let manifest: SpaceManifest = serde_json::from_slice(&bytes).map_err(|error| {
+        QuartersError::new(
+            ErrorKind::CorruptState,
+            format!("space manifest is invalid at {}", manifest_path.display()),
+        )
+        .with_source(error)
+    })?;
+    validate_stored_manifest(&manifest)?;
+    if expected_name != manifest.name.as_str() {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "space directory and manifest names differ",
+        ));
+    }
+    Ok(manifest)
 }
 
 pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -508,13 +453,17 @@ fn missing_private_file(path: &Path, error: std::io::Error) -> QuartersError {
 }
 
 fn validate_space_anchors(path: &Path) -> Result<()> {
-    let root_metadata =
-        fs::symlink_metadata(path).map_err(|error| QuartersError::io("inspect space directory", path, error))?;
-    validate_private_dir(path, &root_metadata)?;
+    validate_removal_anchors(path)?;
     let home = path.join("home");
     let home_metadata =
         fs::symlink_metadata(&home).map_err(|error| QuartersError::io("inspect space home", &home, error))?;
-    validate_private_dir(&home, &home_metadata)?;
+    validate_private_dir(&home, &home_metadata)
+}
+
+fn validate_removal_anchors(path: &Path) -> Result<()> {
+    let root_metadata =
+        fs::symlink_metadata(path).map_err(|error| QuartersError::io("inspect space directory", path, error))?;
+    validate_private_dir(path, &root_metadata)?;
     drop(open_private_lock(&path.join(".active"))?);
     Ok(())
 }
@@ -593,6 +542,7 @@ pub(crate) fn unique_suffix() -> Result<String> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use fs4::FileExt;
     #[cfg(target_os = "linux")]
     use std::ffi::OsString;
     #[cfg(target_os = "linux")]
@@ -648,6 +598,18 @@ mod tests {
     }
 
     #[test]
+    fn bounded_inspection_separates_hidden_work_from_visible_results() {
+        let (_temporary, store) = test_store();
+        store.ensure_layout().expect("create layout");
+        for name in [".ignored-one", ".ignored-two"] {
+            fs::write(store.layout().spaces_root().join(name), b"").expect("create ignored entry");
+        }
+
+        let inspections = store.inspect_at_most(1).expect("hidden entries are not results");
+        assert!(inspections.is_empty());
+    }
+
+    #[test]
     fn existing_empty_root_lists_no_spaces() {
         let temporary = TempDir::new().expect("temporary directory");
         let store = Store::new(temporary.path().to_path_buf()).expect("valid store");
@@ -694,12 +656,12 @@ mod tests {
 
     #[test]
     fn symlinked_space_home_is_rejected() {
-        let (_temporary, store) = test_store();
+        let (temporary, store) = test_store();
         let name = SpaceName::parse("redirected").expect("valid name");
         let space = store
             .create(name.clone(), PathBuf::from("/bin/sh"))
             .expect("create space");
-        let real_home = space.root().join("real-home");
+        let real_home = temporary.path().join("real-home");
         fs::rename(space.home(), &real_home).expect("move home");
         symlink(&real_home, space.home()).expect("link home");
 
@@ -710,6 +672,7 @@ mod tests {
             SpaceInspection::Unhealthy { .. }
         ));
         store.remove(name.as_str()).expect("remove entry with unhealthy home");
+        assert!(real_home.exists());
     }
 
     #[test]

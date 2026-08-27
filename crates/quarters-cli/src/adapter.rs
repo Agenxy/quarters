@@ -173,11 +173,17 @@ fn resolve_host_tool(tool: &str, path: &OsStr) -> Result<PathBuf> {
         if resolved.file_name() == Some(OsStr::new("quarters")) {
             continue;
         }
-        if resolved.metadata().is_ok_and(|metadata| {
-            metadata.is_file()
-                && metadata.permissions().mode() & 0o111 != 0
-                && (metadata.dev(), metadata.ino()) != current
-        }) {
+        if resolved
+            .metadata()
+            .is_ok_and(|metadata| metadata.is_file() && (metadata.dev(), metadata.ino()) != current)
+            && nix::unistd::faccessat(
+                nix::fcntl::AT_FDCWD,
+                &resolved,
+                nix::unistd::AccessFlags::X_OK,
+                nix::fcntl::AtFlags::AT_EACCESS,
+            )
+            .is_ok()
+        {
             return Ok(resolved);
         }
     }

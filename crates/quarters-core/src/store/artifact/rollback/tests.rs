@@ -2,6 +2,21 @@ use super::*;
 use tempfile::TempDir;
 
 #[test]
+fn ordinary_spaces_do_not_consume_the_rollback_marker_limit() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let temporary = TempDir::new()?;
+    let store = Store::new(temporary.path().join("root"))?;
+    store.ensure_layout()?;
+    for index in 0..=MAX_ROLLBACK_MARKERS {
+        create_private_dir(&store.layout().spaces_root().join(format!("space-{index}")))?;
+    }
+
+    let inventory = load_recovery_inventory(store.layout().spaces_root(), None)?;
+    assert!(inventory.plans.is_empty());
+    assert!(inventory.issues.is_empty());
+    Ok(())
+}
+
+#[test]
 fn rollback_restores_state_and_keeps_recovery() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let temporary = TempDir::new()?;
     let store = Store::new(temporary.path().join("root"))?;

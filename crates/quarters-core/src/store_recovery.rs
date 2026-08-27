@@ -11,6 +11,7 @@ use fs4::FileExt;
 
 use crate::store::artifact::rollback_retired_entry_is_actionable;
 use crate::store::lifecycle::remove_tree_restoring_owner_access;
+use crate::store::scan::ScanBudget;
 use crate::store::{StoreLayout, entry_exists, open_private_lock, sync_directory, unique_suffix};
 use crate::store_policy::{validate_private_dir, validate_private_file, validate_store_root};
 use crate::{
@@ -359,8 +360,10 @@ fn artifact_candidates(root: &Path) -> Result<ArtifactCandidates> {
         unknown: 0,
     };
     let entries = fs::read_dir(root).map_err(|error| QuartersError::io("read artifact recovery root", root, error))?;
+    let mut scan = ScanBudget::new("the artifact recovery root");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read artifact recovery entry", root, error))?;
+        scan.observe()?;
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             candidates.unknown = candidates.unknown.saturating_add(1);
             continue;
@@ -517,8 +520,10 @@ fn validate_layout(root: &Path, layout: &StoreLayout) -> Result<()> {
 fn matching_entries(parent: &Path, prefixes: &[&[u8]]) -> Result<Vec<std::path::PathBuf>> {
     let mut matches = Vec::new();
     let entries = fs::read_dir(parent).map_err(|error| QuartersError::io("read recovery parent", parent, error))?;
+    let mut scan = ScanBudget::new("the store recovery parent");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read recovery entry", parent, error))?;
+        scan.observe()?;
         if !prefixes.iter().any(|prefix| has_prefix(&entry.file_name(), prefix)) {
             continue;
         }
@@ -542,8 +547,10 @@ fn count_unknown_space_entries(spaces: &Path) -> Result<usize> {
     let entries =
         fs::read_dir(spaces).map_err(|error| QuartersError::io("read spaces recovery namespace", spaces, error))?;
     let mut unknown = 0_usize;
+    let mut scan = ScanBudget::new("the spaces recovery namespace");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read spaces recovery entry", spaces, error))?;
+        scan.observe()?;
         let name = entry.file_name();
         if name.as_bytes().starts_with(b".") && !is_known_space_hidden_entry(spaces, &name) {
             unknown = unknown.saturating_add(1);

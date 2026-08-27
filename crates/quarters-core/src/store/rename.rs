@@ -2,6 +2,7 @@
 
 use super::artifact::SourceIdentity;
 use super::create::replace_manifest;
+use super::scan::ScanBudget;
 use super::{Store, entry_exists, read_private_file, sync_directory, write_private_file};
 use crate::store_lock::acquire_lifecycle_lease;
 use crate::store_policy::validate_private_file;
@@ -221,8 +222,10 @@ fn rename_scan(spaces: &Path) -> Result<RenameScan> {
         Err(error) => return Err(QuartersError::io("read rename recovery namespace", spaces, error)),
     };
     let mut scan = RenameScan::default();
+    let mut work = ScanBudget::new("the spaces directory while inspecting rename recovery");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read rename recovery entry", spaces, error))?;
+        work.observe()?;
         let Some(id) = parse_marker_name(&entry.file_name()) else {
             continue;
         };
@@ -250,8 +253,10 @@ fn recover_rename_batch(store: &Store, spaces: &Path) -> Result<RenameRecovery> 
         recovered: 0,
         issues: 0,
     };
+    let mut work = ScanBudget::new("the spaces directory while recovering renames");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read rename recovery entry", spaces, error))?;
+        work.observe()?;
         let Some((path, marker)) = valid_marker_entry(&entry) else {
             continue;
         };
@@ -282,8 +287,10 @@ fn rename_target_exists(spaces: &Path, name: &SpaceName) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(QuartersError::io("read rename recovery namespace", spaces, error)),
     };
+    let mut work = ScanBudget::new("the spaces directory while matching rename targets");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read rename recovery entry", spaces, error))?;
+        work.observe()?;
         let Some(id) = parse_marker_name(&entry.file_name()) else {
             continue;
         };

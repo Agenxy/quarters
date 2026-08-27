@@ -17,7 +17,9 @@ mod text;
 pub mod platform;
 
 pub use agent::{AgentState, AgentStatus, run_ssh_agent_helper};
-pub use command_links::{CommandLinkEntry, CommandLinkReport, CommandLinkState, inspect_command_links};
+pub use command_links::{
+    CommandLinkEntry, CommandLinkReport, CommandLinkState, inspect_command_links, validate_command_launcher,
+};
 pub use environment::{EnvironmentPlan, HostEnvironment, host_command_environment};
 pub use error::{ErrorKind, QuartersError, Result};
 pub use model::{

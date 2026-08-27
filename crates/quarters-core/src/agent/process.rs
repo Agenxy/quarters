@@ -77,14 +77,138 @@ pub(super) fn process_is_alive(pid: u32) -> Result<bool> {
     }
 }
 
-pub(super) fn terminate(pid: u32) -> Result<()> {
+pub(super) fn terminate_unreaped_child(pid: u32) -> Result<()> {
     let pid = validated_pid(pid)?;
     match kill(pid, Signal::SIGTERM) {
         Ok(()) | Err(Errno::ESRCH) => Ok(()),
         Err(error) => {
-            Err(QuartersError::new(ErrorKind::System, "could not stop the verified private agent").with_source(error))
+            Err(QuartersError::new(ErrorKind::System, "could not stop the private-agent launcher").with_source(error))
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+pub(super) struct SignalTarget {
+    pidfd: rustix::fd::OwnedFd,
+}
+
+#[cfg(target_os = "macos")]
+pub(super) struct SignalTarget {
+    pid: Pid,
+    started_seconds: u64,
+    started_microseconds: u64,
+}
+
+#[cfg(target_os = "linux")]
+impl SignalTarget {
+    pub(super) fn capture(pid: u32) -> Result<Self> {
+        let pid = validated_pid(pid)?;
+        let rustix_pid = rustix::process::Pid::from_raw(pid.as_raw())
+            .ok_or_else(|| QuartersError::new(ErrorKind::CorruptState, "the private-agent PID is invalid"))?;
+        let pidfd = rustix::process::pidfd_open(rustix_pid, rustix::process::PidfdFlags::empty()).map_err(|error| {
+            QuartersError::new(ErrorKind::System, "could not capture the private-agent process handle")
+                .with_source(error)
+        })?;
+        Ok(Self { pidfd })
+    }
+
+    pub(super) fn terminate(&self) -> Result<()> {
+        match rustix::process::pidfd_send_signal(&self.pidfd, rustix::process::Signal::TERM) {
+            Ok(()) => Ok(()),
+            Err(rustix::io::Errno::SRCH) => Ok(()),
+            Err(error) => Err(
+                QuartersError::new(ErrorKind::System, "could not stop the verified private agent").with_source(error),
+            ),
+        }
+    }
+
+    pub(super) fn has_exited(&self) -> Result<bool> {
+        use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+        use std::os::fd::AsFd;
+
+        let mut descriptors = [PollFd::new(self.pidfd.as_fd(), PollFlags::POLLIN)];
+        let ready = poll(&mut descriptors, PollTimeout::ZERO).map_err(|error| {
+            QuartersError::new(ErrorKind::System, "could not poll the verified private agent").with_source(error)
+        })?;
+        if ready == 0 {
+            return Ok(false);
+        }
+        let events = descriptors[0].revents().ok_or_else(|| {
+            QuartersError::new(
+                ErrorKind::System,
+                "the private-agent process handle returned unknown poll events",
+            )
+        })?;
+        if events.intersects(PollFlags::POLLIN | PollFlags::POLLHUP) {
+            return Ok(true);
+        }
+        Err(QuartersError::new(
+            ErrorKind::System,
+            "the private-agent process handle returned an unexpected poll event",
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl SignalTarget {
+    pub(super) fn capture(pid: u32) -> Result<Self> {
+        let pid = validated_pid(pid)?;
+        let info = macos_process_info(pid)?;
+        Ok(Self {
+            pid,
+            started_seconds: info.pbi_start_tvsec,
+            started_microseconds: info.pbi_start_tvusec,
+        })
+    }
+
+    pub(super) fn terminate(&self) -> Result<()> {
+        let current = macos_process_info(self.pid)?;
+        if current.pbi_start_tvsec != self.started_seconds || current.pbi_start_tvusec != self.started_microseconds {
+            return Err(QuartersError::new(
+                ErrorKind::CorruptState,
+                "the private-agent process generation changed before shutdown",
+            ));
+        }
+        match kill(self.pid, Signal::SIGTERM) {
+            Ok(()) | Err(Errno::ESRCH) => Ok(()),
+            Err(error) => Err(
+                QuartersError::new(ErrorKind::System, "could not stop the verified private agent").with_source(error),
+            ),
+        }
+    }
+
+    pub(super) fn has_exited(&self) -> Result<bool> {
+        let Some(current) = macos_process_info_optional(self.pid)? else {
+            return Ok(true);
+        };
+        if current.pbi_start_tvsec == self.started_seconds && current.pbi_start_tvusec == self.started_microseconds {
+            return Ok(false);
+        }
+        Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "the private-agent process generation changed during shutdown",
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_process_info(pid: Pid) -> Result<proc_pidinfo::ProcBSDInfo> {
+    macos_process_info_optional(pid)?
+        .ok_or_else(|| QuartersError::new(ErrorKind::NotFound, "the private-agent process no longer exists"))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_process_info_optional(pid: Pid) -> Result<Option<proc_pidinfo::ProcBSDInfo>> {
+    let raw = u32::try_from(pid.as_raw()).map_err(|error| {
+        QuartersError::new(ErrorKind::CorruptState, "the private-agent PID is invalid").with_source(error)
+    })?;
+    proc_pidinfo::proc_pidinfo::<proc_pidinfo::ProcBSDInfo>(proc_pidinfo::Pid(raw)).map_err(|error| {
+        QuartersError::new(
+            ErrorKind::System,
+            "could not inspect the private-agent process generation",
+        )
+        .with_source(error)
+    })
 }
 
 pub(super) fn remove_matching_socket(path: &Path, device: u64, inode: u64) -> Result<()> {
@@ -167,4 +291,65 @@ fn validated_pid(pid: u32) -> Result<Pid> {
         ));
     }
     Ok(Pid::from_raw(raw))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[allow(clippy::expect_used)]
+mod linux_tests {
+    use super::*;
+
+    const ORPHAN_PID_PATH: &str = "QUARTERS_TEST_ORPHAN_PID_PATH";
+
+    #[test]
+    fn orphan_process_helper() {
+        let Some(path) = std::env::var_os(ORPHAN_PID_PATH) else {
+            return;
+        };
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn orphan target");
+        fs::write(path, format!("{}\n", child.id())).expect("publish orphan PID");
+    }
+
+    #[test]
+    fn pidfd_poll_observes_a_non_child_process_exit() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let pid_path = temporary.path().join("pid");
+        let executable = std::env::current_exe().expect("test executable");
+        let status = Command::new(executable)
+            .args(["--exact", "agent::process::linux_tests::orphan_process_helper"])
+            .env(ORPHAN_PID_PATH, &pid_path)
+            .status()
+            .expect("run orphan helper");
+        assert!(status.success());
+        let pid = fs::read_to_string(&pid_path)
+            .expect("read orphan PID")
+            .trim()
+            .parse::<u32>()
+            .expect("parse orphan PID");
+        assert_ne!(
+            linux_parent_pid(pid).expect("read orphan parent PID"),
+            std::process::id()
+        );
+        let target = SignalTarget::capture(pid).expect("capture non-child pidfd");
+
+        target.terminate().expect("signal non-child through pidfd");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !target.has_exited().expect("poll non-child pidfd") && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(target.has_exited().expect("observe non-child exit"));
+    }
+
+    fn linux_parent_pid(pid: u32) -> std::io::Result<u32> {
+        let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("PPid:\t"))
+            .ok_or_else(|| std::io::Error::other("process status omitted PPid"))?
+            .trim()
+            .parse::<u32>()
+            .map_err(std::io::Error::other)
+    }
 }

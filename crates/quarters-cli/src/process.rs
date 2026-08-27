@@ -53,7 +53,7 @@ impl ProfileLaunch<'_> {
             )
             .with_hint("omit --home-view for portable state redirection"));
         }
-        self.host_home()
+        Self::host_home()
     }
 
     fn run_home_view(
@@ -66,7 +66,7 @@ impl ProfileLaunch<'_> {
             QuartersError::new(ErrorKind::System, "could not locate the Quarters executable").with_source(error)
         })?;
         install_runtime_binary(&current_executable, environment)?;
-        let host_home = self.host_home()?;
+        let host_home = Self::host_home()?;
         let mut command = Command::new(current_executable);
         command
             .arg("__linux-launch")
@@ -83,12 +83,19 @@ impl ProfileLaunch<'_> {
             .map_err(|error| process_error("start Linux home-view launcher", program, error))
     }
 
-    fn host_home(&self) -> Result<PathBuf> {
-        self.host
-            .get("HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .ok_or_else(|| QuartersError::new(ErrorKind::InvalidInput, "host HOME is unset or not absolute"))
+    fn host_home() -> Result<PathBuf> {
+        let user = nix::unistd::User::from_uid(nix::unistd::Uid::current())
+            .map_err(|error| {
+                QuartersError::new(ErrorKind::System, "could not resolve the current account home").with_source(error)
+            })?
+            .ok_or_else(|| QuartersError::new(ErrorKind::Unsupported, "the current account has no passwd record"))?;
+        if user.dir.is_absolute() {
+            return Ok(user.dir);
+        }
+        Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "the current account passwd home is not absolute",
+        ))
     }
 }
 

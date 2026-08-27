@@ -413,3 +413,40 @@ residuals, not authority or data-isolation defects.
 The explicit final verdict for the exact tested implementation tree was:
 
 > VERDICT: SHIP
+
+## Stable-identity security hardening, 2026-08-26
+
+Codex Security scan `dfb84c4f-7ba7-4af0-a853-f314670c5df8` inspected exact
+commit `51b2a65063ee52cf7408c64b99433a53c9cdeb19` and reported four medium and
+six low findings. The repaired tree now binds staging and removal roots to
+retained filesystem generations, validates persisted launcher ancestry, fully
+parses SSH-agent replies, separates filesystem work budgets from result
+ceilings and retains generation-safe process handles through shutdown.
+
+Claude Code Opus 5 first returned `VERDICT: REPAIR REQUIRED`. It confirmed four
+blocking paths: Linux home-view entered a descriptor behind the bind mount,
+ordinary spaces consumed the rollback-marker limit, damaged-home removal could
+not safely distinguish agent state, and several filtered directory scans had
+no total-work bound. Each path received direct regression coverage.
+
+A second Opus pass found that `pidfd-util::try_wait` relied on child-only
+`waitid`, which fails for the ordinary later-process stop topology. Linux now
+uses rustix `pidfd_open`, `pidfd_send_signal` and readiness polling on the
+retained pidfd. Its Linux-only test creates a verified orphaned non-child,
+signals it through the pidfd and observes exit without resolving the numeric
+PID again. An exact `x86_64-unknown-linux-musl` all-targets check passes.
+
+The final safe-mode, read-only Opus 5 pass returned
+`VERDICT: READY FOR HOST-FORK PHASE`. Its nonblocking determinism notes were
+also closed by enabling rustix `std` explicitly and asserting the regression
+target's parent differs from the polling test process.
+
+Local evidence on this checkpoint:
+
+- `make check`: 209 Rust tests and 4 typed npm launcher tests
+- warnings-as-errors Clippy and rustdoc, formatting and structural ceilings
+- `cargo deny check`: advisory, ban, license and source policy pass; only the
+  approved transitive `syn` 2/3 duplication warning remains
+- `cargo audit --deny warnings`: pass
+- `x86_64-unknown-linux-musl` all-targets core check: pass
+- `git diff --check`: pass

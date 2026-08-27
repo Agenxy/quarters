@@ -7,7 +7,10 @@ use super::model::{
     TemplateUseReport,
 };
 use crate::store::create::{acquire_creation_lock, ensure_directory_skeleton, write_manifest};
-use crate::store::lifecycle::{CloneMode, CloneReport, WalkControl, remove_tree_restoring_owner_access, walk_home};
+use crate::store::lifecycle::{
+    CloneMode, CloneReport, StagingIdentity, WalkControl, remove_tree_restoring_owner_access, walk_home,
+};
+use crate::store::scan::ScanBudget;
 use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease};
 use crate::store_policy::{validate_private_dir, validate_shell};
 use crate::{ErrorKind, QuartersError, Result, STABLE_SCHEMA_VERSION, SpaceId, SpaceManifest, SpaceName, Store};
@@ -66,7 +69,7 @@ impl Store {
         let result = self.execute_artifact(&mut setup, name, include_cache, origin);
         if let Err(original) = &result
             && let Some(staging) = &setup.staging
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(QuartersError::new(
                 original.kind(),
@@ -93,7 +96,7 @@ impl Store {
         let result = self.execute_artifact(&mut setup, name, include_cache, origin);
         if let Err(original) = &result
             && let Some(staging) = &setup.staging
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(QuartersError::new(
                 original.kind(),
@@ -142,8 +145,10 @@ impl Store {
             .collect::<BTreeSet<_>>();
         let mut inspections = Vec::new();
         let entries = fs::read_dir(&root).map_err(|error| QuartersError::io("read artifact catalog", &root, error))?;
+        let mut scan = ScanBudget::new("the artifact catalog");
         for entry in entries {
             let entry = entry.map_err(|error| QuartersError::io("read artifact entry", &root, error))?;
+            scan.observe()?;
             let id = entry.file_name().to_string_lossy().into_owned();
             if id.starts_with('.') {
                 continue;
@@ -261,7 +266,7 @@ impl Store {
         let staging = prepare_space_staging(self, destination)?;
         let result = self.execute_template_use(&template, destination, &selected_shell, &staging);
         if let Err(original) = &result
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(QuartersError::new(
                 original.kind(),
@@ -425,6 +430,7 @@ impl Store {
         write_template_provenance(&staging.temporary, template)?;
         sync_directory(&staging.temporary.join("home"))?;
         sync_directory(&staging.temporary)?;
+        self.verify_artifact(ArtifactKind::Template, &template.manifest().name)?;
         self.publish_template_space(template, &manifest, staging)?;
         Ok(template_use_report(
             template,
@@ -449,6 +455,9 @@ impl Store {
             ));
         }
         reject_space_destination(self, &manifest.name)?;
+        staging
+            .identity
+            .verify(&staging.temporary, &staging.creation_lock_path)?;
         fs::remove_file(&staging.creation_lock_path)
             .map_err(|error| QuartersError::io("remove template staging lock", &staging.creation_lock_path, error))?;
         sync_directory(&staging.temporary)?;
@@ -478,6 +487,9 @@ impl Store {
                 "generated artifact ID already exists",
             ));
         }
+        staging
+            .identity
+            .verify(&staging.temporary, &staging.creation_lock_path)?;
         fs::remove_file(&staging.creation_lock_path)
             .map_err(|error| QuartersError::io("remove artifact staging lock", &staging.creation_lock_path, error))?;
         sync_directory(&staging.temporary)?;
@@ -492,7 +504,9 @@ impl Store {
             .map_err(|error| QuartersError::io("publish artifact", &staging.temporary, error))?;
         sync_directory(&staging.root)
     }
+}
 
+impl Store {
     pub(super) fn require_artifact_name_available(&self, kind: ArtifactKind, name: &ArtifactName) -> Result<()> {
         match self.open_artifact(kind, name) {
             Ok(_artifact) => Err(QuartersError::new(
@@ -596,6 +610,7 @@ pub(super) struct SpaceStaging {
     pub(super) temporary: PathBuf,
     pub(super) destination: PathBuf,
     pub(super) creation_lock_path: PathBuf,
+    pub(super) identity: StagingIdentity,
     pub(super) _creation_lock: File,
 }
 
@@ -605,6 +620,7 @@ struct ArtifactStaging {
     temporary: PathBuf,
     destination: PathBuf,
     creation_lock_path: PathBuf,
+    identity: StagingIdentity,
     _creation_lock: File,
 }
 
@@ -697,13 +713,18 @@ fn prepare_artifact_staging(store: &Store, kind: ArtifactKind) -> Result<Artifac
     create_private_dir(&temporary)?;
     let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
     let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
-    create_private_dir(&temporary.join("home"))?;
+    let identity = StagingIdentity::capture(&temporary, &creation_lock)?;
+    if let Err(error) = create_private_dir(&temporary.join("home")) {
+        let _cleanup = identity.cleanup(&temporary);
+        return Err(error);
+    }
     Ok(ArtifactStaging {
         id,
         root,
         temporary,
         destination,
         creation_lock_path,
+        identity,
         _creation_lock: creation_lock,
     })
 }
@@ -721,11 +742,16 @@ pub(super) fn prepare_space_staging(store: &Store, destination: &SpaceName) -> R
     create_private_dir(&temporary)?;
     let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
     let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
-    create_private_dir(&temporary.join("home"))?;
+    let identity = StagingIdentity::capture(&temporary, &creation_lock)?;
+    if let Err(error) = create_private_dir(&temporary.join("home")) {
+        let _cleanup = identity.cleanup(&temporary);
+        return Err(error);
+    }
     Ok(SpaceStaging {
         destination: store.space_path(destination),
         temporary,
         creation_lock_path,
+        identity,
         _creation_lock: creation_lock,
     })
 }

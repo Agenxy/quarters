@@ -2,6 +2,7 @@
 
 use super::model::{AgentRecord, REGISTRY_SCHEMA_VERSION};
 use crate::store::{read_private_file, sync_directory, unique_suffix, write_private_file};
+use crate::store_policy::validate_private_file;
 use crate::{ErrorKind, QuartersError, Result, Space};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,12 +51,24 @@ pub(super) fn replace(runtime: &Path, expected: &AgentRecord, replacement: &Agen
     }
     let temporary = runtime.join(format!(".ssh-agent-registry-{}.tmp", unique_suffix()?));
     let bytes = serialize(replacement)?;
-    write_private_file(&temporary, &bytes)?;
+    if let Err(error) = write_private_file(&temporary, &bytes) {
+        cleanup_private_temporary(&temporary);
+        return Err(error);
+    }
     if let Err(error) = fs::rename(&temporary, registry_path(runtime)) {
-        let _cleanup = fs::remove_file(&temporary);
+        cleanup_private_temporary(&temporary);
         return Err(QuartersError::io("replace private SSH-agent registry", runtime, error));
     }
     sync_directory(runtime)
+}
+
+fn cleanup_private_temporary(path: &Path) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if validate_private_file(path, &metadata).is_ok() {
+        let _cleanup = fs::remove_file(path);
+    }
 }
 
 pub(super) fn remove(runtime: &Path, expected: &AgentRecord) -> Result<()> {

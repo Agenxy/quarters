@@ -977,6 +977,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc_pidinfo"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29492a7b48a00ab80202528e235d2f80a04ccff3747540b4ec6881f2f2bc42d1"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "quarters"
 version = "0.1.0-alpha.3"
 dependencies = [
@@ -997,6 +1006,8 @@ dependencies = [
  "fs4",
  "getrandom 0.4.3",
  "nix",
+ "proc_pidinfo",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

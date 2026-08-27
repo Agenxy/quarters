@@ -1,6 +1,6 @@
 //! Atomic space creation transaction and initial user-state files.
 
-use super::lifecycle::remove_tree_restoring_owner_access;
+use super::lifecycle::{StagingIdentity, remove_tree_restoring_owner_access};
 use super::{
     MANIFEST_FILE, Store, create_private_dir, entry_exists, epoch_millis, open_or_create_private_lock, sync_directory,
     sync_parent_directory, write_private_file,
@@ -50,35 +50,42 @@ impl Store {
         create_private_dir(&temporary)?;
         let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
         let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
+        let staging_identity = StagingIdentity::capture(&temporary, &creation_lock)?;
         drop(setup_observation);
         let requested_name = name.as_str().to_owned();
         if let Err(error) = populate_space(&temporary, name, default_shell, layout) {
-            let _cleanup = remove_tree_restoring_owner_access(&temporary);
+            let _cleanup = staging_identity.cleanup(&temporary);
             return Err(error);
         }
-        let _publish_observation = match self.management_guard() {
+        let publication = (|| {
+            staging_identity.verify(&temporary, &creation_lock_path)?;
+            let observation = self.management_guard()?;
+            let publication_name = SpaceName::parse(requested_name.clone())?;
+            self.ensure_no_rename_target(&publication_name)?;
+            self.ensure_no_rollback_target(&publication_name)?;
+            reject_publish_collision(&destination, &requested_name)?;
+            staging_identity.verify(&temporary, &creation_lock_path)?;
+            Ok(observation)
+        })();
+        let _publish_observation = match publication {
             Ok(observation) => observation,
             Err(error) => {
-                let _cleanup = remove_tree_restoring_owner_access(&temporary);
+                let _cleanup = staging_identity.cleanup(&temporary);
                 return Err(error);
             }
         };
-        let publication_name = SpaceName::parse(requested_name.clone())?;
-        self.ensure_no_rename_target(&publication_name)?;
-        self.ensure_no_rollback_target(&publication_name)?;
-        reject_publish_collision(&destination, &temporary, &requested_name)?;
         if let Err(error) = fs::remove_file(&creation_lock_path) {
             let failure = QuartersError::io("remove creation marker", &creation_lock_path, error);
-            let _cleanup = remove_tree_restoring_owner_access(&temporary);
+            let _cleanup = staging_identity.cleanup(&temporary);
             return Err(failure);
         }
         if let Err(error) = sync_directory(&temporary) {
-            let _cleanup = remove_tree_restoring_owner_access(&temporary);
+            let _cleanup = staging_identity.cleanup(&temporary);
             return Err(error);
         }
         if let Err(error) = fs::rename(&temporary, &destination) {
             let failure = QuartersError::io("publish space", &destination, error);
-            let _cleanup = remove_tree_restoring_owner_access(&temporary);
+            let _cleanup = staging_identity.cleanup(&temporary);
             return Err(failure);
         }
         if let Err(error) = sync_parent_directory(&destination) {
@@ -123,20 +130,14 @@ pub(super) fn acquire_creation_lock(temporary: &Path, lock_path: &Path) -> Resul
     Ok(creation_lock)
 }
 
-fn reject_publish_collision(destination: &Path, temporary: &Path, name: &str) -> Result<()> {
+fn reject_publish_collision(destination: &Path, name: &str) -> Result<()> {
     match entry_exists(destination) {
         Ok(false) => Ok(()),
-        Ok(true) => {
-            let _cleanup = remove_tree_restoring_owner_access(temporary);
-            Err(QuartersError::new(
-                ErrorKind::AlreadyExists,
-                format!("space '{name}' already exists"),
-            ))
-        }
-        Err(error) => {
-            let _cleanup = remove_tree_restoring_owner_access(temporary);
-            Err(error)
-        }
+        Ok(true) => Err(QuartersError::new(
+            ErrorKind::AlreadyExists,
+            format!("space '{name}' already exists"),
+        )),
+        Err(error) => Err(error),
     }
 }
 

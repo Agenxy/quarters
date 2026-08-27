@@ -1,6 +1,5 @@
 //! Descriptor-relative lifecycle copy implementation.
 
-use super::cleanup::remove_tree_restoring_owner_access;
 #[cfg(test)]
 use super::policy::CloneLimits;
 use super::policy::{CloneMode, CloneReport};
@@ -73,7 +72,7 @@ impl Store {
         let result = self.execute_clone(&mut setup, destination, include_cache, control);
         if let Err(original) = &result
             && let Some(staging) = &setup.staging
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(compound_cleanup_error(original, cleanup));
         }
@@ -272,6 +271,7 @@ struct Staging {
     temporary: PathBuf,
     destination: PathBuf,
     creation_lock_path: PathBuf,
+    identity: super::StagingIdentity,
     _creation_lock: File,
 }
 
@@ -335,15 +335,17 @@ fn prepare_staging(store: &Store, destination: &SpaceName, destination_path: Pat
     create_private_dir(&temporary)?;
     let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
     let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
+    let identity = super::StagingIdentity::capture(&temporary, &creation_lock)?;
     if let Err(error) = create_private_dir(&temporary.join("home")) {
         drop(creation_lock);
-        let _cleanup = remove_tree_restoring_owner_access(&temporary);
+        let _cleanup = identity.cleanup(&temporary);
         return Err(error);
     }
     Ok(Staging {
         temporary,
         destination: destination_path,
         creation_lock_path,
+        identity,
         _creation_lock: creation_lock,
     })
 }
@@ -413,6 +415,9 @@ fn publish(store: &Store, setup: &CloneSetup, manifest: &SpaceManifest, control:
     store.ensure_no_rollback_target(&manifest.name)?;
     store.ensure_no_rename_target(&manifest.name)?;
     reject_destination(&staging.destination, manifest.name.as_str())?;
+    staging
+        .identity
+        .verify(&staging.temporary, &staging.creation_lock_path)?;
     #[cfg(test)]
     control.abort_before_publish()?;
     fs::remove_file(&staging.creation_lock_path)

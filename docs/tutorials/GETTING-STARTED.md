@@ -232,10 +232,12 @@ after that supervisor exits, so `status` reports detached processes as unknown
 and you must stop those processes first. Removal is not
 secure erasure from backups or filesystem snapshots.
 
-If a home or manifest is unhealthy, `list` and `status` show the exact issue and
-`rm` can still remove the named entry after validating its private root and
-activity lock. Quarters fails closed and requires manual inspection when either
-of those removal anchors is invalid.
+If a home or manifest is unhealthy, `list` and `status` show the exact issue.
+`rm` can still remove an entry with an unhealthy home after validating its
+private root, activity lock and stable manifest identity and proving no private
+SSH-agent state exists. An unreadable, malformed or mis-permissioned manifest
+cannot provide that proof; repair it from trusted evidence before retrying.
+Quarters also fails closed when the root or activity lock is invalid.
 For an invalid stored name, obtain the exact value from `quarters --json list`.
 Removal accepts one literal entry name but never a path, `.` or `..`.
 

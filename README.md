@@ -139,9 +139,14 @@ management operations. It does not guess from PIDs or scan processes. A
 detached process, background job or server can outlive the lease and is not
 discoverable portably, so its state is reported as unknown. Removal is blocked
 while the lease is held; stop detached processes before removing their space.
-An unhealthy home or manifest remains visible to `list` and `status` and can be
-removed after exact-name confirmation, but Quarters refuses removal when the
-space root or activity lock itself cannot be validated.
+An unhealthy home or manifest remains visible to `list` and `status`. An
+unhealthy home can be removed after exact-name confirmation only when the
+space's private root, activity lock and manifest still prove its stable
+identity and no private SSH-agent state exists. A damaged or unparseable
+manifest cannot prove which runtime belongs to the entry, so removal fails
+closed until that protected control file is repaired from trusted evidence.
+Quarters also refuses removal when the space root or activity lock itself
+cannot be validated.
 Quarters deliberately does not rebuild or bypass a damaged published activity
 lock: a supervisor may still hold the old inode, so automated deletion could
 misclassify active state. Repairing such corruption remains a manual

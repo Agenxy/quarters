@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-nix = { workspace = true, features = ["process", "user"] }
+nix = { workspace = true, features = ["fs", "process", "user"] }
 quarters-core = { version = "=0.1.0-alpha.3", path = "../quarters-core" }
 quarters-mcp = { version = "=0.1.0-alpha.3", path = "../quarters-mcp" }
 serde.workspace = true

@@ -22,14 +22,12 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(3);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl Store {
-    pub(crate) fn ensure_no_agent_for_removal(&self, name: &crate::SpaceName, host: &HostEnvironment) -> Result<()> {
-        let Ok(space) = self.open(name) else {
-            return Ok(());
-        };
-        let status = self.ssh_agent_status(&space, host)?;
+    pub(crate) fn ensure_no_agent_for_removal(&self, space: &Space, host: &HostEnvironment) -> Result<()> {
+        let status = self.ssh_agent_status(space, host)?;
         if status.state == AgentState::Unset {
             return Ok(());
         }
+        let name = &space.manifest().name;
         Err(QuartersError::new(
             ErrorKind::SpaceActive,
             format!("space '{name}' has private SSH-agent state ({})", status.state.as_str()),
@@ -230,7 +228,7 @@ fn start_agent(store: &Store, space: &Space, runtime: &Path) -> Result<AgentStat
 }
 
 fn stop_spawned_child(child: &mut Child) -> Result<()> {
-    process::terminate(child.id())?;
+    process::terminate_unreaped_child(child.id())?;
     let deadline = Instant::now() + STOP_TIMEOUT;
     loop {
         if child
@@ -367,6 +365,7 @@ fn finish_stopping(space: &Space, runtime: &Path, stopping: &AgentRecord) -> Res
             "stopping SSH-agent ownership omitted the socket device",
         )
     })?;
+    let target = process::SignalTarget::capture(stopping.pid)?;
     let verified = protocol::verified_socket_identity(&registry::socket_path(runtime), stopping.pid)?;
     if verified.device != device || verified.inode != inode {
         return Err(QuartersError::new(
@@ -374,12 +373,12 @@ fn finish_stopping(space: &Space, runtime: &Path, stopping: &AgentRecord) -> Res
             "the private SSH-agent socket changed immediately before shutdown",
         ));
     }
-    process::terminate(stopping.pid)?;
+    target.terminate()?;
     let deadline = Instant::now() + STOP_TIMEOUT;
-    while process::process_is_alive(stopping.pid)? && Instant::now() < deadline {
+    while !target.has_exited()? && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(20));
     }
-    if process::process_is_alive(stopping.pid)? {
+    if !target.has_exited()? {
         return Err(QuartersError::new(
             ErrorKind::ResourceLimit,
             "the verified SSH-agent process did not stop within three seconds",
@@ -875,11 +874,18 @@ mod tests {
             .expect("test agent protocol ready");
         registry::create(&runtime, &active_record(&space, child.id(), identity)).expect("create active record");
 
+        let preserved_home = space.root().join("preserved-home");
+        std::fs::rename(space.home(), &preserved_home).expect("move home");
+        std::os::unix::fs::symlink(&preserved_home, space.home()).expect("replace home with symlink");
+
         let error = store
             .remove(space.manifest().name.as_str())
-            .expect_err("active agent must block removal");
+            .expect_err("active agent must block removal even when home is corrupt");
         assert_eq!(error.kind(), ErrorKind::SpaceActive);
         assert!(space.root().is_dir());
+
+        std::fs::remove_file(space.home()).expect("remove home symlink");
+        std::fs::rename(&preserved_home, space.home()).expect("restore home");
 
         let waiter = std::thread::spawn(move || child.wait());
         store.stop_ssh_agent(&space, &host).expect("stop private agent");

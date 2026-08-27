@@ -12,10 +12,9 @@ mod transport_tests;
 
 pub use server::SUPPORTED_PROTOCOL_VERSIONS;
 
-use quarters_core::{ErrorKind, HostEnvironment, QuartersError, Result, Store};
+use quarters_core::{ErrorKind, HostEnvironment, QuartersError, Result, Store, validate_command_launcher};
 use rmcp::ServiceExt;
 use rmcp::service::QuitReason;
-use std::ffi::OsStr;
 use std::path::PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -89,14 +88,14 @@ fn current_launcher() -> Result<PathBuf> {
     })?;
     let launcher = std::fs::canonicalize(&executable)
         .map_err(|error| QuartersError::io("resolve the stable Quarters MCP executable", &executable, error))?;
-    if launcher.file_name() == Some(OsStr::new("quarters")) {
-        return Ok(launcher);
-    }
-    Err(QuartersError::new(
-        ErrorKind::Unsupported,
-        "the running MCP executable is not a stable Quarters launcher",
-    )
-    .with_hint("invoke the installed 'quarters' command rather than a renamed executable"))
+    validate_command_launcher(&launcher).map_err(|error| {
+        QuartersError::new(
+            ErrorKind::Unsupported,
+            "the running MCP executable is not a protected stable Quarters launcher",
+        )
+        .with_hint("invoke an installed 'quarters' command from a protected root- or user-owned directory tree")
+        .with_source(error)
+    })
 }
 
 fn startup_error() -> QuartersError {

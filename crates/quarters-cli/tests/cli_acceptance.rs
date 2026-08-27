@@ -65,7 +65,7 @@ fn renamed_mcp_executable_fails_before_serving() -> Result<(), Box<dyn Error>> {
         .arg("mcp")
         .output()?;
     assert_eq!(output.status.code(), Some(6));
-    assert!(String::from_utf8(output.stderr)?.contains("not a stable Quarters launcher"));
+    assert!(String::from_utf8(output.stderr)?.contains("not a protected stable Quarters launcher"));
     Ok(())
 }
 
@@ -415,7 +415,7 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
         ["broken", "unhealthy", "unknown", "unknown", "unknown", "no"]
     );
 
-    run(quarters(temporary.path()).args(["rm", "broken", "--confirm", "broken"]))?;
+    repair_then_remove_broken_space(temporary.path(), &manifest)?;
     assert!(!temporary.path().join("spaces/broken").exists());
 
     let rogue = "\u{1b}[31mrogue-\u{202e}name-that-is-far-too-long-for-a-space";
@@ -472,6 +472,17 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
             .is_some_and(|name| name.contains("\\u{1b}") && name.contains("\\u{202e}"))
     );
     assert!(!rogue_root.exists());
+    Ok(())
+}
+
+fn repair_then_remove_broken_space(root: &Path, manifest: &Path) -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let refused = quarters(root).args(["rm", "broken", "--confirm", "broken"]).output()?;
+    assert_eq!(refused.status.code(), Some(7));
+    assert!(String::from_utf8(refused.stderr)?.contains("cannot prove private SSH-agent state is absent"));
+    std::fs::set_permissions(manifest, std::fs::Permissions::from_mode(0o600))?;
+    run(quarters(root).args(["rm", "broken", "--confirm", "broken"]))?;
     Ok(())
 }
 
@@ -920,7 +931,7 @@ fn linux_home_view_is_exercised_or_fails_closed() -> Result<(), Box<dyn Error>> 
             "--",
             "/bin/sh",
             "-c",
-            "test -f \"$HOME/.quarters-home-view-marker\" && test \"$(quarters current)\" = work",
+            "test -f \"$HOME/.quarters-home-view-marker\" && test -f .quarters-home-view-marker && test \"$(quarters current)\" = work",
         ])
         .output()?;
 

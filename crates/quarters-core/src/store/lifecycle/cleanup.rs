@@ -9,22 +9,50 @@ use nix::unistd::Uid;
 use std::fs;
 use std::path::Path;
 
+use super::identity::PathIdentity;
+
 const MAX_PRIVATE_REMOVAL_DEPTH: u32 = 256;
-const MAX_PRIVATE_REMOVAL_DIRECTORIES: usize = 131_072;
+const MAX_PRIVATE_REMOVAL_ENTRIES: usize = 131_072;
 
 pub(crate) fn remove_tree_restoring_owner_access(path: &Path) -> Result<()> {
+    remove_tree(path, None)
+}
+
+pub(crate) fn remove_exact_tree_restoring_owner_access(path: &Path, identity: PathIdentity) -> Result<()> {
+    remove_tree(path, Some(identity))
+}
+
+fn remove_tree(path: &Path, identity: Option<PathIdentity>) -> Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(QuartersError::io("inspect private removal tree", path, error)),
     };
     validate_private_dir(path, &metadata)?;
+    verify_expected_identity(identity, &metadata)?;
     restore_tree_access(path)?;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(QuartersError::io("reinspect private removal tree", path, error)),
+    };
+    verify_expected_identity(identity, &metadata)?;
     match fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(QuartersError::io("remove private recovery tree", path, error)),
     }
+}
+
+fn verify_expected_identity(identity: Option<PathIdentity>, metadata: &fs::Metadata) -> Result<()> {
+    if identity.is_none_or(|expected| expected.matches(metadata)) {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        crate::ErrorKind::CorruptState,
+        "the private removal root changed before cleanup",
+    )
+    .with_hint("the mismatched filesystem state was preserved for manual inspection"))
 }
 
 fn restore_tree_access(root: &Path) -> Result<()> {
@@ -134,11 +162,11 @@ fn collect_child_directories(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(QuartersError::io("inspect private removal entry", &entry.path(), error)),
         };
+        *observed = observed.saturating_add(1);
+        if *observed > MAX_PRIVATE_REMOVAL_ENTRIES {
+            return Err(cleanup_limit_error("entry count"));
+        }
         if entry_metadata.file_type().is_dir() {
-            *observed = observed.saturating_add(1);
-            if *observed > MAX_PRIVATE_REMOVAL_DIRECTORIES {
-                return Err(cleanup_limit_error("directory count"));
-            }
             pending.push((entry.path(), depth.saturating_add(1)));
         }
     }
