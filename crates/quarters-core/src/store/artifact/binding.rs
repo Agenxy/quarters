@@ -9,7 +9,9 @@ impl Store {
         for kind in [ArtifactKind::Template, ArtifactKind::Snapshot] {
             for inspection in self.inspect_artifacts(kind)? {
                 if let ArtifactInspection::Healthy { artifact, .. } = inspection {
-                    let source = &artifact.manifest().source_identity;
+                    let Some(source) = &artifact.manifest().source_identity else {
+                        continue;
+                    };
                     if source.space_id.is_none()
                         && source.name == space.manifest().name
                         && source.created_unix_ms == space.manifest().created_unix_ms

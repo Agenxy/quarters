@@ -1,11 +1,13 @@
 //! Human and machine output contracts.
 
 mod artifacts;
+mod bundles;
 
 pub(crate) use artifacts::{
     print_artifact, print_artifact_list, print_artifact_mutation, print_artifact_report, print_artifact_verified,
     print_rollback, print_template_use,
 };
+pub(crate) use bundles::{print_bundle_export, print_bundle_import, print_export_key};
 
 use crate::adapter::AdapterReport;
 use crate::shortcut::{ShortcutAction, ShortcutReport};

@@ -30,7 +30,8 @@ pub use platform::{Capabilities, CapabilityStatus};
 pub use probe::{CompatibilityTier, ToolProbe, executable_matches, tool_probes};
 pub use store::artifact::{
     Artifact, ArtifactCounts, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest, ArtifactMutationReport,
-    ArtifactName, ArtifactOrigin, ArtifactReport, ContentIntegrity, RollbackInventory, RollbackIssue, RollbackMode,
+    ArtifactName, ArtifactOrigin, ArtifactReport, BundleExportReport, BundleHeader, BundleImportReport,
+    ContentIntegrity, ExportKeyReport, ImportedBundleProvenance, RollbackInventory, RollbackIssue, RollbackMode,
     RollbackObservation, RollbackRecoveryAction, RollbackReport, SourceIdentity, SourceStatus, TemplateUseReport,
 };
 pub use store::lifecycle::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};

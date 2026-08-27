@@ -152,7 +152,58 @@ that snapshot is deliberately retained. Inspect it, then retry with a new
 `--recovery-name`; alternatively verify and explicitly remove the retained
 snapshot before reusing the old name.
 
-## 6. Add an optional short command
+## 6. Move a verified artifact between stores
+
+Create a separate authentication key in a private directory. Quarters creates
+exactly 32 random bytes with mode `0600` and will not replace an existing file:
+
+```sh
+umask 077
+mkdir -p "$HOME/private"
+chmod 700 "$HOME/private"
+quarters export-key create "$HOME/private/quarters-bundle.key"
+```
+
+Preview, then export a verified template. The bundle path must be absolute and
+outside the Quarters store:
+
+```sh
+quarters export template studio-clean \
+  --to "$HOME/private/studio-clean.qbundle" \
+  --key "$HOME/private/quarters-bundle.key" --preview
+quarters export template studio-clean \
+  --to "$HOME/private/studio-clean.qbundle" \
+  --key "$HOME/private/quarters-bundle.key" \
+  --confirm-sensitive-state studio-clean
+```
+
+Copy the bundle and key through separate trusted channels when practical. On
+the receiving host, place both beneath a mode-`0700` directory and restore each
+file to mode `0600`; Quarters refuses group- or world-accessible bundles and
+keys. The bundle is authenticated plaintext: anyone who can read it can read
+its files. Then preview the destination and pass back the exact digest:
+
+```sh
+umask 077
+mkdir -p "$HOME/private"
+chmod 700 "$HOME/private"
+chmod 600 "$HOME/private/quarters-bundle.key" \
+  "$HOME/private/studio-clean.qbundle"
+quarters import "$HOME/private/studio-clean.qbundle" received \
+  --key "$HOME/private/quarters-bundle.key" --preview
+quarters import "$HOME/private/studio-clean.qbundle" received \
+  --key "$HOME/private/quarters-bundle.key" --confirm-plan DIGEST
+quarters template use received new-studio --preview
+```
+
+Every import becomes a fresh external template, including a bundle exported
+from a snapshot. Historical source identity is retained only as provenance; it
+cannot authorize rollback or bind to a local space. Authentication detects a
+wrong key or modified bytes but does not make imported startup files safe to
+execute. Inspect content from an untrusted sender before creating or entering a
+space from it.
+
+## 7. Add an optional short command
 
 Install Quarters first. When `~/.local/bin` is already on the host PATH:
 
@@ -168,7 +219,7 @@ check matters because a child cannot see aliases and functions defined only in
 its parent shell. Remove only the managed link with
 `quarters shortcut remove qts`. The shorter `q` name is opt-in.
 
-## 7. Prove state separation
+## 8. Prove state separation
 
 New spaces place a managed Quarters launcher and OpenSSH adapters first on
 their private PATH. Inspect them, then start the private agent only if this
@@ -197,7 +248,7 @@ git config --global user.name
 The last command runs on the host and should retain the host value. File
 permissions and access are still those of the same account.
 
-## 8. Enter the shell
+## 9. Enter the shell
 
 ```sh
 target/release/quarters enter clean
@@ -225,7 +276,7 @@ target/release/quarters enter clean --login
 
 Host system profiles can run in login mode.
 
-## 9. Pass a variable deliberately
+## 10. Pass a variable deliberately
 
 The baseline does not inherit arbitrary variables:
 
@@ -236,7 +287,7 @@ MY_SETTING=present target/release/quarters exec clean --inherit MY_SETTING -- en
 
 `env clean --inherit MY_SETTING` shows the value as redacted.
 
-## 10. Use host state explicitly
+## 11. Use host state explicitly
 
 Inside a baseline shell:
 
@@ -247,7 +298,7 @@ quarters host -- sh -c 'printf "%s\n" "$HOME"'
 This restores host path variables only. It does not restore blocked credential
 variables. Exit the space when you need the exact original host environment.
 
-## 11. Remove the space
+## 12. Remove the space
 
 Exit every process launched in the space, inspect the name, then run:
 
@@ -271,7 +322,7 @@ Quarters also fails closed when the root or activity lock is invalid.
 For an invalid stored name, obtain the exact value from `quarters --json list`.
 Removal accepts one literal entry name but never a path, `.` or `..`.
 
-## 12. Connect a local agent
+## 13. Connect a local agent
 
 Build or install Quarters, then configure the agent host to run the absolute
 binary path with the single `mcp` argument. Quarters communicates only over the

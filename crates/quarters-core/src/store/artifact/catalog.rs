@@ -2,9 +2,9 @@
 
 use super::integrity::{digest_home, verify_home};
 use super::model::{
-    ARTIFACT_SCHEMA_VERSION, Artifact, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest,
-    ArtifactMutationReport, ArtifactName, ArtifactOrigin, ArtifactReport, SourceIdentity, SourceStatus,
-    TemplateUseReport,
+    Artifact, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest, ArtifactMutationReport, ArtifactName,
+    ArtifactOrigin, ArtifactReport, IMPORTED_ARTIFACT_SCHEMA_VERSION, LOCAL_ARTIFACT_SCHEMA_VERSION, SourceIdentity,
+    SourceStatus, TemplateUseReport,
 };
 use crate::store::create::{acquire_creation_lock, ensure_directory_skeleton, write_manifest};
 use crate::store::lifecycle::{
@@ -374,18 +374,19 @@ impl Store {
         )?;
         let integrity = digest_home(&staging.temporary.join("home"))?;
         let manifest = ArtifactManifest {
-            schema_version: ARTIFACT_SCHEMA_VERSION,
+            schema_version: LOCAL_ARTIFACT_SCHEMA_VERSION,
             artifact_id: staging.id.clone(),
             kind: setup.kind,
             name,
             created_unix_ms: epoch_millis()?,
-            source_identity: SourceIdentity::for_space(&setup.source),
+            source_identity: Some(SourceIdentity::for_space(&setup.source)),
             source_layout: setup.source.layout(),
             source_platform: crate::platform::capabilities().platform,
             default_shell: setup.source.manifest().default_shell.clone(),
             include_cache,
             includes_sensitive_state: true,
             origin,
+            imported_bundle: None,
             content_integrity: integrity.clone(),
         };
         write_artifact_manifest(&staging.temporary, &manifest)?;
@@ -518,7 +519,7 @@ impl Store {
         }
     }
 
-    fn open_artifact_path(kind: ArtifactKind, path: PathBuf) -> Result<Artifact> {
+    pub(super) fn open_artifact_path(kind: ArtifactKind, path: PathBuf) -> Result<Artifact> {
         let metadata = fs::symlink_metadata(&path)
             .map_err(|error| QuartersError::io("inspect artifact directory", &path, error))?;
         validate_private_dir(&path, &metadata)?;
@@ -530,7 +531,10 @@ impl Store {
         let header: ArtifactHeader = serde_json::from_slice(&bytes).map_err(|error| {
             QuartersError::new(ErrorKind::CorruptState, "artifact manifest header is invalid").with_source(error)
         })?;
-        if header.schema_version != ARTIFACT_SCHEMA_VERSION {
+        if !matches!(
+            header.schema_version,
+            LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION
+        ) {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 format!("unsupported artifact schema {}", header.schema_version),
@@ -572,7 +576,9 @@ fn source_status(
     rollback_targets: &BTreeSet<SpaceName>,
     stable_sources: &BTreeSet<(String, u128, u32)>,
 ) -> SourceStatus {
-    let identity = &artifact.manifest().source_identity;
+    let Some(identity) = &artifact.manifest().source_identity else {
+        return SourceStatus::External;
+    };
     if rollback_targets.contains(&identity.name) {
         return SourceStatus::Orphaned;
     }
@@ -614,13 +620,13 @@ pub(super) struct SpaceStaging {
     pub(super) _creation_lock: File,
 }
 
-struct ArtifactStaging {
-    id: ArtifactId,
-    root: PathBuf,
-    temporary: PathBuf,
-    destination: PathBuf,
-    creation_lock_path: PathBuf,
-    identity: StagingIdentity,
+pub(super) struct ArtifactStaging {
+    pub(super) id: ArtifactId,
+    pub(super) root: PathBuf,
+    pub(super) temporary: PathBuf,
+    pub(super) destination: PathBuf,
+    pub(super) creation_lock_path: PathBuf,
+    pub(super) identity: StagingIdentity,
     _creation_lock: File,
 }
 
@@ -698,7 +704,7 @@ impl ArtifactSetup {
     }
 }
 
-fn prepare_artifact_staging(store: &Store, kind: ArtifactKind) -> Result<ArtifactStaging> {
+pub(super) fn prepare_artifact_staging(store: &Store, kind: ArtifactKind) -> Result<ArtifactStaging> {
     let root = artifact_root(store, kind);
     create_private_dir(&root)?;
     let id = ArtifactId::generate()?;
@@ -849,7 +855,7 @@ fn replace_artifact_manifest(root: &Path, manifest: &ArtifactManifest) -> Result
     sync_directory(root)
 }
 
-fn write_artifact_manifest(root: &Path, manifest: &ArtifactManifest) -> Result<()> {
+pub(super) fn write_artifact_manifest(root: &Path, manifest: &ArtifactManifest) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(manifest).map_err(|error| {
         QuartersError::new(ErrorKind::System, "could not serialize artifact manifest").with_source(error)
     })?;

@@ -354,7 +354,18 @@ recovery. Readers report `rollback_in_progress`; recovery never guesses from an
 ambiguous filesystem tuple. Artifact and rollback staging are included in the
 bounded `doctor`/confirmed `recover` contract.
 
-Platform clonefile/reflink acceleration, export, encryption and live freeze
-remain deferred. Stable identity upgrade and inactive display-name rename are
-implemented; hidden store-root migration remains deferred. ADR 0003 records
-the copy boundary; ADR 0008 defines lifecycle artifacts and rollback.
+Authenticated bundle export/import builds on the canonical artifact stream.
+Export verifies while emitting a versioned keyed-BLAKE3 plaintext file and
+publishes with a no-clobber link. Import authenticates with compile-time bounds,
+retains only an active-directory metadata stack, keeps one bundle descriptor
+across preview/execution checks, re-authenticates while extracting and publishes
+only a digest-matching schema-2 external template. Key paths inside the store
+fail closed. Foreign source identity remains historical provenance and never
+authorizes local rollback. Post-commit directory-sync or hidden-link cleanup
+failures return the committed object with an explicit warning.
+
+Platform clonefile/reflink acceleration, encryption and live freeze remain
+deferred. Stable identity upgrade and inactive display-name rename are
+implemented; hidden store-root migration remains deferred. ADR 0003 records the
+copy boundary, ADR 0008 defines lifecycle artifacts and rollback, and ADR 0009
+defines authenticated portable bundles.

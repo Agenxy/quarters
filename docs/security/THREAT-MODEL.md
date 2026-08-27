@@ -10,6 +10,7 @@
 - the validated storage root and removal target
 - terminal control and process exit status
 - agent context integrity and bounded MCP availability
+- bundle authentication keys and exported plaintext state
 
 ## Trust boundaries
 
@@ -43,6 +44,14 @@ policy.
 | Generated startup state is overwritten silently | Conflicts fail until `--replace-generated` is included in a new preview and therefore in a new digest |
 | Artifact content changes after capture | Canonical whole-tree BLAKE3 verification binds stored paths, types, ordinary modes, content, link targets and counts before every use |
 | Artifact digest is mistaken for authentication | Output and documentation state that another same-UID process can alter both content and manifest |
+| Bundle mutation or wrong key | Complete keyed-BLAKE3 tag over strict bounded framing; import authenticates twice on one retained descriptor and compares tags in constant time |
+| Bundle traversal or extraction collision | Compile-time limits, canonical parent-first paths, descriptor-relative exclusive creation, one bounded raw-name/inode sweep and private atomic staging |
+| Bundle overwrites a user file | Retained protected parent, exclusive hidden staging and no-clobber link publication outside the Quarters store |
+| Bundle key leaks through output | Exact private key-file contract; key path and bytes are omitted from reports, errors and stored metadata |
+| Bundle key is captured into its own plaintext bundle | Key creation and every export/import key use reject resolved paths inside the active store |
+| Post-commit filesystem failure is mistaken for no publication | Link and rename commit points return visible state with an explicit durability or hidden-staging warning |
+| Hostile bundle path metadata exhausts memory before authentication | Compile-time byte/entry limits plus a fallible active-directory stack; extraction verifies and releases each directory as traversal leaves it |
+| Foreign bundle identity authorizes local state | Schema-2 imported templates have no local source binding and always report `external`; snapshots import only as creation sources |
 | Partial rollback replaces only some state | Complete staging, verified automatic recovery snapshot and durable prepared/retired/published transaction; recursive merge is forbidden |
 | Interrupted display-name rename | Stable identity, private durable marker, same-filesystem move and atomic manifest replacement; valid states recover deterministically while malformed markers remain localized issues |
 | Crash leaves a target apparently absent | Atomic marker publication and exact filesystem tuples produce bounded actions; malformed or ambiguous markers preserve every tree, become itemized issues, block only a known named target and do not stop unrelated recovery |
@@ -98,6 +107,7 @@ policy.
 - discovering detached descendants or same-user servers after their Quarters supervisor exits
 - secure deletion from snapshots, backups or recovery media
 - crash-consistent live snapshot or export
+- confidentiality, non-repudiation or content-safety review for authenticated bundles
 - authenticating artifact state against another process with the same UID
 - treating a free cooperative lease as proof that detached clone writers are absent
 - treating workspace directories or a stable space ID as containment or authorization
@@ -163,6 +173,15 @@ but the portable copy is not a database-consistent snapshot. Skipped sockets,
 FIFOs, devices, foreign-owned entries and cache roots are reported by count.
 Timestamps, ACLs, xattrs, filesystem flags, special mode bits, sparse extents
 and hard-link topology are not preserved.
+
+An authenticated bundle is intentionally plaintext and uses one symmetric key:
+it provides neither confidentiality nor proof of which key holder created it.
+The receiver must protect and transport the key separately, and can replay any
+older bundle authenticated by that key. Import refuses case-folding or
+normalizing filesystems when the extracted byte names do not reproduce the
+authenticated canonical tree. Successful authentication proves only the bytes;
+startup files, credentials and executables inside the bundle remain untrusted
+content that can act with the real account's authority after use.
 
 Rollback provides recoverable publication, not containment or a global process
 freeze. A detached same-UID writer can continue using the retired inode or

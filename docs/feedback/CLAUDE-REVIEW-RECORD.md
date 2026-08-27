@@ -492,3 +492,51 @@ Final local evidence on the reviewed checkpoint:
 - release-installed macOS host fork: content-free preview, exact confirmation,
   interactive zsh execution, private history, provenance and status all pass
 - `git diff --check`: pass
+
+## Authenticated portable-bundle review, 2026-08-27
+
+Claude Code 2.1.233 used Claude Opus 5 at maximum effort in read-only mode
+before implementation. It judged authenticated, plaintext template and snapshot
+bundles useful and feasible within Quarters' stated same-account boundary. The
+plan was revised through its findings until it returned
+`VERDICT: READY TO IMPLEMENT`.
+
+The first implementation audit returned `VERDICT: REPAIR REQUIRED` with eight
+findings: parent-relative link and maximum-depth mismatches, incomplete early
+header validation, unsafe foreign-field presentation, store-internal keys,
+ambiguous post-commit errors, whole-tree parser metadata retention and an
+incomplete key-transfer tutorial. All were repaired. A fresh independent
+read-only bypass review then found three residual paths: pathname check/use
+races around keys, one unbounded human shell-path field and missing receiver
+parent setup. The final implementation retains protected parent descriptors
+through key and bundle use, rejects descriptor ancestry beneath the active
+store, keeps pre-authentication metadata proportional to active depth, shares
+link and header validators with artifact state, and reports post-commit
+durability uncertainty without claiming publication failed.
+
+Opus re-derived all eleven repairs from source and returned `VERDICT: SHIP`.
+Its three remaining low-severity UX observations were also closed: both key
+help strings now state the complete path contract, symlinked store roots reuse
+the standard precise diagnostic, and in-store key errors use source-appropriate
+wording. A narrow final pass found no regressions or incomplete fixes and again
+returned:
+
+> VERDICT: SHIP
+
+Claude remained read-only and could not execute compiler gates. Final local
+evidence is separate:
+
+- `make check`: 242 Rust tests and 4 Bun-managed typed npm launcher tests
+- warnings-as-errors Clippy and rustdoc, formatting and structural ceilings
+- `cargo deny check` and `cargo audit --deny warnings`: pass; only the approved
+  transitive `syn` 2/3 duplication warning remains
+- Rust 1.97.1 `x86_64-unknown-linux-musl` all-targets Clippy with warnings
+  denied: pass
+- release-installed macOS export, transfer, authenticated preview, import,
+  template use, state content and parent-relative link round trip: pass
+- sender and receiver key directories mode `0700`; transferred key and bundle
+  mode `0600`: pass
+- `git diff --check`: pass
+
+Dibs registration was attempted by the reviewer but blocked by its read-only
+permission layer. This did not affect implementation or acceptance evidence.

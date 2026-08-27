@@ -6,6 +6,13 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.3 — unreleased
 
+- Add versioned keyed-BLAKE3 plaintext bundles for verified templates and
+  snapshots, private no-clobber key creation, two-pass authenticated import as
+  schema-2 external templates, plan-digest confirmation and atomic publication.
+- Reject bundle keys inside the active store, preserve legal parent-relative
+  links and deepest leaves, release hostile path metadata at directory close,
+  validate authenticated provenance before extraction, and report post-commit
+  durability or cleanup failures without implying that publication vanished.
 - Pin Bun 1.3.14 as the typed npm launcher's development package manager and
   lockfile owner, rename its local gate to `make launcher-check`, and retain
   npm as the consumer installation, artifact packaging and publication surface.

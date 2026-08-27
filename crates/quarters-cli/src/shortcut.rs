@@ -248,7 +248,7 @@ fn inspect_entry(entry: &Path, directory: &Path, desired: Option<&Path>) -> Resu
     };
     let identity = nix::sys::stat::lstat(entry)
         .ok()
-        .and_then(|status| normalized_device(status.st_dev).map(|device| (device, status.st_ino)));
+        .map(|status| (normalized_device(status.st_dev), status.st_ino));
     Ok((state, Some(target), identity))
 }
 
@@ -264,7 +264,7 @@ fn remove_exact_shortcut(directory: &Path, entry: &Path, target: &Path, device: 
         .map(PathBuf::from)
         .map_err(|error| QuartersError::io("reinspect shortcut target", entry, std::io::Error::from(error)))?;
     if link_type != nix::sys::stat::SFlag::S_IFLNK
-        || normalized_device(metadata.st_dev) != Some(device)
+        || normalized_device(metadata.st_dev) != device
         || metadata.st_ino != inode
         || actual != target
     {
@@ -277,8 +277,14 @@ fn remove_exact_shortcut(directory: &Path, entry: &Path, target: &Path, device: 
         .map_err(|error| QuartersError::io("remove shortcut", entry, std::io::Error::from(error)))
 }
 
-fn normalized_device(device: nix::libc::dev_t) -> Option<u64> {
-    u64::try_from(device).ok()
+#[cfg(target_os = "linux")]
+const fn normalized_device(device: nix::libc::dev_t) -> u64 {
+    device
+}
+
+#[cfg(target_os = "macos")]
+fn normalized_device(device: nix::libc::dev_t) -> u64 {
+    u64::from(device.cast_unsigned())
 }
 
 fn open_install_directory(directory: &Path) -> Result<fs::File> {
@@ -661,7 +667,7 @@ mod tests {
                 &directory,
                 &entry,
                 Path::new("quarters"),
-                normalized_device(metadata.st_dev).expect("device"),
+                normalized_device(metadata.st_dev),
                 metadata.st_ino
             )
             .is_err()

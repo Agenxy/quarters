@@ -829,7 +829,12 @@ fn validate_snapshot_target(snapshot: &super::Artifact, target: &Space) -> Resul
         )
         .with_hint("use a same-platform snapshot; cross-platform template use is the portable adaptation path"));
     }
-    if !snapshot.manifest().source_identity.matches(target) {
+    if snapshot
+        .manifest()
+        .source_identity
+        .as_ref()
+        .is_none_or(|identity| !identity.matches(target))
+    {
         return Err(QuartersError::new(
             ErrorKind::InvalidInput,
             format!(

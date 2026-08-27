@@ -36,6 +36,12 @@ pub(crate) enum Command {
     Snapshot(SnapshotArgs),
     /// Replace a Quarter from a snapshot after capturing recovery.
     Rollback(RollbackArgs),
+    /// Export an authenticated plaintext template or snapshot bundle.
+    Export(ExportArgs),
+    /// Authenticate a bundle and import it as a fresh template.
+    Import(ImportArgs),
+    /// Create private authentication keys for portable bundles.
+    ExportKey(ExportKeyArgs),
     /// List each space entry, its health and its stored home.
     List,
     /// Report current and cooperative lease state for spaces.
@@ -315,6 +321,79 @@ pub(crate) struct RollbackArgs {
     /// Omit derived caches from the automatic recovery snapshot.
     #[arg(long)]
     pub(crate) exclude_recovery_cache: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ExportKind {
+    /// Reusable creation source.
+    Template,
+    /// Named recovery point; imports as a template.
+    Snapshot,
+}
+
+impl From<ExportKind> for quarters_core::ArtifactKind {
+    fn from(value: ExportKind) -> Self {
+        match value {
+            ExportKind::Template => Self::Template,
+            ExportKind::Snapshot => Self::Snapshot,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ExportArgs {
+    /// Artifact category.
+    #[arg(value_enum)]
+    pub(crate) kind: ExportKind,
+    /// Existing artifact display name.
+    pub(crate) name: String,
+    /// Absolute bundle destination outside the Quarters store.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) to: PathBuf,
+    /// Absolute private 32-byte key file in a protected directory outside the Quarters store.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) key: PathBuf,
+    /// Authenticate inputs and report the exact policy without writing.
+    #[arg(long, conflicts_with = "confirm_sensitive_state")]
+    pub(crate) preview: bool,
+    /// Exactly repeat NAME to acknowledge plaintext sensitive-state export.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm_sensitive_state: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ImportArgs {
+    /// Absolute path to one authenticated bundle.
+    pub(crate) bundle: PathBuf,
+    /// New local template display name.
+    pub(crate) name: String,
+    /// Absolute private 32-byte key file in a protected directory outside the Quarters store.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) key: PathBuf,
+    /// Authenticate and return the exact plan digest without mutation.
+    #[arg(long, conflicts_with = "confirm_plan")]
+    pub(crate) preview: bool,
+    /// Execute only the exact digest returned by preview.
+    #[arg(long, value_name = "DIGEST")]
+    pub(crate) confirm_plan: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ExportKeyArgs {
+    #[command(subcommand)]
+    pub(crate) command: ExportKeyCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ExportKeyCommand {
+    /// Create one no-clobber mode-0600 random key file.
+    Create(ExportKeyCreateArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ExportKeyCreateArgs {
+    /// Absolute destination in a protected current-user directory.
+    pub(crate) path: PathBuf,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

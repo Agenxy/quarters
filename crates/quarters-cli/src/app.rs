@@ -2,9 +2,9 @@
 
 use crate::cli::{
     AdapterCommand, AgentCommand, AgentRecoverArgs, AgentTargetArgs, ArtifactCreateArgs, ArtifactRemoveArgs,
-    ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ProfileArgs, RecoverArgs,
-    RemoveArgs, RenameArgs, RollbackArgs, SnapshotCommand, SnapshotCreateArgs, SnapshotListArgs, StatusArgs,
-    TemplateCommand, TemplateUseArgs, UpgradeArgs,
+    ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ExportArgs,
+    ExportKeyCommand, ImportArgs, ProfileArgs, RecoverArgs, RemoveArgs, RenameArgs, RollbackArgs, SnapshotCommand,
+    SnapshotCreateArgs, SnapshotListArgs, StatusArgs, TemplateCommand, TemplateUseArgs, UpgradeArgs,
 };
 use crate::{output, process};
 use quarters_core::{
@@ -39,6 +39,9 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         Command::Template(arguments) => template(&store, arguments.command, cli.json),
         Command::Snapshot(arguments) => snapshot(&store, arguments.command, cli.json),
         Command::Rollback(arguments) => rollback(&store, &arguments, cli.json),
+        Command::Export(arguments) => export_bundle(&store, &arguments, cli.json),
+        Command::Import(arguments) => import_bundle(&store, &arguments, cli.json),
+        Command::ExportKey(arguments) => export_key(&store, arguments.command, cli.json),
         Command::List => list(&store, cli.json),
         Command::Status(arguments) => status(&store, &host, &arguments, cli.json),
         Command::Current => current(&store, cli.json),
@@ -220,6 +223,53 @@ fn rollback(store: &Store, arguments: &RollbackArgs, json: bool) -> Result<i32> 
     Ok(0)
 }
 
+fn export_bundle(store: &Store, arguments: &ExportArgs, json: bool) -> Result<i32> {
+    let kind = arguments.kind.into();
+    let name = ArtifactName::parse(arguments.name.clone())?;
+    let report = if arguments.preview {
+        store.bundle_export_plan(kind, &name, &arguments.to, &arguments.key)?
+    } else {
+        if arguments.confirm_sensitive_state.as_deref() != Some(name.as_str()) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm-sensitive-state must exactly repeat the exported artifact name",
+            )
+            .with_hint(format!(
+                "run 'quarters export {} {name} --to PATH --key PATH --preview' first",
+                kind.as_str()
+            )));
+        }
+        store.export_bundle(kind, &name, &arguments.to, &arguments.key)?
+    };
+    output::print_bundle_export(&report, json)?;
+    Ok(0)
+}
+
+fn import_bundle(store: &Store, arguments: &ImportArgs, json: bool) -> Result<i32> {
+    let name = ArtifactName::parse(arguments.name.clone())?;
+    let report = if arguments.preview {
+        store.bundle_import_plan(&arguments.bundle, &name, &arguments.key)?
+    } else {
+        let digest = arguments.confirm_plan.as_deref().ok_or_else(|| {
+            QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--confirm-plan is required to import an authenticated bundle",
+            )
+            .with_hint("run the same command with --preview and copy its plan digest")
+        })?;
+        store.import_bundle(&arguments.bundle, &name, &arguments.key, digest)?
+    };
+    output::print_bundle_import(&report, json)?;
+    Ok(0)
+}
+
+fn export_key(store: &Store, command: ExportKeyCommand, json: bool) -> Result<i32> {
+    let ExportKeyCommand::Create(arguments) = command;
+    let report = store.create_export_key(&arguments.path)?;
+    output::print_export_key(&report, json)?;
+    Ok(0)
+}
+
 fn template(store: &Store, command: TemplateCommand, json: bool) -> Result<i32> {
     match command {
         TemplateCommand::Create(arguments) => create_artifact(store, ArtifactKind::Template, &arguments, json),
@@ -315,9 +365,11 @@ fn list_artifacts(store: &Store, kind: ArtifactKind, source: Option<&Space>, jso
         .inspect_artifacts(kind)?
         .into_iter()
         .filter(|inspection| match (source, inspection) {
-            (Some(source), ArtifactInspection::Healthy { artifact, .. }) => {
-                artifact.manifest().source_identity.matches(source)
-            }
+            (Some(source), ArtifactInspection::Healthy { artifact, .. }) => artifact
+                .manifest()
+                .source_identity
+                .as_ref()
+                .is_some_and(|identity| identity.matches(source)),
             (Some(_), ArtifactInspection::Unhealthy { .. }) => false,
             (None, _) => true,
         })
@@ -652,7 +704,11 @@ fn surviving_artifacts(store: &Store, kind: ArtifactKind, space: &Space) -> Resu
             matches!(
                 inspection,
                 ArtifactInspection::Healthy { artifact, .. }
-                    if artifact.manifest().source_identity.matches(space)
+                    if artifact
+                        .manifest()
+                        .source_identity
+                        .as_ref()
+                        .is_some_and(|identity| identity.matches(space))
             )
         })
         .count())

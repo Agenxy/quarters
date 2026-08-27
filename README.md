@@ -47,6 +47,14 @@ convenience and review boundary, not containment from the host account.
 Unsafe optional preset entries are reported as ineligible; an explicitly named
 unsafe path is an error.
 
+Verified templates and snapshots can be exported as one versioned,
+key-authenticated plaintext bundle and imported as a fresh external template.
+The bundle preserves the exact canonical tree and therefore requires explicit
+sensitive-state confirmation. Import authenticates the complete file twice on
+one retained descriptor, extracts only into private staging, verifies the
+canonical digest and publishes atomically. Authentication is not encryption or
+content review; imported startup files remain untrusted.
+
 New spaces have opaque stable identities, recoverable display-name changes,
 managed OpenSSH invocation adapters and an explicit private SSH-agent
 lifecycle. The socket enters a child environment only after process liveness,
@@ -125,6 +133,11 @@ install path.
 | `snapshot create\|list\|show\|verify\|rename\|rm` | Manage named, integrity-checked recovery points |
 | `rollback SPACE SNAPSHOT --recovery-name NAME --preview` | Verify replacement and automatic recovery capture without mutation |
 | `rollback SPACE SNAPSHOT --recovery-name NAME --confirm-space SPACE --confirm-replace-state SPACE` | Capture recovery, then replace the complete home while retaining space identity |
+| `export-key create PATH` | Create a private 32-byte bundle authentication key without printing its path or bytes |
+| `export template\|snapshot NAME --to PATH --key PATH --preview` | Verify and disclose an authenticated plaintext export plan |
+| `export template\|snapshot NAME --to PATH --key PATH --confirm-sensitive-state NAME` | No-clobber publish one authenticated bundle outside the store |
+| `import BUNDLE NAME --key PATH --preview` | Authenticate a bundle and return its exact import-plan digest |
+| `import BUNDLE NAME --key PATH --confirm-plan DIGEST` | Re-authenticate and atomically import a fresh external template |
 | `list` | List healthy and unhealthy space entries without hiding siblings |
 | `status [NAME]` | Observe whether Quarters' cooperative lease is free or held |
 | `current` | Print the current space or `host` |
@@ -359,14 +372,29 @@ them by default. Artifact content is bound to a canonical BLAKE3 digest and
 verified before use, but the digest is not authentication against another
 process with the same UID.
 
+Portable bundles add symmetric keyed-BLAKE3 authentication. Keys are exact
+32-byte mode-`0600` files and travel separately; Quarters never prints their
+path or bytes. Key creation and every key use reject paths inside the active
+store, preventing a captured space from carrying the key that authenticates
+its own bundle. A bundle is mode `0600`, plaintext, never overwrites a destination
+and must live outside the store. Import accepts only current-user, single-link
+bundle and key files, returns a metadata-bound preview digest, then repeats
+authentication while extracting. A snapshot bundle becomes a template because
+foreign source identity is historical provenance, not local rollback authority.
+Case-colliding or filename-normalizing destination filesystems fail closed with
+an explicit portability error.
+If a final link or rename is already visible but directory sync or hidden
+staging cleanup fails, Quarters reports the publication as committed with an
+explicit warning instead of claiming that nothing was created.
+
 Rollback never merges in place. It verifies that the snapshot belongs to the
 exact target generation, creates and verifies the required automatic recovery
 snapshot, stages the replacement, preserves the target identity, and publishes
 through durable `prepared`, `retired` and `published` states. The visible state
 is old, new, or explicitly `rollback_in_progress`; `doctor` reports the exact
 recovery action. This still adds no containment boundary. Display-name rename
-is a separate recoverable transaction that retains stable identity and
-snapshot binding. Freeze, export and encryption remain unavailable.
+is a separate recoverable transaction that retains stable identity and snapshot
+binding. Enforceable freeze, encryption and confinement remain unavailable.
 
 ## Documentation
 
@@ -380,6 +408,7 @@ snapshot binding. Freeze, export and encryption remain unavailable.
 - [Storage migration and runtime identity](docs/architecture/ADR-0006-STORAGE-MIGRATION-AND-RUNTIME-IDENTITY.md)
 - [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
 - [Lifecycle artifacts and rollback](docs/architecture/ADR-0008-LIFECYCLE-ARTIFACTS-AND-ROLLBACK.md)
+- [Authenticated portable bundles](docs/architecture/ADR-0009-AUTHENTICATED-BUNDLES.md)
 - [MCP guide](docs/mcp/README.md)
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Alpha 3 security review](docs/security/ALPHA3-SECURITY-REVIEW.md)

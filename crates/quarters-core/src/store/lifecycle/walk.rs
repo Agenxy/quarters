@@ -265,7 +265,7 @@ impl<'a> Walker<'a> {
             self.report.exclusions.managed_command_links += 1;
             return Ok(());
         }
-        let resolved = resolve_relative_target(parent_path, &target, path)?;
+        let resolved = resolve_relative_link_target(parent_path, &target).ok_or_else(|| escaping_symlink(path))?;
         self.add_logical_bytes(target_bytes, path)?;
         if let Some(parent) = destination_parent {
             symlinkat(target.as_os_str(), parent, name)
@@ -562,10 +562,10 @@ fn file_length(metadata: &FileStat, path: &[OsString]) -> Result<u64> {
     })
 }
 
-fn resolve_relative_target(parent: &[OsString], target: &OsStr, path: &[OsString]) -> Result<Vec<OsString>> {
+pub(crate) fn resolve_relative_link_target(parent: &[OsString], target: &OsStr) -> Option<Vec<OsString>> {
     let target_path = Path::new(target);
     if target_path.is_absolute() {
-        return Err(escaping_symlink(path));
+        return None;
     }
     let mut resolved = parent.to_vec();
     for component in target_path.components() {
@@ -573,14 +573,12 @@ fn resolve_relative_target(parent: &[OsString], target: &OsStr, path: &[OsString
             Component::CurDir => {}
             Component::Normal(value) => resolved.push(value.to_os_string()),
             Component::ParentDir => {
-                if resolved.pop().is_none() {
-                    return Err(escaping_symlink(path));
-                }
+                resolved.pop()?;
             }
-            Component::RootDir | Component::Prefix(_) => return Err(escaping_symlink(path)),
+            Component::RootDir | Component::Prefix(_) => return None,
         }
     }
-    Ok(resolved)
+    Some(resolved)
 }
 
 fn escaping_symlink(path: &[OsString]) -> QuartersError {

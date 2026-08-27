@@ -21,6 +21,7 @@ current host. It does not read credentials.
 | Named templates | B/C | canonical BLAKE3-verified portable copy plus fresh destination controls | arbitrary state may contain credentials; embedded paths are not rewritten |
 | Named snapshots | B/C | immutable-by-interface recovery point with whole-tree verification | cooperative lease cannot prove detached writers are absent |
 | Rollback | C | verified recovery capture plus durable three-state whole-home replacement | old, new or marked-in-progress visibility; no recursive merge or detached-writer proof |
+| Authenticated bundle | C | keyed-BLAKE3 plaintext export of a verified artifact; retained-descriptor two-pass import as an external template | key travels separately; no confidentiality or content-safety claim; case-colliding or normalizing filesystems may refuse import |
 | Space rename | C | durable marker, same-filesystem directory move and atomic manifest replacement | display name only; detached same-UID processes remain unknown |
 | Private cleanup | C | iterative owner-checked removal with depth/count limits | mode-`000` recovery on Linux may require `/proc` for no-follow `fchmodat` emulation |
 | Git | B | `GIT_CONFIG_GLOBAL` | repository-local config still wins |

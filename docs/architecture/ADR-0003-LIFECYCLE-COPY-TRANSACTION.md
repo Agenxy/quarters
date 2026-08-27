@@ -58,8 +58,11 @@ never silently claimed as preserved.
   provenance and a credential inclusion declaration.
 - `snapshot` creates an immutable-by-interface recovery point. Filesystem
   immutability flags are optional hardening, not the correctness anchor.
-- `export` writes a versioned, authenticated manifest plus bounded content. It
-  defaults to excluding credentials and must never include runtime sockets.
+- `export` writes a versioned, authenticated manifest plus bounded content from
+  an already verified artifact. Artifact bundles preserve that exact tree and
+  require explicit sensitive-state confirmation; they do not claim that
+  arbitrary credentials can be recognized and filtered safely. Runtime sockets
+  can never enter a verified artifact.
 - `rollback` first creates and verifies an automatic recovery snapshot, then
   replaces the target through the same publish transaction. In-place recursive
   overwrite is forbidden.
