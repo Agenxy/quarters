@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 pub(super) const REGISTRY_FILE: &str = "ssh-agent.json";
 pub(super) const LOCK_FILE: &str = "ssh-agent.lock";
+pub(super) const STARTUP_OWNER_LOCK_FILE: &str = "ssh-agent-startup-owner.lock";
 pub(super) const SOCKET_FILE: &str = "ssh-agent.sock";
 
 pub(super) fn registry_path(runtime: &Path) -> PathBuf {

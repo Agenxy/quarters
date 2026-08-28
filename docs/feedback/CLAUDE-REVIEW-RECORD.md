@@ -540,3 +540,39 @@ evidence is separate:
 
 Dibs registration was attempted by the reviewer but blocked by its read-only
 permission layer. This did not affect implementation or acceptance evidence.
+
+## Alpha.4 P0 planning and private-agent review, 2026-08-27
+
+Claude Code 2.1.233 used Claude Opus 5 at maximum effort in read-only mode
+before implementation. It judged the broader native userspace-virtualization
+roadmap worth building and feasible when Quarters preserves its honest
+same-account boundary. It returned `VERDICT: READY FOR IMPLEMENTATION` after
+prioritizing the alpha.4 version boundary, physical Linux evidence and the
+private-agent concurrency flake ahead of broader confinement work.
+
+The first implementation review returned `VERDICT: REVISE P0` for a spawned
+launcher that could outlive a failed activation commit and a lifecycle-lock
+deadline shorter than its own shutdown work. Startup now uses a separate
+close-on-exec owner lease, exact registry revalidation, bounded cleanup and an
+absolute protocol deadline. The lifecycle budget dominates verified shutdown
+work, and the Linux acceptance target covers the real home-view, host escape,
+XDG runtime fallback and overlong agent-socket behavior.
+
+The next complete read-only pass confirmed both blockers structurally resolved
+and returned:
+
+> VERDICT: SHIP P0
+
+Its three nonblocking concurrency observations were closed before publication:
+orphan recovery now takes the lifecycle lock before probing the owner lease,
+only one observer may publish recovery, and abort rechecks an exact committed
+activation under lock before signaling. Claude remained read-only, so local and
+hosted compiler evidence remains a separate requirement.
+
+A final narrow pass audited the resulting deadline proof, transient activation
+convergence, cleanup semantics, native 20-round six-caller stress test and line
+ceilings. It again returned `VERDICT: SHIP P0`. The complete local gate passed
+243 Rust tests and 4 Bun-managed launcher tests, warnings-as-errors Clippy and
+rustdoc, formatting and structural ceilings. Dependency advisory, licence and
+source policy also passed; the approved transitive `syn` 2/3 duplication is the
+only `cargo deny` warning. Hosted Linux and macOS results remain required.

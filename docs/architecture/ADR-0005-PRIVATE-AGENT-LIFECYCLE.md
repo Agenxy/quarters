@@ -36,6 +36,27 @@ requires the corresponding protocol response while comparing the socket device
 and inode before and after the exchange. The kernel-reported peer PID must also
 match the ownership record. PID files alone are never trusted.
 
+Concurrent starts reserve one `starting` record under the private-agent
+lifecycle lock and hold a separate startup-owner lease, then release the
+lifecycle lock before waiting for protocol readiness. Every contender observes
+the same reservation but may promote it only after the startup owner exits.
+The owner revalidates the exact record and repeats the socket proof before
+atomically publishing `active`; any ambiguous commit error resolves to a
+verified active record or bounded termination while the owner lease prevents a
+peer promotion. The five-second readiness wait does not hold the lifecycle
+lock; observers retake it briefly before any recovery publication. Shutdown
+remains separately serialized, with bounded protocol checks and a three-second
+process-exit deadline.
+
+Orphan observers serialize through the lifecycle lock before probing the
+startup-owner lease. Owner-lease acquisition is always nonblocking, which
+prevents a wait cycle even while the startup owner later retakes the lifecycle
+lock. Lifecycle serialization permits only one observer to publish a recovered
+state. Before signaling, an abort attempts to recheck both verified status and
+the exact committed activation record while holding that same lifecycle lock.
+If the bounded lock itself is unavailable, the still-owned, unreaped child may
+be terminated and ambiguous persistent state remains available to recovery.
+
 Stop first re-verifies the active process, exact socket identity, peer PID and
 protocol, records `stopping`, repeats the complete socket proof immediately
 before signaling only that PID, waits within a deadline, and removes only the

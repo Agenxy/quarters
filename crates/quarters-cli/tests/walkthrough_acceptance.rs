@@ -61,34 +61,33 @@ fn private_agent_never_follows_an_unowned_socket_link() -> Result<(), Box<dyn Er
     assert_eq!(doctor["result"]["space_ssh_agent"]["state"], "stale");
     Ok(())
 }
-
 #[test]
 fn concurrent_private_agent_starts_converge_on_one_verified_process() -> Result<(), Box<dyn Error>> {
-    let temporary = TempDir::new()?;
-    create(temporary.path(), "concurrent-agent")?;
-    let first = quarters(temporary.path())
-        .args(["--json", "agent", "start", "concurrent-agent"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let second = quarters(temporary.path())
-        .args(["--json", "agent", "start", "concurrent-agent"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let first = first.wait_with_output()?;
-    let second = second.wait_with_output()?;
-    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
-    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
-    let first: Value = serde_json::from_slice(&first.stdout)?;
-    let second: Value = serde_json::from_slice(&second.stdout)?;
-    assert_eq!(first["result"]["state"], "active");
-    assert_eq!(second["result"]["state"], "active");
-    assert_eq!(first["result"]["pid"], second["result"]["pid"]);
-    run(quarters(temporary.path()).args(["agent", "stop", "concurrent-agent"]))?;
+    for _attempt in 0..20 {
+        let temporary = TempDir::new()?;
+        create(temporary.path(), "concurrent-agent")?;
+        let children = (0..6)
+            .map(|_| {
+                quarters(temporary.path())
+                    .args(["--json", "agent", "start", "concurrent-agent"])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+            })
+            .collect::<std::io::Result<Vec<_>>>()?;
+        let mut reports = Vec::new();
+        for child in children {
+            let output = child.wait_with_output()?;
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            reports.push(serde_json::from_slice::<Value>(&output.stdout)?);
+        }
+        let pid = reports.first().ok_or("missing agent result")?["result"]["pid"].clone();
+        assert!(reports.iter().all(|report| report["result"]["state"] == "active"));
+        assert!(reports.iter().all(|report| report["result"]["pid"] == pid));
+        run(quarters(temporary.path()).args(["agent", "stop", "concurrent-agent"]))?;
+    }
     Ok(())
 }
-
 #[test]
 fn openssh_adapters_are_installed_by_default_and_preserve_version_output() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;

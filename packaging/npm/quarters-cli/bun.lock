@@ -9,9 +9,9 @@
         "typescript": "7.0.2",
       },
       "optionalDependencies": {
-        "quarters-cli-darwin-arm64": "0.1.0-alpha.3",
-        "quarters-cli-darwin-x64": "0.1.0-alpha.3",
-        "quarters-cli-linux-x64": "0.1.0-alpha.3",
+        "quarters-cli-darwin-arm64": "0.1.0-alpha.4",
+        "quarters-cli-darwin-x64": "0.1.0-alpha.4",
+        "quarters-cli-linux-x64": "0.1.0-alpha.4",
       },
     },
   },

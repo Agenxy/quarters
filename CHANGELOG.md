@@ -4,7 +4,7 @@ Quarters follows [Semantic Versioning](https://semver.org/). Until 1.0, minor
 versions may refine the space format and environment contract; migrations and
 compatibility notes will be called out here.
 
-## 0.1.0-alpha.3 — unreleased
+## 0.1.0-alpha.4 — unreleased
 
 - Add versioned keyed-BLAKE3 plaintext bundles for verified templates and
   snapshots, private no-clobber key creation, two-pass authenticated import as
@@ -28,6 +28,10 @@ compatibility notes will be called out here.
 - Add an explicit per-space OpenSSH agent lifecycle with bounded startup and
   shutdown, private ownership records, process and socket-identity checks,
   protocol liveness, fail-closed environment injection and narrow recovery.
+- Publish the private-agent `starting` reservation under its lifecycle lock,
+  retain a separate startup-owner lease during bounded protocol readiness, and
+  revalidate the record and socket when concurrent starters converge on one
+  active process or a failed owner terminates its child.
 - Install collision-safe `ssh`, `scp`, `sftp` and `ssh-add` invocation adapters
   into new CLI and installed-server MCP spaces; force a protected per-space SSH
   configuration while preserving child output and exit status.

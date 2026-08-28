@@ -9,17 +9,20 @@ use nix::sys::socket::{
 };
 use nix::unistd::Uid;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::os::fd::{AsFd, AsRawFd};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const REQUEST_IDENTITIES: [u8; 5] = [0, 0, 0, 1, 11];
 const IDENTITIES_ANSWER: u8 = 12;
 const MAXIMUM_RESPONSE_BYTES: u32 = 1_048_576;
 const IO_TIMEOUT: Duration = Duration::from_millis(500);
+pub(super) const MAXIMUM_VERIFICATION_WAIT: Duration = Duration::from_secs(1);
+
+const _: () = assert!(MAXIMUM_VERIFICATION_WAIT.as_millis() >= IO_TIMEOUT.as_millis() * 2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct SocketIdentity {
@@ -31,24 +34,17 @@ pub(super) fn verified_socket_identity(path: &Path, expected_pid: u32) -> Result
     let before = socket_metadata(path)?;
     let mut stream =
         connect_bounded(path).map_err(|error| QuartersError::io("connect to the private SSH agent", path, error))?;
-    stream
-        .set_read_timeout(Some(IO_TIMEOUT))
-        .map_err(|error| QuartersError::io("set SSH-agent read timeout", path, error))?;
-    stream
-        .set_write_timeout(Some(IO_TIMEOUT))
-        .map_err(|error| QuartersError::io("set SSH-agent write timeout", path, error))?;
     if peer_pid(&stream)? != expected_pid {
         return Err(QuartersError::new(
             ErrorKind::CorruptState,
             "the private SSH-agent socket peer PID does not match its ownership record",
         ));
     }
-    stream
-        .write_all(&REQUEST_IDENTITIES)
+    let exchange_deadline = Instant::now() + IO_TIMEOUT;
+    write_all_bounded(&mut stream, &REQUEST_IDENTITIES, exchange_deadline)
         .map_err(|error| QuartersError::io("request SSH-agent identities", path, error))?;
     let mut header = [0_u8; 5];
-    stream
-        .read_exact(&mut header)
+    read_exact_bounded(&mut stream, &mut header, exchange_deadline)
         .map_err(|error| QuartersError::io("read SSH-agent response", path, error))?;
     let declared = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
     if !(5..=MAXIMUM_RESPONSE_BYTES).contains(&declared) || header[4] != IDENTITIES_ANSWER {
@@ -61,8 +57,7 @@ pub(super) fn verified_socket_identity(path: &Path, expected_pid: u32) -> Result
         QuartersError::new(ErrorKind::CorruptState, "the private agent response length is invalid").with_source(error)
     })?;
     let mut payload = vec![0_u8; payload_length];
-    stream
-        .read_exact(&mut payload)
+    read_exact_bounded(&mut stream, &mut payload, exchange_deadline)
         .map_err(|error| QuartersError::io("read complete SSH-agent response", path, error))?;
     validate_identities_payload(&payload)?;
     let after = socket_metadata(path)?;
@@ -76,6 +71,51 @@ pub(super) fn verified_socket_identity(path: &Path, expected_pid: u32) -> Result
         device: after.dev(),
         inode: after.ino(),
     })
+}
+
+fn write_all_bounded(stream: &mut UnixStream, bytes: &[u8], deadline: Instant) -> io::Result<()> {
+    let mut written = 0;
+    while written < bytes.len() {
+        stream.set_write_timeout(Some(remaining(deadline)?))?;
+        match stream.write(&bytes[written..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "private-agent write made no progress",
+                ));
+            }
+            Ok(count) => written += count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn read_exact_bounded(stream: &mut UnixStream, bytes: &mut [u8], deadline: Instant) -> io::Result<()> {
+    let mut read = 0;
+    while read < bytes.len() {
+        stream.set_read_timeout(Some(remaining(deadline)?))?;
+        match stream.read(&mut bytes[read..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "private-agent response ended early",
+                ));
+            }
+            Ok(count) => read += count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn remaining(deadline: Instant) -> io::Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|value| !value.is_zero())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "private-agent protocol exchange timed out"))
 }
 
 fn validate_identities_payload(payload: &[u8]) -> Result<()> {
@@ -254,6 +294,7 @@ fn validate_socket(path: &Path, metadata: &fs::Metadata) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::net::UnixStream;
 
     #[test]
     fn identities_payload_requires_complete_exact_framing() {
@@ -262,5 +303,26 @@ mod tests {
         assert!(validate_identities_payload(&[0, 0, 0, 0, 0]).is_err());
         assert!(validate_identities_payload(&[0, 0, 0, 1]).is_err());
         assert!(validate_identities_payload(&[0, 0, 0, 1, 0, 0, 0, 1, 42, 0, 0, 0, 0]).is_ok());
+    }
+
+    #[test]
+    fn bounded_read_uses_one_deadline_across_partial_progress() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (mut reader, mut writer) = UnixStream::pair()?;
+        let writer = std::thread::spawn(move || {
+            for byte in [1_u8, 2, 3, 4, 5] {
+                if writer.write_all(&[byte]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let started = Instant::now();
+        let mut bytes = [0_u8; 5];
+        let result = read_exact_bounded(&mut reader, &mut bytes, started + Duration::from_millis(150));
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_millis(500));
+        drop(reader);
+        assert!(writer.join().is_ok());
+        Ok(())
     }
 }

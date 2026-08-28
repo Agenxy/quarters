@@ -4,22 +4,30 @@ mod model;
 mod process;
 mod protocol;
 mod registry;
+mod startup;
 
 pub use model::{AgentState, AgentStatus};
 
-use crate::store::{epoch_millis, open_or_create_private_lock, sync_directory};
+use crate::store::{open_or_create_private_lock, sync_directory};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result, Space, Store};
 use fs4::FileExt;
-use model::{AgentFailure, AgentRecord, REGISTRY_SCHEMA_VERSION, StoredAgentState};
+use model::{AgentFailure, AgentRecord, StoredAgentState};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::Child;
 use std::thread;
 use std::time::{Duration, Instant};
 
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
-const STOP_TIMEOUT: Duration = Duration::from_secs(3);
-const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+pub(super) const STOP_TIMEOUT: Duration = Duration::from_secs(3);
+const LOCK_TIMEOUT: Duration = Duration::from_secs(8);
+const LOCK_OVERHEAD_BUDGET: Duration = Duration::from_secs(2);
+
+const _: () = assert!(
+    LOCK_TIMEOUT.as_millis()
+        >= STOP_TIMEOUT.as_millis()
+            + (2 * protocol::MAXIMUM_VERIFICATION_WAIT.as_millis())
+            + LOCK_OVERHEAD_BUDGET.as_millis(),
+    "the agent lock deadline must dominate verified shutdown work",
+);
 
 impl Store {
     pub(crate) fn ensure_no_agent_for_removal(&self, space: &Space, host: &HostEnvironment) -> Result<()> {
@@ -52,38 +60,7 @@ impl Store {
     ///
     /// Returns an error on legacy identity, stale state, launch failure or timeout.
     pub fn start_ssh_agent(&self, space: &Space, host: &HostEnvironment) -> Result<AgentStatus> {
-        self.ensure_no_rename_target(&space.manifest().name)?;
-        self.ensure_no_rollback_target(&space.manifest().name)?;
-        if space.id().is_none() {
-            return Err(legacy_agent_error());
-        }
-        let _lease = self.lease(space)?;
-        let runtime = crate::platform::runtime_directory(space, host)?;
-        let _lock = agent_lock(&runtime)?;
-        let current = inspect_at(space, &runtime)?;
-        match current.state {
-            AgentState::Active => return Ok(current),
-            AgentState::Starting => return reconcile_starting(space, &runtime),
-            AgentState::Failed
-                if current
-                    .pid
-                    .is_some_and(|pid| !process::process_is_alive(pid).unwrap_or(true)) =>
-            {
-                let record = registry::read(&runtime, space)?.ok_or_else(missing_registry)?;
-                recover_inactive_record(space, &runtime, &record)?;
-            }
-            AgentState::Unset => {}
-            AgentState::Stopping | AgentState::Failed | AgentState::Stale => {
-                return Err(QuartersError::new(
-                    ErrorKind::CorruptState,
-                    format!("private SSH-agent state is {}; start refused", current.state.as_str()),
-                )
-                .with_hint("run 'quarters agent status NAME' and resolve the reported state before retrying"));
-            }
-        }
-        reject_unowned_socket(&runtime)?;
-        process::validate_launch(&runtime)?;
-        start_agent(self, space, &runtime)
+        startup::start(self, space, host)
     }
 
     /// Stop one identity-verified private OpenSSH agent.
@@ -125,13 +102,18 @@ impl Store {
         let Some(runtime) = crate::platform::existing_runtime_directory(space, host)? else {
             return Ok(AgentStatus::unset(space));
         };
-        let _lock = agent_lock(&runtime)?;
-        let current = inspect_at(space, &runtime)?;
-        match current.state {
-            AgentState::Unset | AgentState::Active => Ok(current),
-            AgentState::Starting => reconcile_starting(space, &runtime),
-            AgentState::Stopping | AgentState::Failed | AgentState::Stale => recover_inactive_state(space, &runtime),
-        }
+        let starting = {
+            let _lock = agent_lock(&runtime)?;
+            let current = inspect_at(space, &runtime)?;
+            match current.state {
+                AgentState::Unset | AgentState::Active => return Ok(current),
+                AgentState::Starting => registry::read(&runtime, space)?.ok_or_else(missing_registry)?,
+                AgentState::Stopping | AgentState::Failed | AgentState::Stale => {
+                    return recover_inactive_state(space, &runtime);
+                }
+            }
+        };
+        startup::reconcile(space, &runtime, &starting)
     }
 }
 
@@ -171,126 +153,6 @@ pub fn run_ssh_agent_helper(host: &HostEnvironment, space: &Space, token: &str) 
         return Err(legacy_agent_error());
     }
     process::run_helper(host, space, token)
-}
-
-fn start_agent(store: &Store, space: &Space, runtime: &Path) -> Result<AgentStatus> {
-    let id = space.id().cloned().ok_or_else(legacy_agent_error)?;
-    let token = generate_token()?;
-    let mut child = process::spawn_helper(store, space, &token)?;
-    let starting = AgentRecord {
-        schema_version: REGISTRY_SCHEMA_VERSION,
-        state: StoredAgentState::Starting,
-        space_id: id,
-        token,
-        pid: child.id(),
-        created_unix_ms: epoch_millis()?,
-        socket_inode: None,
-        socket_device: None,
-        failure: None,
-    };
-    if let Err(error) = registry::create(runtime, &starting) {
-        if let Err(cleanup) = stop_spawned_child(&mut child) {
-            return Err(error.with_hint(format!("private-agent launcher cleanup also failed: {cleanup}")));
-        }
-        return Err(error);
-    }
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
-    loop {
-        if let Ok(identity) = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid) {
-            return activate_starting(space, runtime, &starting, identity);
-        }
-        if child
-            .try_wait()
-            .map_err(|error| {
-                QuartersError::new(ErrorKind::System, "could not inspect agent startup").with_source(error)
-            })?
-            .is_some()
-        {
-            mark_failed(runtime, &starting, AgentFailure::LaunchExited)?;
-            return Err(QuartersError::new(
-                ErrorKind::System,
-                "the OpenSSH agent exited before its protocol became ready",
-            ));
-        }
-        if Instant::now() >= deadline {
-            let cleanup = stop_spawned_child(&mut child);
-            mark_failed(runtime, &starting, AgentFailure::StartupTimeout)?;
-            if let Err(error) = cleanup {
-                return Err(error.with_hint("the failed ownership record was retained for confirmed recovery"));
-            }
-            return Err(QuartersError::new(
-                ErrorKind::ResourceLimit,
-                "the private SSH agent did not become ready within five seconds",
-            ));
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn stop_spawned_child(child: &mut Child) -> Result<()> {
-    process::terminate_unreaped_child(child.id())?;
-    let deadline = Instant::now() + STOP_TIMEOUT;
-    loop {
-        if child
-            .try_wait()
-            .map_err(|error| QuartersError::new(ErrorKind::System, "could not reap agent launcher").with_source(error))?
-            .is_some()
-        {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            child.kill().map_err(|error| {
-                QuartersError::new(ErrorKind::System, "could not kill an unresponsive agent launcher")
-                    .with_source(error)
-            })?;
-            child.wait().map_err(|error| {
-                QuartersError::new(ErrorKind::System, "could not reap the killed agent launcher").with_source(error)
-            })?;
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn reconcile_starting(space: &Space, runtime: &Path) -> Result<AgentStatus> {
-    let starting = registry::read(runtime, space)?.ok_or_else(missing_registry)?;
-    if starting.state != StoredAgentState::Starting {
-        return Err(QuartersError::new(
-            ErrorKind::CorruptState,
-            "private-agent state changed before startup reconciliation",
-        ));
-    }
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
-    loop {
-        if let Ok(identity) = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid) {
-            return activate_starting(space, runtime, &starting, identity);
-        }
-        if !process::process_is_alive(starting.pid)? {
-            return recover_inactive_record(space, runtime, &starting);
-        }
-        if Instant::now() >= deadline {
-            return Err(QuartersError::new(
-                ErrorKind::ResourceLimit,
-                "the recorded private-agent launcher is alive but did not become ready",
-            )
-            .with_hint("run 'quarters agent status NAME'; Quarters will not signal an incompletely verified process"));
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn activate_starting(
-    space: &Space,
-    runtime: &Path,
-    starting: &AgentRecord,
-    identity: protocol::SocketIdentity,
-) -> Result<AgentStatus> {
-    let mut active = starting.clone();
-    active.state = StoredAgentState::Active;
-    active.socket_inode = Some(identity.inode);
-    active.socket_device = Some(identity.device);
-    registry::replace(runtime, starting, &active)?;
-    inspect_at(space, runtime)
 }
 
 fn recover_inactive_state(space: &Space, runtime: &Path) -> Result<AgentStatus> {
@@ -513,7 +375,7 @@ fn agent_lock(runtime: &Path) -> Result<File> {
             Err(fs4::TryLockError::WouldBlock) => {
                 return Err(QuartersError::new(
                     ErrorKind::ResourceLimit,
-                    "the private-agent lifecycle lock did not become available within two seconds",
+                    "the private-agent lifecycle lock did not become available within eight seconds",
                 ));
             }
             Err(fs4::TryLockError::Error(error)) => {
@@ -521,27 +383,6 @@ fn agent_lock(runtime: &Path) -> Result<File> {
             }
         }
     }
-}
-
-fn mark_failed(runtime: &Path, starting: &AgentRecord, failure: AgentFailure) -> Result<()> {
-    let mut failed = starting.clone();
-    failed.state = StoredAgentState::Failed;
-    failed.failure = Some(failure);
-    registry::replace(runtime, starting, &failed)
-}
-
-fn generate_token() -> Result<String> {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut random = [0_u8; 16];
-    getrandom::fill(&mut random).map_err(|error| {
-        QuartersError::new(ErrorKind::System, "could not obtain randomness for agent ownership").with_source(error)
-    })?;
-    let mut token = String::with_capacity(32);
-    for byte in random {
-        token.push(char::from(HEX[usize::from(byte >> 4)]));
-        token.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    Ok(token)
 }
 
 fn legacy_agent_error() -> QuartersError {
@@ -564,6 +405,8 @@ fn missing_registry() -> QuartersError {
 mod tests {
     use super::*;
     use crate::SpaceName;
+    use crate::store::epoch_millis;
+    use model::REGISTRY_SCHEMA_VERSION;
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
 
