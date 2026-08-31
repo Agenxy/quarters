@@ -6,8 +6,8 @@ mod policy;
 use super::super::{CapabilityStatus, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, QuartersError, Result};
 use landlock::{ABI, Access, AccessFs, CompatLevel, Compatible, Ruleset, RulesetAttr};
-use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
+use std::path::PathBuf;
 
 pub(super) struct PreparedConfinement {
     ruleset: landlock::RulesetCreated,
