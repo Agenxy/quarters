@@ -151,8 +151,8 @@ jobs:
           prefix="$RUNNER_TEMP/quarters-npm-prefix"
           store="$RUNNER_TEMP/quarters-npm-store"
           npm install --global --prefix "$prefix" \
-            npm-smoke/quarters-cli-${NATIVE_PACKAGE}-*.tgz \
-            npm-smoke/quarters-cli-[0-9]*.tgz
+            ./npm-smoke/quarters-cli-${NATIVE_PACKAGE}-*.tgz \
+            ./npm-smoke/quarters-cli-[0-9]*.tgz
           export PATH="$prefix/bin:$PATH"
           quarters --version
           QUARTERS_ROOT="$store" quarters create smoke
