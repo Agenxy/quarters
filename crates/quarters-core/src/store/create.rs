@@ -35,18 +35,18 @@ impl Store {
     pub fn create_with_layout(&self, name: SpaceName, default_shell: PathBuf, layout: SpaceLayout) -> Result<Space> {
         self.ensure_layout()?;
         validate_shell(&default_shell)?;
+        let setup_observation = self.begin_mutation()?;
         self.ensure_no_rename_target(&name)?;
         self.ensure_no_rollback_target(&name)?;
-        let destination = self.space_path(&name);
+        let destination = setup_observation.layout().space_path(&name);
         if entry_exists(&destination)? {
             return Err(QuartersError::new(
                 ErrorKind::AlreadyExists,
                 format!("space '{name}' already exists"),
             ));
         }
-        let temporary = self.temporary_path(&name)?;
+        let temporary = setup_observation.layout().temporary_path(&name)?;
         reject_unfinished_path(&temporary)?;
-        let setup_observation = self.management_guard()?;
         create_private_dir(&temporary)?;
         let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
         let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
@@ -62,7 +62,7 @@ impl Store {
         };
         let publication = (|| {
             staging_identity.verify(&temporary, &creation_lock_path)?;
-            let observation = self.management_guard()?;
+            let observation = self.begin_mutation()?;
             let publication_name = SpaceName::parse(requested_name.clone())?;
             self.ensure_no_rename_target(&publication_name)?;
             self.ensure_no_rollback_target(&publication_name)?;

@@ -79,7 +79,7 @@ impl Store {
         let snapshot = self.verify_artifact(ArtifactKind::Snapshot, snapshot_name)?;
         validate_snapshot_target(&snapshot, &self.open(target)?)?;
         require_recovery_name_available(self, recovery_name)?;
-        let management = self.management_guard()?;
+        let management = self.begin_mutation()?;
         let target_space = self.open(target)?;
         let activity = acquire_lifecycle_lease(&target_space, target.as_str())?;
         drop(management);
@@ -146,7 +146,7 @@ impl Store {
             &recovery_id,
         );
         if let Err(error) = &result
-            && !rollback_marker_path(self, &transaction_id).exists()
+            && !rollback_marker_path(self, &transaction_id)?.exists()
             && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(QuartersError::new(
@@ -204,10 +204,10 @@ impl Store {
     /// Reconciles actionable transactions and preserves every ambiguous tree.
     pub fn recover_rollbacks(&self) -> Result<Vec<RollbackObservation>> {
         self.ensure_layout()?;
-        let spaces = self.layout().spaces_root().to_path_buf();
-        let trash = self.layout().trash_root().to_path_buf();
-        let (observations, reclaiming) = {
-            let _management = self.management_guard()?;
+        let (observations, reclaiming, trash) = {
+            let management = self.begin_mutation()?;
+            let spaces = management.layout().spaces_root().to_path_buf();
+            let trash = management.layout().trash_root().to_path_buf();
             reclaim_marker_temporaries(&spaces)?;
             let plans = load_recovery_inventory(&spaces, None)?.plans;
             let mut reclaiming = Vec::new();
@@ -219,7 +219,7 @@ impl Store {
             reclaim_orphan_staging(&spaces, &trash, &mut reclaiming)?;
             sync_directory(&spaces)?;
             sync_directory(&trash)?;
-            (observations, reclaiming)
+            (observations, reclaiming, trash)
         };
         for path in reclaiming {
             remove_tree_restoring_owner_access(&path)?;
@@ -236,12 +236,12 @@ impl Store {
         transaction_id: &ArtifactId,
     ) -> Result<(Space, LifecycleLease, SpaceStaging)> {
         self.ensure_no_rename_target(target)?;
-        let management = self.management_guard()?;
+        let management = self.begin_mutation()?;
         let target_space = self.open(target)?;
         validate_snapshot_target(snapshot, &target_space)?;
         require_recovery_name_available(self, recovery_name)?;
         let activity = acquire_lifecycle_lease(&target_space, target.as_str())?;
-        let staging = prepare_rollback_staging(self, transaction_id)?;
+        let staging = prepare_rollback_staging(management.layout(), transaction_id)?;
         drop(management);
         Ok((target_space, activity, staging))
     }
@@ -328,8 +328,9 @@ impl Store {
         transaction_id: &ArtifactId,
         recovery_id: &ArtifactId,
     ) -> Result<()> {
-        let spaces = self.layout().spaces_root().to_path_buf();
-        let marker_path = rollback_marker_path(self, transaction_id);
+        let management = self.begin_mutation()?;
+        let spaces = management.layout().spaces_root().to_path_buf();
+        let marker_path = rollback_marker_path_from_text(&spaces, transaction_id.as_str());
         let retired = spaces.join(format!(".rolled-back-{transaction_id}"));
         let mut marker = RollbackMarker {
             schema_version: MARKER_SCHEMA_VERSION,
@@ -342,7 +343,6 @@ impl Store {
             snapshot_id: snapshot.manifest().artifact_id.clone(),
             recovery_snapshot_id: recovery_id.clone(),
         };
-        let management = self.management_guard()?;
         revalidate_publication(self, target, snapshot, staging)?;
         write_marker_new(&marker_path, &marker)?;
         sync_directory(&spaces)?;
@@ -369,7 +369,7 @@ impl Store {
         sync_directory(&spaces)?;
         marker.state = RollbackState::Published;
         replace_marker(&marker_path, &marker)?;
-        let trash = self.layout().trash_root().to_path_buf();
+        let trash = management.layout().trash_root().to_path_buf();
         create_private_dir(&trash)?;
         let reclaiming = trash.join(format!(".reclaiming-{}", unique_suffix()?));
         fs::rename(&retired, &reclaiming)
@@ -794,8 +794,8 @@ const fn marker_state_text(state: RollbackState) -> &'static str {
     }
 }
 
-fn prepare_rollback_staging(store: &Store, id: &ArtifactId) -> Result<SpaceStaging> {
-    let spaces = store.layout().spaces_root().to_path_buf();
+fn prepare_rollback_staging(layout: &crate::store::StoreLayout, id: &ArtifactId) -> Result<SpaceStaging> {
+    let spaces = layout.spaces_root().to_path_buf();
     let temporary = spaces.join(format!(".rollback-staging-{id}"));
     let destination = temporary.clone();
     if entry_exists(&temporary)? {
@@ -957,8 +957,8 @@ pub(crate) fn read_marker(path: &Path) -> Result<RollbackMarker> {
     Ok(marker)
 }
 
-pub(crate) fn rollback_marker_path(store: &Store, id: &ArtifactId) -> PathBuf {
-    store.layout().spaces_root().join(format!(".rollback-{id}.json"))
+pub(crate) fn rollback_marker_path(store: &Store, id: &ArtifactId) -> Result<PathBuf> {
+    Ok(store.layout()?.spaces_root().join(format!(".rollback-{id}.json")))
 }
 
 fn entry_name(path: &Path) -> Result<String> {

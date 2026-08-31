@@ -70,7 +70,7 @@ impl Store {
         }
         self.require_artifact_name_available(ArtifactKind::Template, destination)?;
         let staging = {
-            let _management = self.management_guard()?;
+            let _management = self.begin_mutation()?;
             self.require_artifact_name_available(ArtifactKind::Template, destination)?;
             prepare_artifact_staging(self, ArtifactKind::Template)?
         };
@@ -144,7 +144,7 @@ impl Store {
         staging: &ArtifactStaging,
         manifest: &ArtifactManifest,
     ) -> Result<Option<String>> {
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         self.require_artifact_name_available(ArtifactKind::Template, &manifest.name)?;
         if entry_exists(&staging.destination)? {
             return Err(QuartersError::new(

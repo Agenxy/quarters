@@ -37,7 +37,7 @@ pub use store::artifact::{
 pub use store::lifecycle::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};
 pub use store::{
     HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport, LeaseState,
-    SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store,
+    SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store, StoreLayoutDiagnosis,
 };
 pub use store_recovery::RecoverySummary;
 pub use text::{encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded};

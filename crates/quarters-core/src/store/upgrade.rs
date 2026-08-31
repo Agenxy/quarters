@@ -52,7 +52,7 @@ impl Store {
     pub fn upgrade_space(&self, name: &SpaceName) -> Result<SpaceUpgradeReport> {
         self.ensure_no_rename_target(name)?;
         self.ensure_no_rollback_target(name)?;
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         let space = self.open(name)?;
         let _lease = acquire_lifecycle_lease(&space, name.as_str())?;
         if space.id().is_some() {

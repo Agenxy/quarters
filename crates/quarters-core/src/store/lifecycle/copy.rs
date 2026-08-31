@@ -290,15 +290,15 @@ impl CloneSetup {
         }
         store.ensure_no_rename_target(source)?;
         store.ensure_no_rename_target(destination)?;
-        let management = store.management_guard()?;
+        let management = store.begin_mutation()?;
         let source_space = store.open(source)?;
         validate_shell(&source_space.manifest().default_shell)?;
         let activity_lock = acquire_lifecycle_lease(&source_space, source.as_str())?;
-        let destination_path = store.space_path(destination);
+        let destination_path = management.layout().space_path(destination);
         store.ensure_no_rollback_target(destination)?;
         reject_destination(&destination_path, destination.as_str())?;
         let staging = if mode == CloneMode::Execute {
-            Some(prepare_staging(store, destination, destination_path)?)
+            Some(prepare_staging(management.layout(), destination, destination_path)?)
         } else {
             None
         };
@@ -324,8 +324,12 @@ impl CloneSetup {
     }
 }
 
-fn prepare_staging(store: &Store, destination: &SpaceName, destination_path: PathBuf) -> Result<Staging> {
-    let temporary = store.temporary_path(destination)?;
+fn prepare_staging(
+    layout: &crate::store::StoreLayout,
+    destination: &SpaceName,
+    destination_path: PathBuf,
+) -> Result<Staging> {
+    let temporary = layout.temporary_path(destination)?;
     if entry_exists(&temporary)? {
         return Err(
             QuartersError::new(ErrorKind::CorruptState, "reserved clone staging path already exists")
@@ -404,7 +408,7 @@ fn publish(store: &Store, setup: &CloneSetup, manifest: &SpaceManifest, control:
         .ok_or_else(|| QuartersError::new(ErrorKind::System, "clone publication has no private staging directory"))?;
     validate_space_anchors(&staging.temporary)?;
     validate_stored_manifest(manifest)?;
-    let _management = store.management_guard()?;
+    let _management = store.begin_mutation()?;
     let reopened = store.open(&setup.source_manifest.name)?;
     if reopened.manifest() != &setup.source_manifest {
         return Err(

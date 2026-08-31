@@ -163,6 +163,32 @@ fn removal_never_follows_present_or_dangling_space_links() {
 }
 
 #[test]
+fn removal_never_traverses_a_replaced_spaces_anchor_for_legacy_names() {
+    let (temporary, store) = test_store();
+    store.recover().expect("initialize store");
+    let spaces = store.root.join("spaces");
+    let retained = store.root.join("spaces-retained");
+    fs::rename(&spaces, &retained).expect("retain spaces directory");
+    let outside = temporary.path().join("outside");
+    fs::create_dir(&outside).expect("create outside directory");
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).expect("protect outside directory");
+    let legacy = outside.join("notes.bak");
+    fs::create_dir(&legacy).expect("create legacy target");
+    fs::set_permissions(&legacy, fs::Permissions::from_mode(0o700)).expect("protect legacy target");
+    let sentinel = legacy.join("sentinel");
+    fs::write(&sentinel, b"outside").expect("write sentinel");
+    symlink(&outside, &spaces).expect("replace spaces anchor");
+
+    let error = store
+        .remove("notes.bak")
+        .expect_err("linked spaces anchor must fail closed");
+
+    assert_eq!(error.kind(), ErrorKind::CorruptState);
+    assert!(sentinel.is_file());
+    assert!(fs::symlink_metadata(&spaces).is_ok_and(|metadata| metadata.file_type().is_symlink()));
+}
+
+#[test]
 fn concurrent_recovery_tolerates_reclaiming_state() {
     let (_temporary, store) = test_store();
     store.recover().expect("initialize store");

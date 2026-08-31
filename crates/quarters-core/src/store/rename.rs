@@ -69,7 +69,7 @@ impl Store {
         let source = self.open(previous)?;
         reject_legacy(&source)?;
         reject_legacy_artifact_bindings(self, &source)?;
-        reject_destination(self, name)?;
+        reject_destination(self.layout()?.spaces_root(), name)?;
         let _lease = acquire_lifecycle_lease(&source, previous.as_str())?;
         rename_report(&source, previous, name, false)
     }
@@ -82,14 +82,14 @@ impl Store {
     pub fn rename_space(&self, previous: &SpaceName, name: &SpaceName) -> Result<SpaceRenameReport> {
         self.ensure_layout()?;
         validate_distinct_names(previous, name)?;
+        let management = self.begin_mutation()?;
         self.ensure_no_rename_target(previous)?;
         self.ensure_no_rename_target(name)?;
         self.ensure_no_rollback_target(previous)?;
         self.ensure_no_rollback_target(name)?;
-        let _management = self.management_guard()?;
         let source = self.open(previous)?;
         reject_legacy(&source)?;
-        reject_destination(self, name)?;
+        reject_destination(management.layout().spaces_root(), name)?;
         let _lease = acquire_lifecycle_lease(&source, previous.as_str())?;
         reject_legacy_artifact_bindings(self, &source)?;
         crate::platform::migrate_existing_legacy_runtime(&source, &crate::HostEnvironment::capture())?;
@@ -100,11 +100,11 @@ impl Store {
             name: name.clone(),
             source_identity: source_identity(&source),
         };
-        let spaces = self.layout().spaces_root().to_path_buf();
+        let spaces = management.layout().spaces_root().to_path_buf();
         let marker_path = marker_path(&spaces, &marker.transaction_id);
         write_marker(&marker_path, &marker)?;
         sync_directory(&spaces)?;
-        let destination = self.space_path(name);
+        let destination = spaces.join(name.as_str());
         if let Err(error) = fs::rename(source.root(), &destination) {
             let _cleanup = fs::remove_file(&marker_path);
             let _sync = sync_directory(&spaces);
@@ -120,7 +120,7 @@ impl Store {
     }
 
     pub(crate) fn ensure_no_rename_target(&self, name: &SpaceName) -> Result<()> {
-        if rename_target_exists(self.layout().spaces_root(), name)? {
+        if rename_target_exists(self.layout()?.spaces_root(), name)? {
             return Err(QuartersError::new(
                 ErrorKind::SpaceActive,
                 format!("space '{name}' has an interrupted rename transaction"),
@@ -131,17 +131,17 @@ impl Store {
     }
 
     pub(crate) fn rename_recovery_count(&self) -> Result<usize> {
-        Ok(rename_scan(self.layout().spaces_root())?.marker_count)
+        Ok(rename_scan(self.layout()?.spaces_root())?.marker_count)
     }
 
     pub(crate) fn rename_recovery_issue_count(&self) -> Result<usize> {
-        Ok(rename_scan(self.layout().spaces_root())?.issues)
+        Ok(rename_scan(self.layout()?.spaces_root())?.issues)
     }
 
     pub(crate) fn recover_renames(&self) -> Result<RenameRecovery> {
-        let _management = self.management_guard()?;
-        let spaces = self.layout().spaces_root().to_path_buf();
-        let recovery = recover_rename_batch(self, &spaces)?;
+        let management = self.begin_mutation()?;
+        let spaces = management.layout().spaces_root().to_path_buf();
+        let recovery = recover_rename_batch(&spaces)?;
         sync_directory(&spaces)?;
         Ok(recovery)
     }
@@ -162,9 +162,9 @@ fn reject_legacy_artifact_bindings(store: &Store, source: &Space) -> Result<()> 
     .with_hint("retain the current name, or recreate and explicitly remove those legacy templates and snapshots before renaming"))
 }
 
-fn recover_one(store: &Store, marker_path: &Path, marker: &RenameMarker) -> Result<()> {
-    let source_path = store.space_path(&marker.previous);
-    let destination = store.space_path(&marker.name);
+fn recover_one(spaces: &Path, marker_path: &Path, marker: &RenameMarker) -> Result<()> {
+    let source_path = spaces.join(marker.previous.as_str());
+    let destination = spaces.join(marker.name.as_str());
     let source_exists = entry_exists(&source_path)?;
     let destination_exists = entry_exists(&destination)?;
     match (source_exists, destination_exists) {
@@ -246,7 +246,7 @@ fn rename_scan(spaces: &Path) -> Result<RenameScan> {
     Ok(scan)
 }
 
-fn recover_rename_batch(store: &Store, spaces: &Path) -> Result<RenameRecovery> {
+fn recover_rename_batch(spaces: &Path) -> Result<RenameRecovery> {
     let entries =
         fs::read_dir(spaces).map_err(|error| QuartersError::io("read rename recovery namespace", spaces, error))?;
     let mut recovery = RenameRecovery {
@@ -263,7 +263,7 @@ fn recover_rename_batch(store: &Store, spaces: &Path) -> Result<RenameRecovery> 
         if recovery.recovered >= MAX_RENAMES {
             continue;
         }
-        if recover_one(store, &path, &marker).is_ok() {
+        if recover_one(spaces, &path, &marker).is_ok() {
             recovery.recovered = recovery.recovered.saturating_add(1);
         } else {
             recovery.issues = recovery.issues.saturating_add(1);
@@ -358,8 +358,8 @@ fn marker_path(spaces: &Path, id: &SpaceId) -> PathBuf {
     spaces.join(format!("{RENAME_PREFIX}{id}{RENAME_SUFFIX}"))
 }
 
-fn reject_destination(store: &Store, name: &SpaceName) -> Result<()> {
-    if !entry_exists(&store.space_path(name))? {
+fn reject_destination(spaces: &Path, name: &SpaceName) -> Result<()> {
+    if !entry_exists(&spaces.join(name.as_str()))? {
         return Ok(());
     }
     Err(QuartersError::new(
@@ -443,7 +443,10 @@ mod tests {
     fn recovery_aborts_a_pre_move_rename() {
         let (_temporary, store, source, destination) = fixture();
         let marker = marker(&source, &destination);
-        let path = marker_path(store.layout().spaces_root(), &marker.transaction_id);
+        let path = marker_path(
+            store.layout().expect("store layout").spaces_root(),
+            &marker.transaction_id,
+        );
         write_marker(&path, &marker).expect("write marker");
         assert_eq!(store.rename_recovery_count().expect("inspect markers"), 1);
         assert_eq!(store.recover_renames().expect("recover marker").recovered, 1);
@@ -456,7 +459,10 @@ mod tests {
     fn interrupted_rename_blocks_only_its_source_and_destination_names() {
         let (_temporary, store, source, destination) = fixture();
         let marker = marker(&source, &destination);
-        let path = marker_path(store.layout().spaces_root(), &marker.transaction_id);
+        let path = marker_path(
+            store.layout().expect("store layout").spaces_root(),
+            &marker.transaction_id,
+        );
         write_marker(&path, &marker).expect("write marker");
         let unrelated = SpaceName::parse("unrelated").expect("unrelated name");
         store
@@ -473,9 +479,16 @@ mod tests {
     fn recovery_completes_a_moved_space_before_removing_its_marker() {
         let (_temporary, store, source, destination) = fixture();
         let marker = marker(&source, &destination);
-        let path = marker_path(store.layout().spaces_root(), &marker.transaction_id);
+        let path = marker_path(
+            store.layout().expect("store layout").spaces_root(),
+            &marker.transaction_id,
+        );
         write_marker(&path, &marker).expect("write marker");
-        fs::rename(source.root(), store.space_path(&destination)).expect("move source");
+        fs::rename(
+            source.root(),
+            store.layout().expect("store layout").space_path(&destination),
+        )
+        .expect("move source");
         assert!(store.open(&destination).is_err());
         assert_eq!(store.recover_renames().expect("complete rename").recovered, 1);
         let renamed = store.open(&destination).expect("open renamed space");
@@ -492,7 +505,7 @@ mod tests {
             .create(unrelated.clone(), PathBuf::from("/bin/sh"))
             .expect("create unrelated space");
         let id = SpaceId::generate().expect("marker ID");
-        let path = marker_path(store.layout().spaces_root(), &id);
+        let path = marker_path(store.layout().expect("store layout").spaces_root(), &id);
         write_private_file(&path, b"{not-json\n").expect("write malformed marker");
 
         store.inspect_named(&unrelated).expect("inspect unrelated space");
@@ -507,9 +520,13 @@ mod tests {
     fn ambiguous_marker_does_not_block_an_unrelated_recovery() {
         let (_temporary, store, source, destination) = fixture();
         let ambiguous = marker(&source, &destination);
-        let ambiguous_path = marker_path(store.layout().spaces_root(), &ambiguous.transaction_id);
+        let ambiguous_path = marker_path(
+            store.layout().expect("store layout").spaces_root(),
+            &ambiguous.transaction_id,
+        );
         write_marker(&ambiguous_path, &ambiguous).expect("write ambiguous marker");
-        crate::store::create_private_dir(&store.space_path(&destination)).expect("create colliding destination");
+        crate::store::create_private_dir(&store.layout().expect("store layout").space_path(&destination))
+            .expect("create colliding destination");
 
         let other_name = SpaceName::parse("other").expect("other name");
         let other = store
@@ -517,7 +534,10 @@ mod tests {
             .expect("create other source");
         let final_name = SpaceName::parse("final").expect("final name");
         let actionable = marker(&other, &final_name);
-        let actionable_path = marker_path(store.layout().spaces_root(), &actionable.transaction_id);
+        let actionable_path = marker_path(
+            store.layout().expect("store layout").spaces_root(),
+            &actionable.transaction_id,
+        );
         write_marker(&actionable_path, &actionable).expect("write actionable marker");
 
         let recovery = store.recover_renames().expect("recover independent marker");
@@ -533,7 +553,10 @@ mod tests {
         for index in 0..=MAX_RENAMES {
             let destination = SpaceName::parse(format!("destination-{index}")).expect("destination name");
             let marker = marker(&source, &destination);
-            let path = marker_path(store.layout().spaces_root(), &marker.transaction_id);
+            let path = marker_path(
+                store.layout().expect("store layout").spaces_root(),
+                &marker.transaction_id,
+            );
             write_marker(&path, &marker).expect("write marker");
         }
         assert_eq!(store.rename_recovery_count().expect("count every marker"), 129);
@@ -547,10 +570,14 @@ mod tests {
     #[test]
     fn ambiguous_markers_cannot_starve_an_actionable_recovery() {
         let (_temporary, store, source, destination) = fixture();
-        crate::store::create_private_dir(&store.space_path(&destination)).expect("create colliding destination");
+        crate::store::create_private_dir(&store.layout().expect("store layout").space_path(&destination))
+            .expect("create colliding destination");
         for _index in 0..MAX_RENAMES {
             let marker = marker(&source, &destination);
-            let path = marker_path(store.layout().spaces_root(), &marker.transaction_id);
+            let path = marker_path(
+                store.layout().expect("store layout").spaces_root(),
+                &marker.transaction_id,
+            );
             write_marker(&path, &marker).expect("write ambiguous marker");
         }
         let other = store
@@ -563,7 +590,10 @@ mod tests {
             &other,
             &SpaceName::parse("other-destination").expect("actionable destination"),
         );
-        let actionable_path = marker_path(store.layout().spaces_root(), &actionable.transaction_id);
+        let actionable_path = marker_path(
+            store.layout().expect("store layout").spaces_root(),
+            &actionable.transaction_id,
+        );
         write_marker(&actionable_path, &actionable).expect("write actionable marker");
 
         let recovery = store.recover_renames().expect("scan beyond ambiguous markers");

@@ -144,7 +144,7 @@ impl Store {
     pub fn install_space_command_links(&self, name: &SpaceName, executable: &Path) -> Result<CommandLinkReport> {
         self.ensure_no_rename_target(name)?;
         self.ensure_no_rollback_target(name)?;
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         let space = self.open(name)?;
         let _lease = acquire_lifecycle_lease(&space, name.as_str())?;
         install_command_links(&space, executable)
@@ -158,7 +158,7 @@ impl Store {
     pub fn remove_space_command_links(&self, name: &SpaceName) -> Result<CommandLinkReport> {
         self.ensure_no_rename_target(name)?;
         self.ensure_no_rollback_target(name)?;
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         let space = self.open(name)?;
         let _lease = acquire_lifecycle_lease(&space, name.as_str())?;
         remove_command_links(&space)

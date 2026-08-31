@@ -387,6 +387,20 @@ If a final link or rename is already visible but directory sync or hidden
 staging cleanup fails, Quarters reports the publication as committed with an
 explicit warning instead of claiming that nothing was created.
 
+The storage expand phase recognizes both the current `spaces`/`trash` layout
+and the future `.spaces`/`.trash` layout. All writers still use the current
+visible categories. Unmarked visible stores remain compatible; dotted stores
+require a strict `.quarters-store.json` marker and are inspection-only in this
+release. Dual layouts, active migrations, malformed markers, unexplained links
+and newer marker schemas fail closed. The exact two-link no-clobber publication
+state remains readable and is repaired under the management lease. `quarters
+doctor` reports this state with bounded detail without creating or repairing
+it.
+Reserved staging problems are shown separately, without falsely describing an
+otherwise valid visible store as read-only. Safe orphan staging is reclaimed on
+the next explicit layout initialization even when the marker already exists;
+ordinary reads remain non-mutating.
+
 Rollback never merges in place. It verifies that the snapshot belongs to the
 exact target generation, creates and verifies the required automatic recovery
 snapshot, stages the replacement, preserves the target identity, and publishes

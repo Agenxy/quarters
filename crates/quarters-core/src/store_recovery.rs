@@ -116,7 +116,7 @@ impl Store {
             Err(error) => return Err(QuartersError::io("inspect Quarters root", &self.root, error)),
         };
         validate_store_root(&self.root, &root_metadata)?;
-        let layout = self.layout();
+        let layout = self.layout()?;
         let spaces_present = entry_exists(layout.spaces_root())?;
         let trash_present = entry_exists(layout.trash_root())?;
         if !spaces_present && !trash_present {
@@ -157,15 +157,15 @@ impl Store {
             .saturating_add(rename_recovery.issues);
         let rollbacks = self.recover_rollbacks()?;
         let rollback_issues = self.rollback_issues()?;
-        let layout = self.layout();
         let artifacts = inspect_artifact_state(self)?;
-        let (summary, reclaiming) = {
-            let _observation = self.management_guard()?;
-            let (mut summary, mut reclaiming) = prepare_recovery(&self.root, &layout)?;
-            let artifact_reclaiming = prepare_artifact_recovery(self)?;
+        let (summary, reclaiming, trash_root) = {
+            let mutation = self.begin_mutation()?;
+            let layout = mutation.layout();
+            let (mut summary, mut reclaiming) = prepare_recovery(&self.root, layout)?;
+            let artifact_reclaiming = prepare_artifact_recovery(self, layout.trash_root())?;
             reclaiming.extend(artifact_reclaiming);
             summary.apply_artifacts(&artifacts);
-            (summary, reclaiming)
+            (summary, reclaiming, layout.trash_root().to_path_buf())
         };
         let mut first_failure = None;
         for path in &reclaiming {
@@ -175,7 +175,7 @@ impl Store {
                 first_failure = Some(error);
             }
         }
-        let sync_result = sync_directory(layout.trash_root());
+        let sync_result = sync_directory(&trash_root);
         if let Some(error) = first_failure {
             return Err(error.with_hint(
                 "recovery attempted every retired entry; inspect the remaining reclaiming state and retry",
@@ -305,8 +305,7 @@ fn inspect_artifact_state(store: &Store) -> Result<ArtifactRecoveryState> {
     Ok(state)
 }
 
-fn prepare_artifact_recovery(store: &Store) -> Result<Vec<std::path::PathBuf>> {
-    let trash = store.layout().trash_root().to_path_buf();
+fn prepare_artifact_recovery(store: &Store, trash: &Path) -> Result<Vec<std::path::PathBuf>> {
     let mut retired = Vec::new();
     for kind in [ArtifactKind::Template, ArtifactKind::Snapshot] {
         let root = store.root.join(artifact_root_name(kind));
@@ -317,16 +316,16 @@ fn prepare_artifact_recovery(store: &Store) -> Result<Vec<std::path::PathBuf>> {
             })?;
         }
         for candidate in candidates.stale {
-            retire_artifact_recovery_path(&candidate.path, &trash, &mut retired)?;
+            retire_artifact_recovery_path(&candidate.path, trash, &mut retired)?;
         }
         for path in candidates.reclaiming {
-            retire_artifact_recovery_path(&path, &trash, &mut retired)?;
+            retire_artifact_recovery_path(&path, trash, &mut retired)?;
         }
         if root.exists() {
             sync_directory(&root)?;
         }
     }
-    sync_directory(&trash)?;
+    sync_directory(trash)?;
     Ok(retired)
 }
 

@@ -2,6 +2,7 @@
 
 mod artifacts;
 mod bundles;
+mod doctor;
 
 pub(crate) use artifacts::{
     print_artifact, print_artifact_list, print_artifact_mutation, print_artifact_report, print_artifact_verified,
@@ -25,7 +26,9 @@ const OUTPUT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy)]
 pub(crate) struct DoctorSpace<'a> {
+    pub(crate) requested: Option<&'a str>,
     pub(crate) space: Option<&'a Space>,
+    pub(crate) inspection_error: Option<&'a QuartersError>,
     pub(crate) environment_validated: Option<bool>,
     pub(crate) lease_state: Option<LeaseState>,
     pub(crate) agent_status: Option<&'a AgentStatus>,
@@ -468,6 +471,7 @@ pub(crate) fn print_environment(
 
 pub(crate) fn print_doctor(
     capabilities: &Capabilities,
+    layout: &quarters_core::StoreLayoutDiagnosis,
     tools: &[ToolProbe],
     shortcuts: &[ShortcutReport],
     context: DoctorSpace<'_>,
@@ -475,7 +479,9 @@ pub(crate) fn print_doctor(
     json_output: bool,
 ) -> quarters_core::Result<()> {
     let DoctorSpace {
+        requested,
         space,
+        inspection_error,
         environment_validated,
         lease_state,
         agent_status,
@@ -512,7 +518,10 @@ pub(crate) fn print_doctor(
     );
     let result = json!({
         "platform": capabilities,
+        "store_layout": layout,
+        "space_requested": requested.map(|name| safe_json_text(name, 64)),
         "space": space.map(space_value),
+        "space_inspection_error": inspection_error.map(inspection_error_value),
         "space_environment_validated": environment_validated,
         "space_lease_state": lease_state.map(LeaseState::as_str),
         "space_ssh_agent": agent_status,
@@ -526,12 +535,13 @@ pub(crate) fn print_doctor(
     if json_output {
         return print_success("doctor", &result, true);
     }
-    print_doctor_human(capabilities, tools, shortcuts, context, recovery);
+    print_doctor_human(capabilities, layout, tools, shortcuts, context, recovery);
     Ok(())
 }
 
 fn print_doctor_human(
     capabilities: &Capabilities,
+    layout: &quarters_core::StoreLayoutDiagnosis,
     tools: &[ToolProbe],
     shortcuts: &[ShortcutReport],
     context: DoctorSpace<'_>,
@@ -539,6 +549,7 @@ fn print_doctor_human(
 ) {
     println!("Quarters doctor");
     println!("  Platform       {}", capabilities.platform);
+    doctor::print_store_layout(layout);
     println!("  Baseline       available (HOME and user-state profile)");
     println!(
         "  Workspace      {}: {}",
@@ -624,6 +635,14 @@ fn print_doctor_human(
 }
 
 fn print_doctor_space(context: DoctorSpace<'_>) {
+    if let (Some(requested), Some(error)) = (context.requested, context.inspection_error) {
+        println!("  Space          {} (not inspected)", escape_for_human(requested));
+        println!("    issue: {}", escape_for_human(error.message()));
+        if let Some(hint) = error.hint() {
+            println!("    hint: {}", escape_for_human(hint));
+        }
+        return;
+    }
     let (Some(space), Some(lease_state)) = (context.space, context.lease_state) else {
         return;
     };

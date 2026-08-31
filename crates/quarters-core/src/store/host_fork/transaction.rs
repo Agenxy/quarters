@@ -135,7 +135,9 @@ fn execute_staging(
 }
 
 fn prepare_staging(store: &Store, destination: &SpaceName) -> Result<Staging> {
-    let temporary = store.temporary_path(destination)?;
+    let management = store.begin_mutation()?;
+    let layout = management.layout();
+    let temporary = layout.temporary_path(destination)?;
     if entry_exists(&temporary)? {
         return Err(QuartersError::new(
             ErrorKind::CorruptState,
@@ -149,7 +151,7 @@ fn prepare_staging(store: &Store, destination: &SpaceName) -> Result<Staging> {
     let identity = StagingIdentity::capture(&temporary, &creation_lock)?;
     Ok(Staging {
         temporary,
-        destination: store.space_path(destination),
+        destination: layout.space_path(destination),
         creation_lock_path,
         _creation_lock: creation_lock,
         identity,
@@ -225,7 +227,7 @@ fn prepare_destination(destination: &Path, relative: &Path, replace_generated: b
 fn publish(store: &Store, staging: &Staging, manifest: &crate::SpaceManifest) -> Result<()> {
     validate_space_anchors(&staging.temporary)?;
     validate_stored_manifest(manifest)?;
-    let _management = store.management_guard()?;
+    let _management = store.begin_mutation()?;
     store.ensure_no_rename_target(&manifest.name)?;
     store.ensure_no_rollback_target(&manifest.name)?;
     reject_destination_path(&staging.destination, manifest.name.as_str())?;
@@ -286,7 +288,7 @@ fn write_provenance(root: &Path, report: &HostForkReport, created_unix_ms: u128)
 fn preflight_destination(store: &Store, destination: &SpaceName) -> Result<()> {
     store.ensure_no_rename_target(destination)?;
     store.ensure_no_rollback_target(destination)?;
-    reject_destination_path(&store.space_path(destination), destination.as_str())
+    reject_destination_path(&store.layout()?.space_path(destination), destination.as_str())
 }
 
 fn reject_destination_path(path: &Path, name: &str) -> Result<()> {

@@ -11,7 +11,8 @@ pub(crate) mod scan;
 mod upgrade;
 
 pub use host_fork::{HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport};
-pub(crate) use layout::StoreLayout;
+pub use layout::StoreLayoutDiagnosis;
+pub(crate) use layout::{RootFormat, StoreLayout};
 pub use rename::SpaceRenameReport;
 pub use upgrade::SpaceUpgradeReport;
 
@@ -264,7 +265,7 @@ impl Store {
     ///
     /// Returns an error when the lock file cannot be opened or locked.
     pub fn lease(&self, space: &Space) -> Result<SpaceLease> {
-        let _observation = self.management_guard()?;
+        let _observation = self.begin_mutation()?;
         let file = open_private_lock(&space.lock_path())?;
         lock_shared_bounded(&file, &space.lock_path())?;
         Ok(SpaceLease { _file: file })
@@ -609,7 +610,8 @@ mod tests {
         let (_temporary, store) = test_store();
         store.ensure_layout().expect("create layout");
         for name in [".ignored-one", ".ignored-two"] {
-            fs::write(store.layout().spaces_root().join(name), b"").expect("create ignored entry");
+            fs::write(store.layout().expect("store layout").spaces_root().join(name), b"")
+                .expect("create ignored entry");
         }
 
         let inspections = store.inspect_at_most(1).expect("hidden entries are not results");
@@ -621,6 +623,18 @@ mod tests {
         let temporary = TempDir::new().expect("temporary directory");
         let store = Store::new(temporary.path().to_path_buf()).expect("valid store");
         assert!(store.list().expect("empty listing").is_empty());
+    }
+
+    #[test]
+    fn removal_from_an_uninitialized_store_preserves_not_found_semantics() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path().join("store");
+        let store = Store::new(root.clone()).expect("store");
+
+        let error = store.remove("missing").expect_err("missing space");
+
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        assert!(!root.exists());
     }
 
     #[test]

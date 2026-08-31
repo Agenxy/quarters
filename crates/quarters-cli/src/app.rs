@@ -626,11 +626,17 @@ fn exec(store: &Store, host: &HostEnvironment, arguments: &ExecArgs, json: bool)
 }
 
 fn doctor(store: &Store, host: &HostEnvironment, arguments: &DoctorArgs, json: bool) -> Result<i32> {
-    let space = arguments
+    let layout = store.layout_diagnosis();
+    let space_result = arguments
         .name
         .as_deref()
         .map(|name| open_space(store, name))
-        .transpose()?;
+        .transpose();
+    let (space, inspection_error) = match space_result {
+        Ok(space) => (space, None),
+        Err(error) if layout.error_kind.is_some() => (None, Some(error)),
+        Err(error) => return Err(error),
+    };
     let lease_state = space.as_ref().map(|space| store.lease_state(space)).transpose()?;
     let agent_status = space
         .as_ref()
@@ -659,10 +665,13 @@ fn doctor(store: &Store, host: &HostEnvironment, arguments: &DoctorArgs, json: b
     let recovery = store.recovery_summary();
     output::print_doctor(
         &quarters_core::platform::capabilities(),
+        &layout,
         &tools,
         &crate::shortcut::default_reports(),
         output::DoctorSpace {
+            requested: arguments.name.as_deref(),
             space: space.as_ref(),
+            inspection_error: inspection_error.as_ref(),
             environment_validated,
             lease_state,
             agent_status: agent_status.as_ref(),

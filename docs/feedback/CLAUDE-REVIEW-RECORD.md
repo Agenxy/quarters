@@ -631,3 +631,64 @@ tests and 4 Bun-managed launcher tests, warnings-as-errors Clippy and rustdoc,
 formatting and structural ceilings. Release and `x86_64-unknown-linux-musl`
 all-target builds, dependency policy and RustSec auditing also passed. Claude
 remained read-only and did not execute compiler gates.
+
+## Alpha.4 storage expand foundation, 2026-08-30
+
+Claude Code 2.1.233 used Claude Opus 5 at maximum effort in read-only mode for
+the expand-only root-format foundation. The first complete review returned
+`VERDICT: REVISE`: legacy removal could lose its validated category anchor, an
+interrupted two-link marker publication was unreadable, a FIFO swap could block
+a marker open, staging diagnosis could mask newer or migrating formats, and
+diagnostic output and path construction needed tighter bounds and ownership.
+
+The implementation now resolves visible and dotted layouts through one strict
+marker reader, keeps dotted stores inspection-only, derives mutation paths from
+a management-held layout token, validates category anchors, reads markers with
+nonblocking no-follow descriptors, converges only the exact visible two-link
+publication state, and exposes bounded non-mutating diagnosis to the CLI and
+MCP server. Ordinary reads never materialize marker or observation state.
+
+The second full review found one medium truthfulness defect: reserved staging
+damage made `doctor` claim a valid visible store was read-only even though
+normal mutations remained permitted. Opus also identified low-severity cleanup
+and presentation gaps. Diagnosis now preserves the authoritative format and
+writability while reporting staging damage separately; human and JSON/MCP
+output expose bounded itemization and its lower-bound count; marker failures
+are surfaced; orphan staging is reclaimed on explicit initialization; missing
+optional trash does not block unrelated launch; existing trash must validate;
+and a named doctor request still returns store diagnosis when space inspection
+is impossible.
+
+During the exact full gate, the injected private-agent concurrency test then
+reproduced a real pre-existing atomic-replacement race. A helper could retain
+the just-retired registry inode after its link count became zero and mistake it
+for a malicious hard link. Registry reads now use a bounded stable-snapshot
+loop with pre-open, descriptor and post-read identity checks. Only exact inode
+retirement or replacement retries; symlinks, real hard links, broad modes,
+foreign ownership, oversized content and sustained churn still fail closed.
+Deterministic retired-inode and real-hard-link tests pass, as do one hundred
+consecutive six-caller injected-exit rounds.
+
+Opus re-derived the repaired invariants and returned `VERDICT: ACCEPT`. Every
+remaining low observation was then addressed or tested, including the unlocked
+marker-reader convergence race and uninitialized removal semantics. Its final
+narrow delta pass found no high or medium issue and again returned:
+
+> VERDICT: ACCEPT
+
+Claude remained read-only and did not execute compiler gates. Final local
+evidence is separate:
+
+- `make check`: all Rust unit and acceptance suites, 152 core tests and 4
+  Bun-managed typed npm launcher tests pass
+- warnings-as-errors Clippy and rustdoc, formatting and structural ceilings:
+  pass
+- `cargo deny check` and `cargo audit --deny warnings`: pass; only the approved
+  transitive `syn` 2/3 duplication warning remains
+- Rust 1.97.1 `x86_64-unknown-linux-musl` all-target workspace check: pass
+- injected private-agent replacement stress: 100 consecutive six-caller
+  rounds pass
+- `git diff --check`: pass
+
+Hosted macOS, Ubuntu, static-musl and dependency-policy jobs remain a separate
+acceptance gate after publication of this commit.

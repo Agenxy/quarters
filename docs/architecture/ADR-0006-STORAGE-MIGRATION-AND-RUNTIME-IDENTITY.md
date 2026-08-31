@@ -1,6 +1,6 @@
 # ADR 0006: Expand-contract storage migration and runtime identity
 
-Status: partially accepted; stable identity and rename implemented, hidden-root migration proposed
+Status: partially accepted; expand reader, stable identity and rename implemented; physical migration proposed
 
 ## Context
 
@@ -16,8 +16,10 @@ Use an expand, migrate, contract sequence across separate compatibility
 releases:
 
 1. **Expand:** readers understand both legacy `spaces`/`trash` and future
-   `.spaces`/`.trash`; writers continue using legacy paths. A root-format marker
-   records which layout is authoritative. Ambiguous dual state fails closed.
+   `.spaces`/`.trash`; writers continue using legacy paths. A strict
+   `.quarters-store.json` marker records which layout is authoritative.
+   Unmarked visible stores remain compatible; unmarked dotted or ambiguous
+   dual state fails closed. This phase is implemented.
 2. **Migrate:** a confirmed command acquires the management lock, requires all
    known activity leases to be free, writes a durable migration marker, renames
    one directory at a time on the same filesystem, syncs parents, verifies the
@@ -58,6 +60,13 @@ or malformed markers are retained and do not block unrelated spaces.
 - detached-process uncertainty is presented before confirmation
 - directory renames remain on one filesystem and sync their parents
 - rollback never recursively merges two layouts
+- ordinary reads never create or repair the root-format marker
+- every mutation owns the bounded management lease and a resolved writable-layout token
+- current-schema markers are strict, protected files: steady state has one
+  link, while the exact two-link no-clobber publication state remains readable
+  and is repaired only under the management lease; a lenient schema header
+  makes newer schemas a distinct upgrade requirement
+- dotted stores are inspection-only until the migration release exists
 - runtime cleanup validates owner, type, mode and stable identity
 - normal space removal refuses non-unset private-agent state and reclaims the
   exact validated runtime tree only after persistent space deletion

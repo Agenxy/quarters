@@ -205,13 +205,9 @@ fn await_spawned(
                 Err(error) => abort_spawned(space, runtime, &mut child, &starting, error),
             };
         }
-        if child
-            .try_wait()
-            .map_err(|error| {
-                QuartersError::new(ErrorKind::System, "could not inspect agent startup").with_source(error)
-            })?
-            .is_some()
-        {
+        if let Some(exit) = child.try_wait().map_err(|error| {
+            QuartersError::new(ErrorKind::System, "could not inspect agent startup").with_source(error)
+        })? {
             if attempts < MAXIMUM_LAUNCH_ATTEMPTS {
                 cleanup_exited_socket(runtime)?;
                 match retry_exited_launch(store, space, runtime, &starting) {
@@ -241,7 +237,7 @@ fn await_spawned(
             }
             return Err(QuartersError::new(
                 ErrorKind::System,
-                "the OpenSSH agent exited before its protocol became ready",
+                format!("the OpenSSH agent exited before its protocol became ready ({exit})"),
             ));
         }
         if Instant::now() >= deadline {

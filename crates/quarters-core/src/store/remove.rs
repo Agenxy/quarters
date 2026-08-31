@@ -19,8 +19,11 @@ impl Store {
     /// removal, or an exact filesystem operation fails.
     pub fn remove(&self, name: &str) -> Result<()> {
         validate_removal_entry_name(name)?;
+        if self.existing_spaces_root()?.is_none() {
+            return Err(space_not_found(name));
+        }
         let host = crate::HostEnvironment::capture();
-        let management = self.management_guard()?;
+        let management = self.begin_mutation()?;
         let removable_space = if let Ok(validated_name) = SpaceName::parse(name.to_owned()) {
             self.ensure_no_rename_target(&validated_name)?;
             self.ensure_no_rollback_target(&validated_name)?;
@@ -40,10 +43,9 @@ impl Store {
         } else {
             None
         };
-        let Some(spaces_root) = self.existing_spaces_root()? else {
-            return Err(space_not_found(name));
-        };
-        let retired = retire_space(self, &spaces_root, name)?;
+        let spaces_root = management.layout().spaces_root();
+        let trash_root = management.layout().trash_root();
+        let retired = retire_space(spaces_root, trash_root, name)?;
         drop(management);
         delete_retired_space(&retired, name)?;
         if let Some(space) = removable_space {
@@ -62,7 +64,7 @@ struct RetiredSpace {
     identity: lifecycle::PathIdentity,
 }
 
-fn retire_space(store: &Store, spaces_root: &Path, name: &str) -> Result<RetiredSpace> {
+fn retire_space(spaces_root: &Path, trash_root: &Path, name: &str) -> Result<RetiredSpace> {
     let space_path = spaces_root.join(name);
     let metadata = removal_metadata(&space_path, name)?;
     validate_private_dir(&space_path, &metadata)?;
@@ -71,8 +73,7 @@ fn retire_space(store: &Store, spaces_root: &Path, name: &str) -> Result<Retired
     let file = open_private_lock(&lock_path)?;
     lock_for_removal(&file, &lock_path, name)?;
     verify_held_lock(&file, &lock_path)?;
-    let trash_root = store.layout().trash_root().to_path_buf();
-    create_private_dir(&trash_root)?;
+    create_private_dir(trash_root)?;
     let retired = trash_root.join(format!(".retired-{}", unique_suffix()?));
     identity.verify_directory(&space_path, "reinspect removal target")?;
     fs::rename(&space_path, &retired).map_err(|error| QuartersError::io("retire space", &space_path, error))?;

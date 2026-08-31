@@ -35,6 +35,7 @@ The default root is `~/.quarters`:
 ```text
 .quarters/
   .observe
+  .quarters-store.json  # optional expand-phase authoritative format marker
   spaces/
     work/
       .quarters.json
@@ -51,6 +52,26 @@ The default root is `~/.quarters`:
   .templates/<artifact-id>/{.quarters-artifact.json,home/}
   .snapshots/<artifact-id>/{.quarters-artifact.json,home/}
 ```
+
+The expand-phase reader resolves both `spaces`/`trash` and future
+`.spaces`/`.trash` category layouts. Writers remain on the visible layout.
+Unmarked visible stores are permanently compatible; a dotted layout requires
+the strict root marker, and dual layouts fail closed. Current-schema markers
+are bounded, current-user regular files. Their steady state has one link; the
+exact two-link no-clobber publication state remains readable and is repaired
+only under the management lease. Newer schema headers are reported as an
+upgrade requirement before strict parsing. `doctor` diagnoses the raw marker,
+migration and reserved-staging state without repairing it, caps itemized
+staging names while retaining a lower-bound count, and never materializes an
+observation lock in a dotted store. Every mutation obtains a non-cloneable
+writable-layout token under the bounded management lease; dotted stores are
+inspection-only in this release.
+
+Reserved staging damage is reported separately from the authoritative format:
+a visible store remains truthfully writable while `doctor` itemizes the issue,
+and marker publication or cleanup reports its exact failure instead of silently
+falling back. Missing optional trash state is created only by an operation that
+needs it; an existing trash entry must still pass private-directory validation.
 
 Creation builds a complete directory under `.creating-<name>-<unique>` on the
 same filesystem, syncs private files and publishes it with `rename()`. A schema
@@ -365,7 +386,8 @@ authorizes local rollback. Post-commit directory-sync or hidden-link cleanup
 failures return the committed object with an explicit warning.
 
 Platform clonefile/reflink acceleration, encryption and live freeze remain
-deferred. Stable identity upgrade and inactive display-name rename are
-implemented; hidden store-root migration remains deferred. ADR 0003 records the
-copy boundary, ADR 0008 defines lifecycle artifacts and rollback, and ADR 0009
-defines authenticated portable bundles.
+deferred. Stable identity upgrade, inactive display-name rename and the
+expand-phase dual-layout reader are implemented; physical hidden store-root
+migration remains deferred. ADR 0003 records the copy boundary, ADR 0008
+defines lifecycle artifacts and rollback, and ADR 0009 defines authenticated
+portable bundles.

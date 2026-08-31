@@ -235,6 +235,7 @@ impl QuartersMcp {
         Ok(DoctorData {
             platform: platform.platform,
             authority_boundary: platform.authority_boundary,
+            store_layout: self.store.layout_diagnosis().into(),
             capabilities,
             tools: quarters_core::tool_probes().into_iter().map(ProbeView::from).collect(),
             validated_space,

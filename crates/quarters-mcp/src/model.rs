@@ -191,12 +191,69 @@ pub(crate) struct DoctorData {
     pub(crate) platform: String,
     /// Plain authority boundary.
     pub(crate) authority_boundary: String,
+    /// Non-mutating root-format diagnosis.
+    pub(crate) store_layout: StoreLayoutView,
     /// Platform mechanisms and declared gaps.
     pub(crate) capabilities: Vec<CapabilityView>,
     /// Side-effect-free executable discovery and declared compatibility.
     pub(crate) tools: Vec<ProbeView>,
     /// Space whose environment was constructed successfully, when requested.
     pub(crate) validated_space: Option<String>,
+}
+
+/// Bounded root-format diagnosis shared with MCP clients.
+#[derive(Debug, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct StoreLayoutView {
+    /// Stable aggregate state.
+    pub(crate) state: String,
+    /// Authoritative category format, when known.
+    pub(crate) root_format: Option<String>,
+    /// Whether this build can mutate the format.
+    pub(crate) writable: bool,
+    /// Whether exact marker staging cleanup is pending.
+    pub(crate) interrupted_publication: bool,
+    /// Raw marker classification.
+    pub(crate) marker: String,
+    /// Observed category families.
+    pub(crate) category_entries: Vec<String>,
+    /// Whether an active migration marker exists.
+    pub(crate) migration_marker: bool,
+    /// Presentation-safe reserved staging identifiers.
+    pub(crate) staging_entries: Vec<String>,
+    /// Lower bound on all observed reserved staging entries.
+    pub(crate) staging_entries_at_least: usize,
+    /// Staging-specific stable error category.
+    pub(crate) staging_error_kind: Option<String>,
+    /// Staging-specific bounded issue.
+    pub(crate) staging_issue: Option<String>,
+    /// Stable error category, when invalid.
+    pub(crate) error_kind: Option<String>,
+    /// Bounded diagnosis issue.
+    pub(crate) issue: Option<String>,
+    /// Suggested operator action.
+    pub(crate) hint: Option<String>,
+}
+
+impl From<quarters_core::StoreLayoutDiagnosis> for StoreLayoutView {
+    fn from(diagnosis: quarters_core::StoreLayoutDiagnosis) -> Self {
+        Self {
+            state: diagnosis.state,
+            root_format: diagnosis.root_format,
+            writable: diagnosis.writable,
+            interrupted_publication: diagnosis.interrupted_publication,
+            marker: diagnosis.marker,
+            category_entries: diagnosis.category_entries,
+            migration_marker: diagnosis.migration_marker,
+            staging_entries: diagnosis.staging_entries,
+            staging_entries_at_least: diagnosis.staging_entries_at_least,
+            staging_error_kind: diagnosis.staging_error_kind,
+            staging_issue: diagnosis.staging_issue,
+            error_kind: diagnosis.error_kind,
+            issue: diagnosis.issue,
+            hint: diagnosis.hint,
+        }
+    }
 }
 
 /// Result of creating one space.

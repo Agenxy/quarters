@@ -58,6 +58,8 @@ policy.
 | Recovery deletes an unrelated path | Only private exact-form generated IDs, free creation locks and validated manifest temporaries are reclaimable; malformed reserved-looking and unknown hidden entries remain counted without blocking unrelated recovery |
 | Manifest downgrade or field confusion | Permissive version probe followed by strict closed schema and version/layout/ID invariants |
 | Abandoned internal state | Bounded doctor counts; confirmed recovery retires entries under the management lock, then deletes outside it |
+| Root-format confusion creates two stores | Strict authoritative marker, visible/dotted dual detection, active-migration refusal and one management-held writable-layout token for every mutation |
+| Malicious or interrupted format marker is followed | Nonblocking no-follow bounded reads, current-UID/type/mode/link validation, newer-schema header probe, exact descriptor-relative staging cleanup, management-held two-link crash convergence and bounded non-mutating doctor diagnosis |
 | Wrong removal target | Manifest/name validation, exact confirmation, rename then delete |
 | Removal during a supervised entry | Shared lease held for the lifetime of the Quarters supervisor |
 | Activity lock denial | Read-only observation, management and supervisor acquisition have separate bounded deadlines and fail closed or report unknown as appropriate |

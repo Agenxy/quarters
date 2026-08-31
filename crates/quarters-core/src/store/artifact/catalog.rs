@@ -292,7 +292,7 @@ impl Store {
         name: &ArtifactName,
     ) -> Result<ArtifactMutationReport> {
         let verified = self.verify_artifact(kind, previous)?;
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         let current = self.open_artifact(kind, previous)?;
         if current.manifest() != verified.manifest() {
             return Err(QuartersError::new(
@@ -321,7 +321,7 @@ impl Store {
     pub fn remove_artifact(&self, kind: ArtifactKind, name: &ArtifactName) -> Result<ArtifactMutationReport> {
         let verified = self.verify_artifact(kind, name)?;
         let (retired, report) = {
-            let _management = self.management_guard()?;
+            let _management = self.begin_mutation()?;
             let current = self.open_artifact(kind, name)?;
             if current.manifest() != verified.manifest() {
                 return Err(QuartersError::new(
@@ -447,7 +447,7 @@ impl Store {
         manifest: &SpaceManifest,
         staging: &SpaceStaging,
     ) -> Result<()> {
-        let _management = self.management_guard()?;
+        let management = self.begin_mutation()?;
         let current = self.open_artifact(ArtifactKind::Template, &template.manifest().name)?;
         if current.manifest() != template.manifest() {
             return Err(QuartersError::new(
@@ -455,7 +455,7 @@ impl Store {
                 "template changed during use",
             ));
         }
-        reject_space_destination(self, &manifest.name)?;
+        reject_space_destination_at(self, &manifest.name, &management.layout().space_path(&manifest.name))?;
         staging
             .identity
             .verify(&staging.temporary, &staging.creation_lock_path)?;
@@ -465,7 +465,7 @@ impl Store {
         super::super::validate_space_anchors(&staging.temporary)?;
         fs::rename(&staging.temporary, &staging.destination)
             .map_err(|error| QuartersError::io("publish template destination", &staging.temporary, error))?;
-        sync_directory(self.layout().spaces_root())
+        sync_directory(management.layout().spaces_root())
     }
 
     fn publish_artifact(&self, setup: &ArtifactSetup, manifest: &ArtifactManifest) -> Result<()> {
@@ -473,7 +473,7 @@ impl Store {
             .staging
             .as_ref()
             .ok_or_else(|| QuartersError::new(ErrorKind::System, "artifact publication has no staging state"))?;
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         let current = self.open(&setup.source.manifest().name)?;
         if current.manifest() != &setup.source_manifest {
             return Err(QuartersError::new(
@@ -642,7 +642,7 @@ impl ArtifactSetup {
             store.ensure_layout()?;
         }
         store.ensure_no_rename_target(source)?;
-        let management = store.management_guard()?;
+        let management = store.begin_mutation()?;
         let source_space = store.open(source)?;
         validate_shell(&source_space.manifest().default_shell)?;
         let activity_lock = acquire_lifecycle_lease(&source_space, source.as_str())?;
@@ -671,7 +671,7 @@ impl ArtifactSetup {
         name: &ArtifactName,
     ) -> Result<Self> {
         store.ensure_layout()?;
-        let management = store.management_guard()?;
+        let management = store.begin_mutation()?;
         let current = store.open(&source.manifest().name)?;
         if current.manifest() != source.manifest() {
             return Err(QuartersError::new(
@@ -736,9 +736,11 @@ pub(super) fn prepare_artifact_staging(store: &Store, kind: ArtifactKind) -> Res
 }
 
 pub(super) fn prepare_space_staging(store: &Store, destination: &SpaceName) -> Result<SpaceStaging> {
-    let _management = store.management_guard()?;
-    reject_space_destination(store, destination)?;
-    let temporary = store.temporary_path(destination)?;
+    let management = store.begin_mutation()?;
+    let layout = management.layout();
+    let destination_path = layout.space_path(destination);
+    reject_space_destination_at(store, destination, &destination_path)?;
+    let temporary = layout.temporary_path(destination)?;
     if entry_exists(&temporary)? {
         return Err(
             QuartersError::new(ErrorKind::CorruptState, "reserved template staging path already exists")
@@ -754,7 +756,7 @@ pub(super) fn prepare_space_staging(store: &Store, destination: &SpaceName) -> R
         return Err(error);
     }
     Ok(SpaceStaging {
-        destination: store.space_path(destination),
+        destination: destination_path,
         temporary,
         creation_lock_path,
         identity,
@@ -763,10 +765,14 @@ pub(super) fn prepare_space_staging(store: &Store, destination: &SpaceName) -> R
 }
 
 pub(super) fn reject_space_destination(store: &Store, destination: &SpaceName) -> Result<()> {
+    let path = store.layout()?.space_path(destination);
+    reject_space_destination_at(store, destination, &path)
+}
+
+fn reject_space_destination_at(store: &Store, destination: &SpaceName, path: &Path) -> Result<()> {
     store.ensure_no_rename_target(destination)?;
     store.ensure_no_rollback_target(destination)?;
-    let path = store.space_path(destination);
-    if entry_exists(&path)? {
+    if entry_exists(path)? {
         return Err(QuartersError::new(
             ErrorKind::AlreadyExists,
             format!("space '{destination}' already exists"),
