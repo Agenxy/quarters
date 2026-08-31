@@ -3,6 +3,7 @@
 mod agents;
 mod artifacts;
 mod bundles;
+mod confinement;
 mod doctor;
 mod freeze;
 
@@ -417,6 +418,7 @@ pub(crate) fn print_current(current: &str, json_output: bool) -> quarters_core::
 pub(crate) fn print_environment(
     space: &Space,
     values: &BTreeMap<String, String>,
+    confinement: Option<&quarters_core::ConfinementPlan>,
     json_output: bool,
 ) -> quarters_core::Result<()> {
     if json_output {
@@ -429,12 +431,22 @@ pub(crate) fn print_environment(
             &json!({
                 "space": safe_json_text(space.manifest().name.as_str(), 64),
                 "environment": safe_values,
+                "confinement": confinement.map(confinement::value),
             }),
             true,
         );
     }
     for (name, value) in values {
         println!("{}={}", escape_for_human(name), escape_for_human(value));
+    }
+    if let Some(plan) = confinement {
+        println!(
+            "Confinement=filesystem (Landlock ABI {}+, cwd {})",
+            plan.minimum_abi,
+            bounded_path_for_human(&plan.working_directory)
+        );
+        println!("ConfinementGrants={}", plan.grants.len());
+        println!("ConfinementOmittedHostPathEntries={}", plan.omitted_host_path_entries);
     }
     Ok(())
 }
@@ -947,6 +959,10 @@ fn escape_for_human(value: &str) -> String {
 
 fn path_for_human(path: &Path) -> String {
     escape_for_human(&path.to_string_lossy())
+}
+
+fn bounded_path_for_human(path: &Path) -> String {
+    quarters_core::escape_untrusted_text_bounded(&path.to_string_lossy(), 512)
 }
 
 fn safe_json_text(value: &str, maximum: usize) -> String {

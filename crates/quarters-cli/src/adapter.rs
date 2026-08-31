@@ -31,7 +31,12 @@ pub(crate) fn dispatch(tool: &str) -> Result<i32> {
         ));
     }
     let home = validated_space_home()?;
-    let host_path = env::var_os("QUARTERS_HOST_PATH").ok_or_else(|| {
+    let path_name = if cfg!(target_os = "linux") && crate::context::RestrictedContext::current().is_some() {
+        "PATH"
+    } else {
+        "QUARTERS_HOST_PATH"
+    };
+    let host_path = env::var_os(path_name).ok_or_else(|| {
         QuartersError::new(
             ErrorKind::Unsupported,
             "an OpenSSH adapter may run only inside a verified Quarter environment",
@@ -318,8 +323,7 @@ fn required_absolute_environment_path(name: &str) -> Result<PathBuf> {
 
 fn validated_space_home() -> Result<PathBuf> {
     let home = required_absolute_environment_path("QUARTERS_SPACE_HOME")?;
-    #[cfg(target_os = "linux")]
-    if env::var_os("QUARTERS_NO_HOST_ESCAPE").as_deref() == Some(OsStr::new("home-view")) {
+    if cfg!(target_os = "linux") && crate::context::RestrictedContext::current().is_some() {
         return Ok(home);
     }
     let root = required_absolute_environment_path("QUARTERS_ROOT")?;

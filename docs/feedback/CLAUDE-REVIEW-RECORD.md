@@ -744,3 +744,65 @@ session did not expose a managed filesystem permission profile. No scan result
 is claimed; the read-only Opus review and local security gates above are the
 available evidence. Hosted macOS, Ubuntu, static-musl and dependency-policy
 jobs remain a separate acceptance gate after publication of this commit.
+
+## Linux Landlock confinement, 2026-08-30
+
+Claude Code 2.1.233 used Claude Opus 5 at maximum effort in read-only mode
+before implementation. The review took five explicit iterations. It first
+rejected a broad, brittle allowlist and identified store-dependent adapters,
+host-home toolchains, cwd semantics, `/proc` claims and ABI truncation coverage.
+Subsequent passes required a reconstructed PATH, Nix and resolver handling,
+precise metadata limits, required hosted enforcement and an unconfined control
+arm for proc evidence. The final pre-implementation verdict was:
+
+> VERDICT: ACCEPT
+
+The accepted design requires Landlock ABI 3, hard compatibility,
+`no_new_privs` and `FullyEnforced`; grants only the exact Quarter home/runtime
+plus fixed reported system paths; blocks store operations without treating the
+environment marker as authority; and reports known-path metadata, proc,
+network, IPC, device, same-UID and inherited-descriptor limits explicitly.
+Claude remained read-only and did not execute compiler or kernel gates. Final
+implementation review and local/hosted evidence are recorded separately after
+the code is complete.
+
+The first complete implementation pass returned `VERDICT: REVISE` with five
+blockers. It found a post-mount plan rebuild that broke the default home-view
+topology, an unbounded resolver-parent grant, custom stores that could overlap
+system grants, an unreadable JSON PATH representation and canonical PATH aliases
+counted as omissions. Quarters now opens every inode-backed rule anchor before
+an optional home-view mount and enforces that prepared ruleset afterward; grants
+only the exact derived resolver file; rejects stores beneath broad system
+hierarchies; and reports bounded, readable paths with explicit provenance.
+
+Two review iterations then repaired the acceptance evidence itself. The
+composition test now places a private temporary store beneath the canonical
+passwd home so the mount genuinely hides its path, without touching the user's
+real store. Optional home-view availability is separate from the required
+Landlock gate. Linux-target Clippy exposed three target-only denied lints before
+runtime execution; all were refactored without suppression, and the complete
+Linux-musl warnings-as-errors check now passes. Runtime placement also excludes
+both environment and passwd homes, and the proc witness has fail-safe process
+cleanup.
+
+The final read-only Opus 5 maximum-effort pass re-derived the namespace ordering,
+descriptor lifetime, hard ABI compatibility, full-enforcement condition,
+store/path policy, fail-closed macOS behavior and Linux test topology. It ran
+host tests plus Linux-musl all-target Clippy and returned:
+
+> VERDICT: ACCEPT
+
+Final local evidence on the accepted checkpoint:
+
+- `make check`: Bun-managed launcher checks and audit, formatting, host Clippy,
+  all host unit and acceptance suites, structural ceilings and warning-free
+  rustdoc pass
+- `make dependencies`: licence/source policy and RustSec pass; only the approved
+  transitive `syn` 2/3 duplication warning remains
+- Rust 1.97.1 `x86_64-unknown-linux-musl` all-target, all-feature Clippy with
+  explicit `-D warnings`: pass
+- `git diff --check`: pass
+
+The macOS host cannot execute Landlock. Hosted Ubuntu with
+`QUARTERS_REQUIRE_LANDLOCK=1` remains the required real enforcement gate after
+publication; source checks and reviewer acceptance do not substitute for it.

@@ -127,6 +127,47 @@ impl EnvironmentPlan {
         command.env_clear().envs(&self.values);
     }
 
+    /// Narrow PATH and tool-owned state for an opt-in filesystem policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when explicit inheritance conflicts with confinement or
+    /// when the reported PATH entries cannot be represented by the host OS.
+    pub fn apply_filesystem_confinement(&mut self, plan: &platform::ConfinementPlan, home: &Path) -> Result<()> {
+        for name in ["NPM_CONFIG_PREFIX", "RUSTUP_HOME", "UV_TOOL_BIN_DIR"] {
+            if self.explicit_inheritance.contains(name) {
+                return Err(QuartersError::new(
+                    ErrorKind::InvalidInput,
+                    format!("'{name}' cannot be inherited with filesystem confinement"),
+                )
+                .with_hint(format!(
+                    "remove '--inherit {name}'; filesystem confinement redirects this tool state into the Quarter"
+                )));
+            }
+        }
+        let executable_path = env::join_paths(&plan.executable_path).map_err(|error| {
+            QuartersError::new(ErrorKind::System, "could not construct the confined executable PATH").with_source(error)
+        })?;
+        self.values.insert("PATH".into(), executable_path);
+        self.values.remove(OsStr::new("QUARTERS_HOST_PATH"));
+        self.values.insert("QUARTERS_CONFINEMENT".into(), "filesystem".into());
+        let context = if self.values.contains_key(OsStr::new("QUARTERS_NO_HOST_ESCAPE")) {
+            "home-view+filesystem"
+        } else {
+            "filesystem"
+        };
+        self.values.insert("QUARTERS_NO_HOST_ESCAPE".into(), context.into());
+        self.values
+            .insert("RUSTUP_HOME".into(), home.join(".rustup").into_os_string());
+        self.values.insert(
+            "NPM_CONFIG_PREFIX".into(),
+            home.join(".local/share/npm").into_os_string(),
+        );
+        self.values
+            .insert("UV_TOOL_BIN_DIR".into(), home.join(".local/bin").into_os_string());
+        Ok(())
+    }
+
     /// Read one planned value without exposing the rest of the environment.
     #[must_use]
     pub fn value(&self, name: &str) -> Option<&OsStr> {
@@ -167,6 +208,7 @@ pub fn host_command_environment() -> BTreeMap<OsString, Option<OsString>> {
         "QUARTERS_HOST_PATH",
         "QUARTERS_HOST_TMPDIR",
         "QUARTERS_HOST_XDG_RUNTIME_DIR",
+        "QUARTERS_CONFINEMENT",
         "QUARTERS_NO_HOST_ESCAPE",
         "QUARTERS_PROMPT_NAME",
         "QUARTERS_PROMPT_PREFIX",

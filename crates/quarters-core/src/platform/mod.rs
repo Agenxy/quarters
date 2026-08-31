@@ -46,6 +46,45 @@ pub struct CapabilityStatus {
     pub detail: String,
 }
 
+/// One filesystem hierarchy admitted by an opt-in confinement policy.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ConfinementGrant {
+    /// Canonical path used to anchor the kernel rule.
+    pub path: PathBuf,
+    /// Stable access class: `read-file`, `read`, `read-execute`, `read-write` or `device`.
+    pub access: String,
+    /// Stable reason for the grant, including derived resolver targets.
+    pub source: String,
+    /// Whether policy construction fails when this path is unavailable.
+    pub required: bool,
+}
+
+/// Non-mutating description of the Linux filesystem-confinement policy.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ConfinementPlan {
+    /// Requested backend name.
+    pub mode: String,
+    /// Oldest Landlock ABI whose complete rights are required.
+    pub minimum_abi: u32,
+    /// Directory selected as the launched process working directory.
+    pub working_directory: PathBuf,
+    /// Exact rules that would be applied.
+    pub grants: Vec<ConfinementGrant>,
+    /// Optional fixed paths absent from this host.
+    pub omitted_paths: Vec<PathBuf>,
+    /// Ordered PATH entries used inside the confined process tree.
+    pub executable_path: Vec<PathBuf>,
+    /// Number of resolvable host PATH entries intentionally excluded.
+    pub omitted_host_path_entries: usize,
+    /// Stable, explicit limitations on the protection claim.
+    pub limitations: Vec<String>,
+}
+
+/// Opaque Linux ruleset whose filesystem anchors have already been opened.
+pub struct PreparedConfinement {
+    inner: PlatformPreparedConfinement,
+}
+
 /// Inspect current platform features.
 #[must_use]
 pub fn capabilities() -> Capabilities {
@@ -269,15 +308,66 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
     platform_enter_home_view(space_home, host_home)
 }
 
+/// Describe a requested Linux Landlock filesystem policy without applying it.
+///
+/// # Errors
+///
+/// Returns an error when the platform, kernel ABI or required path cannot
+/// support the complete policy.
+pub fn confinement_plan(
+    space_home: &Path,
+    effective_home: &Path,
+    runtime: &Path,
+    host_path: Option<&OsString>,
+) -> Result<ConfinementPlan> {
+    platform_confinement_plan(space_home, effective_home, runtime, host_path)
+}
+
+/// Open every anchor and prepare the complete Linux filesystem policy.
+///
+/// # Errors
+///
+/// Returns an error unless every ABI-v3 right and rule can be prepared.
+pub fn prepare_filesystem_confinement(plan: &ConfinementPlan) -> Result<PreparedConfinement> {
+    platform_prepare_filesystem_confinement(plan).map(|inner| PreparedConfinement { inner })
+}
+
+/// Apply a prepared Linux filesystem policy to the calling launcher thread.
+///
+/// # Errors
+///
+/// Returns an error unless the complete prepared policy is fully enforced.
+pub fn enter_filesystem_confinement(prepared: PreparedConfinement) -> Result<()> {
+    platform_enter_filesystem_confinement(prepared.inner)
+}
+
+/// Resolve and validate an executable against the confinement policy.
+///
+/// # Errors
+///
+/// Returns an error for relative paths containing a separator, unresolved
+/// names or paths outside an executable grant.
+pub fn resolve_confined_executable(
+    program: &std::ffi::OsStr,
+    search_path: &std::ffi::OsStr,
+    plan: &ConfinementPlan,
+) -> Result<PathBuf> {
+    platform_resolve_confined_executable(program, search_path, plan)
+}
+
 #[cfg(target_os = "linux")]
 use linux::{
-    platform_capabilities, platform_derived_cache_directories, platform_enter_home_view, platform_extend_environment,
-    platform_runtime_base, platform_workspace_directories,
+    PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
+    platform_enter_filesystem_confinement, platform_enter_home_view, platform_extend_environment,
+    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
+    platform_workspace_directories,
 };
 #[cfg(target_os = "macos")]
 use macos::{
-    platform_capabilities, platform_derived_cache_directories, platform_enter_home_view, platform_extend_environment,
-    platform_runtime_base, platform_workspace_directories,
+    PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
+    platform_enter_filesystem_confinement, platform_enter_home_view, platform_extend_environment,
+    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
+    platform_workspace_directories,
 };
 
 #[cfg(target_os = "macos")]

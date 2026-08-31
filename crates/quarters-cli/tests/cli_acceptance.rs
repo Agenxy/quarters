@@ -7,7 +7,6 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use tempfile::TempDir;
-
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
     command.arg("--root").arg(root);
@@ -946,8 +945,16 @@ fn doctor_does_not_advertise_unimplemented_confinement() -> Result<(), Box<dyn E
     let temporary = TempDir::new()?;
     let doctor = run(quarters(temporary.path()).args(["--json", "doctor"]))?;
     let report: Value = serde_json::from_slice(&doctor.stdout)?;
-    assert_eq!(report["result"]["platform"]["confinement"]["available"], false);
-    assert_eq!(report["result"]["platform"]["confinement"]["status"], "not-implemented");
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(report["result"]["platform"]["confinement"]["available"], false);
+        assert_eq!(report["result"]["platform"]["confinement"]["status"], "not-implemented");
+    }
+    #[cfg(target_os = "linux")]
+    assert!(matches!(
+        report["result"]["platform"]["confinement"]["status"].as_str(),
+        Some("experimental" | "unavailable")
+    ));
     assert!(report["result"]["space_environment_validated"].is_null());
     assert!(
         report["result"]["tools"]

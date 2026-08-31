@@ -3,6 +3,7 @@
 mod adapter;
 mod app;
 mod cli;
+mod context;
 mod output;
 mod process;
 mod shell_init;

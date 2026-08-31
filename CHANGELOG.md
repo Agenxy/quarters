@@ -6,6 +6,24 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Add experimental Linux `--confinement filesystem` for `env`, `enter` and
+  `exec`: a fail-closed Landlock ABI-3 policy, Quarter-home working directory,
+  reconstructed tool PATH, private runtime launcher and exact JSON plan.
+- Require full Landlock enforcement with `no_new_privs`; deny ungranted content
+  reads, directory enumeration and mutation without claiming metadata, process,
+  network, IPC, device, same-UID or inherited-descriptor isolation.
+- Keep macOS confinement unsupported, block store management inside the Linux
+  domain, and require real Landlock enforcement in hosted Linux acceptance.
+- Compose confinement with the default-store Linux home view by constructing
+  one pre-mount policy; reject stores beneath executable grants, admit only the
+  exact derived resolver file, and expose readable PATH entries and grant sources.
+- Treat store inspection, including unnamed `doctor`, as unavailable inside an
+  existing Linux home view because the authoritative host store is overmounted.
+- Keep no-store current, prompt, shortcut-status and managed OpenSSH routes
+  available in restricted contexts while shortcut mutation remains refused.
+- Keep the private Linux runtime outside both environment and passwd homes so
+  an alternate `HOME` cannot place the launcher beneath a later home-view mount.
+
 - Add identity-bound cooperative freeze/unfreeze, immediate stationery capture
   from a current Quarter holding a cooperative lease, and explicit
   `frozen-active` source evidence without claiming filesystem immutability.

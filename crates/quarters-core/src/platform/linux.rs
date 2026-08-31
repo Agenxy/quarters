@@ -1,16 +1,20 @@
 //! Linux profile and opt-in mount-home backend.
 
-use super::{Capabilities, CapabilityStatus};
+mod confinement;
+
+use super::{Capabilities, CapabilityStatus, ConfinementPlan};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use nix::mount::{MsFlags, mount};
 use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{Gid, Uid, getgroups};
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+
+pub(super) struct PlatformPreparedConfinement(confinement::PreparedConfinement);
 
 pub(super) fn platform_capabilities() -> Capabilities {
     let userns = user_namespace_status();
@@ -26,25 +30,56 @@ pub(super) fn platform_capabilities() -> Capabilities {
         },
         core_foundation_home: false,
         home_view: userns,
-        confinement: CapabilityStatus {
-            available: false,
-            status: "not-implemented".to_owned(),
-            detail: "Landlock policy is intentionally not claimed by this alpha".to_owned(),
-        },
+        confinement: confinement::capability_status(),
         authority_boundary:
             "real Linux account and DAC permissions remain; --home-view changes paths but disables ordinary sudo"
                 .to_owned(),
     }
 }
 
+pub(super) fn platform_confinement_plan(
+    space_home: &Path,
+    effective_home: &Path,
+    runtime: &Path,
+    host_path: Option<&OsString>,
+) -> Result<ConfinementPlan> {
+    confinement::plan(space_home, effective_home, runtime, host_path)
+}
+
+pub(super) fn platform_prepare_filesystem_confinement(plan: &ConfinementPlan) -> Result<PlatformPreparedConfinement> {
+    confinement::prepare(plan).map(PlatformPreparedConfinement)
+}
+
+pub(super) fn platform_enter_filesystem_confinement(prepared: PlatformPreparedConfinement) -> Result<()> {
+    confinement::restrict_current_thread(prepared.0)
+}
+
+pub(super) fn platform_resolve_confined_executable(
+    program: &OsStr,
+    search_path: &OsStr,
+    plan: &ConfinementPlan,
+) -> Result<PathBuf> {
+    confinement::resolve_executable(program, search_path, plan)
+}
+
 pub(super) fn platform_extend_environment(_values: &mut BTreeMap<OsString, OsString>, _home: &Path) {}
 
 pub(super) fn platform_runtime_base(host: &HostEnvironment) -> PathBuf {
-    let home = host.get("HOME").map(Path::new);
+    let environment_home = host.get("HOME").map(Path::new);
+    let passwd_home = nix::unistd::User::from_uid(Uid::current())
+        .ok()
+        .flatten()
+        .map(|user| user.dir);
     host.original_xdg_runtime()
         .map(PathBuf::from)
-        .filter(|runtime| runtime.is_absolute() && home.is_none_or(|home| !runtime.starts_with(home)))
+        .filter(|runtime| runtime_is_outside_homes(runtime, environment_home, passwd_home.as_deref()))
         .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+fn runtime_is_outside_homes(runtime: &Path, environment_home: Option<&Path>, passwd_home: Option<&Path>) -> bool {
+    runtime.is_absolute()
+        && environment_home.is_none_or(|home| !runtime.starts_with(home))
+        && passwd_home.is_none_or(|home| !runtime.starts_with(home))
 }
 
 pub(super) fn platform_workspace_directories() -> &'static [&'static str] {
@@ -216,13 +251,30 @@ fn namespace_error(operation: &str, source: nix::errno::Errno) -> QuartersError 
 
 #[cfg(test)]
 mod tests {
-    use super::extra_group_count;
+    use super::{extra_group_count, runtime_is_outside_homes};
     use nix::unistd::Gid;
+    use std::path::Path;
 
     #[test]
     fn primary_group_is_not_treated_as_supplementary_authority() {
         let primary = Gid::from_raw(20);
         assert_eq!(extra_group_count(&[primary], primary), 0);
         assert_eq!(extra_group_count(&[primary, Gid::from_raw(80)], primary), 1);
+    }
+
+    #[test]
+    fn runtime_remains_outside_environment_and_passwd_homes() {
+        let environment_home = Path::new("/tmp/profile-home");
+        let passwd_home = Path::new("/home/person");
+        assert!(!runtime_is_outside_homes(
+            Path::new("/home/person/runtime"),
+            Some(environment_home),
+            Some(passwd_home),
+        ));
+        assert!(runtime_is_outside_homes(
+            Path::new("/run/user/1000"),
+            Some(environment_home),
+            Some(passwd_home),
+        ));
     }
 }

@@ -35,6 +35,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run repository gate
+        env:
+          QUARTERS_REQUIRE_LANDLOCK: ${{ runner.os == 'Linux' && '1' || '' }}
         run: make check
       - name: Build release binary
         run: cargo build --locked --workspace --release

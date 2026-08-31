@@ -20,6 +20,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+landlock.workspace = true
 rustix.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

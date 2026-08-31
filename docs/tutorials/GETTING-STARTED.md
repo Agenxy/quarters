@@ -147,6 +147,22 @@ Inside Linux `--home-view`, the authoritative store root is intentionally
 overmounted and management commands such as `freeze` fail closed; run them from
 a portable Quarter entry or the host shell.
 
+On Linux with Landlock ABI 3, inspect and then enter the experimental
+filesystem policy:
+
+```sh
+quarters --json env studio --confinement filesystem
+quarters enter studio --confinement filesystem
+```
+
+The shell starts in the Quarter home. Its PATH contains Quarter-local tools and
+reported fixed system roots, not host-home shims. Ungranted file contents,
+directory listings and mutations are denied, but known-path metadata can remain
+visible; `/proc`, network, IPC and selected terminal devices remain shared.
+`sudo`, store management, `doctor`, MCP and `quarters host` are unavailable
+inside this mode. Exit the shell to return to the unrestricted host process.
+macOS rejects the option rather than falling back.
+
 Create and independently verify a recovery point:
 
 ```sh

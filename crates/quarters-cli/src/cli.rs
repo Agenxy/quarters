@@ -455,9 +455,19 @@ pub(crate) struct ProfileArgs {
     #[arg(long)]
     pub(crate) home_view: bool,
 
+    /// Enforce the named native filesystem policy; starts in the Quarter home.
+    #[arg(long, value_enum)]
+    pub(crate) confinement: Option<ConfinementArg>,
+
     /// Explicitly inherit one otherwise-blocked host environment variable.
     #[arg(long = "inherit", value_name = "NAME")]
     pub(crate) inherit: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ConfinementArg {
+    /// Linux Landlock ABI 3 path policy; unavailable on macOS.
+    Filesystem,
 }
 
 #[derive(Debug, Args)]
@@ -612,7 +622,11 @@ pub(crate) struct LinuxLaunchArgs {
     #[arg(long)]
     pub(crate) space_home: PathBuf,
     #[arg(long)]
-    pub(crate) host_home: PathBuf,
+    pub(crate) host_home: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) runtime_dir: PathBuf,
+    #[arg(long)]
+    pub(crate) confinement: bool,
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) command: Vec<OsString>,
 }

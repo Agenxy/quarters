@@ -26,7 +26,7 @@ pub use model::{
     LATEST_SCHEMA_VERSION, PROFILE_SCHEMA_VERSION, STABLE_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS, Space, SpaceId,
     SpaceLayout, SpaceManifest, SpaceName, WORKSPACE_SCHEMA_VERSION,
 };
-pub use platform::{Capabilities, CapabilityStatus};
+pub use platform::{Capabilities, CapabilityStatus, ConfinementGrant, ConfinementPlan};
 pub use probe::{CompatibilityTier, ToolProbe, executable_matches, tool_probes};
 pub use store::artifact::{
     Artifact, ArtifactCounts, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest, ArtifactMutationReport,

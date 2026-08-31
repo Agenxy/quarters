@@ -27,6 +27,14 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         output::print_shortcut(action, &report, cli.json)?;
         return Ok(0);
     }
+    if matches!(cli.command, Command::Current) && crate::context::RestrictedContext::current().is_some() {
+        let current = std::env::var("QUARTERS_SPACE")
+            .ok()
+            .and_then(|name| SpaceName::parse(name).ok())
+            .map_or_else(|| "host".to_owned(), |name| name.as_str().to_owned());
+        output::print_current(&current, cli.json)?;
+        return Ok(0);
+    }
     let store = match cli.root {
         Some(root) => Store::new(root)?,
         None => Store::from_environment()?,
@@ -67,7 +75,13 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         }
         Command::LinuxLaunch(arguments) => {
             passthrough_json_guard(cli.json)?;
-            process::linux_launch(&arguments.space_home, &arguments.host_home, &arguments.command)
+            process::linux_launch(
+                &arguments.space_home,
+                arguments.host_home.as_deref(),
+                &arguments.runtime_dir,
+                arguments.confinement,
+                &arguments.command,
+            )
         }
         Command::AgentLaunch(arguments) => {
             passthrough_json_guard(cli.json)?;
@@ -642,8 +656,9 @@ fn current(store: &Store, json: bool) -> Result<i32> {
 fn environment(store: &Store, host: &HostEnvironment, arguments: &ProfileArgs, json: bool) -> Result<i32> {
     let space = open_space(store, &arguments.name)?;
     let launch = profile_launch(store, &space, host, arguments);
-    let values = launch.environment()?.diagnostic_values();
-    output::print_environment(&space, &values, json)?;
+    let (environment, plan) = launch.environment_and_confinement()?;
+    let values = environment.diagnostic_values();
+    output::print_environment(&space, &values, plan.as_ref(), json)?;
     Ok(0)
 }
 
@@ -790,15 +805,11 @@ fn open_space(store: &Store, raw_name: &str) -> Result<Space> {
 
 fn validated_current_space(store: &Store) -> Option<String> {
     let candidate = SpaceName::parse(std::env::var("QUARTERS_SPACE").ok()?).ok()?;
+    if crate::context::RestrictedContext::current().is_some() {
+        return Some(candidate.as_str().to_owned());
+    }
     match store.inspect_named(&candidate) {
         Ok(SpaceInspection::Healthy(_space)) => Some(candidate.as_str().to_owned()),
-        Err(error)
-            if error.kind() == ErrorKind::NotFound
-                && std::env::var_os("QUARTERS_NO_HOST_ESCAPE").as_deref()
-                    == Some(std::ffi::OsStr::new("home-view")) =>
-        {
-            Some(candidate.as_str().to_owned())
-        }
         Ok(SpaceInspection::Unhealthy { .. }) | Err(_) => None,
     }
 }
@@ -850,6 +861,7 @@ fn profile_launch<'a>(
         space,
         host,
         home_view: profile.home_view,
+        confinement: profile.confinement.is_some(),
         inherited_names: &profile.inherit,
     }
 }
@@ -871,22 +883,25 @@ fn passthrough_json_guard(json: bool) -> Result<()> {
 }
 
 fn home_view_management_guard(command: &Command) -> Result<()> {
-    if std::env::var_os("QUARTERS_NO_HOST_ESCAPE").as_deref() != Some(std::ffi::OsStr::new("home-view")) {
+    let Some(context) = crate::context::RestrictedContext::current() else {
         return Ok(());
-    }
+    };
     if matches!(
         command,
         Command::Current
             | Command::ShellInit(_)
+            | Command::Shortcut(_)
             | Command::LinuxLaunch(_)
             | Command::AgentLaunch(_)
-            | Command::Doctor(DoctorArgs { name: None })
     ) {
         return Ok(());
     }
     Err(QuartersError::new(
         ErrorKind::Unsupported,
-        "space management is unavailable inside Linux home-view because the authoritative store is hidden",
+        format!(
+            "this command is unavailable inside {} because the authoritative store is not granted",
+            context.label()
+        ),
     )
-    .with_hint("exit the home-view process tree and run the management command from the host"))
+    .with_hint("exit the restricted process tree and run the command from the host"))
 }

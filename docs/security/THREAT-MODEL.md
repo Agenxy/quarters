@@ -12,6 +12,7 @@
 - agent context integrity and bounded MCP availability
 - bundle authentication keys and exported plaintext state
 - cooperative freeze policy and recorded artifact source evidence
+- integrity of host and sibling-space file content during an opt-in Landlock launch
 
 ## Trust boundaries
 
@@ -92,6 +93,11 @@ policy.
 | Runtime socket collision | Mode-0700 short runtime directory per UID and stable space identity |
 | Read-only status creates runtime state | Agent status uses a validation-only runtime lookup and reports unset without creating directories |
 | Unsupported stronger mode | Capability check and fail-closed error |
+| Requested Linux confinement silently degrades | ABI-3 hard requirement, `no_new_privs`, `FullyEnforced` check and required hosted-kernel gate |
+| Confined child reads or mutates host/store content | Fixed descriptor-anchored allowlist; exact Quarter home/runtime are writable while ungranted content reads, directory enumeration and mutation are denied |
+| Confinement is mistaken for invisibility | Policy JSON and docs state that known-path metadata, `stat`, `readlink`, existence checks, `O_PATH` and path traversal alone remain observable |
+| Confinement launcher leaks store or host handles | Parent retains the cooperative lease; policy anchors are close-on-exec; launcher is single-threaded and immediately execs after restriction; inherited caller descriptors remain an explicit limitation |
+| Host PATH bypasses the policy | Confined PATH is reconstructed from Quarter-local bins and entries whose canonical directories fall beneath fixed executable grants; omitted host entries are counted |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
 | Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
 | Secret diagnostics | No state content reads; explicit inherited values render as redacted |
@@ -123,6 +129,8 @@ policy.
 - treating `frozen-active` provenance as proof that already-running writers
   were quiescent
 - treating workspace directories or a stable space ID as containment or authorization
+- claiming network, IPC, device, process or credential isolation from Linux filesystem confinement
+- hiding known-path metadata or revoking file descriptors opened before Landlock enforcement
 - treating a private SSH agent as protection from another process with the same UID
 - treating host-fork preview or provenance as authentication against the same UID
 - remote MCP, OAuth, agent-triggered command execution or agent-triggered deletion
@@ -146,6 +154,15 @@ is expected to fail.
 matches its environment marker to a healthy space in the active store. In
 Linux home-view, where that store is intentionally hidden, it reports only the
 grammar-validated marker established by the Quarters launcher.
+
+Linux `--confinement filesystem` is a distinct opt-in boundary. It sets
+`no_new_privs`, so ordinary set-id elevation is disabled, and `quarters host`
+cannot remove the inherited kernel domain. The routing marker proactively
+blocks store commands but is not the boundary: a child can unset it without
+relaxing Landlock. The policy grants `/proc` and selected terminal devices for
+compatibility. Ptrace-domain effects and host policy can change which proc
+entries are visible; Quarters makes no general process or credential-
+confidentiality claim. Network and IPC remain shared.
 
 ## Residual risks
 

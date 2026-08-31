@@ -1,10 +1,12 @@
 //! macOS profile backend.
 
-use super::{Capabilities, CapabilityStatus, unsupported_home_view};
-use crate::{HostEnvironment, Result};
+use super::{Capabilities, CapabilityStatus, ConfinementPlan, unsupported_home_view};
+use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+pub(super) struct PlatformPreparedConfinement;
 
 pub(super) fn platform_capabilities() -> Capabilities {
     let seatbelt = Path::new("/usr/bin/sandbox-exec").is_file();
@@ -63,6 +65,36 @@ pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
 
 pub(super) fn platform_enter_home_view(_space_home: &Path, _host_home: &Path) -> Result<()> {
     Err(unsupported_home_view())
+}
+
+pub(super) fn platform_confinement_plan(
+    _space_home: &Path,
+    _effective_home: &Path,
+    _runtime: &Path,
+    _host_path: Option<&OsString>,
+) -> Result<ConfinementPlan> {
+    Err(unsupported_confinement())
+}
+
+pub(super) fn platform_prepare_filesystem_confinement(_plan: &ConfinementPlan) -> Result<PlatformPreparedConfinement> {
+    Err(unsupported_confinement())
+}
+
+pub(super) fn platform_enter_filesystem_confinement(_prepared: PlatformPreparedConfinement) -> Result<()> {
+    Err(unsupported_confinement())
+}
+
+pub(super) fn platform_resolve_confined_executable(
+    _program: &std::ffi::OsStr,
+    _search_path: &std::ffi::OsStr,
+    _plan: &ConfinementPlan,
+) -> Result<PathBuf> {
+    Err(unsupported_confinement())
+}
+
+fn unsupported_confinement() -> QuartersError {
+    QuartersError::new(ErrorKind::Unsupported, "filesystem confinement is unavailable on macOS")
+        .with_hint("omit --confinement filesystem; portable state redirection remains available")
 }
 
 #[cfg(test)]

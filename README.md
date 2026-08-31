@@ -77,10 +77,13 @@ Before the mount, it copies the current native launcher and the four managed
 OpenSSH links into the private runtime directory that remains reachable after
 the host home is covered.
 
-Filesystem confinement is not implemented. `doctor` reports Seatbelt and
-Landlock as implementation gaps without claiming protection. The prebuilt
-macOS npm binaries are unsigned and unnotarized in this alpha; use Homebrew or
-Cargo to build locally if host policy rejects them.
+Linux also offers experimental, opt-in `--confinement filesystem`. It requires
+Landlock ABI 3, starts in the Quarter home, reconstructs PATH from Quarter and
+granted system locations, and fails closed unless the complete policy is
+enforced. Inspect it first with
+`quarters --json env NAME --confinement filesystem`. macOS remains unsupported;
+Seatbelt and App Sandbox are not portable CLI foundations. The prebuilt macOS
+npm binaries are unsigned and unnotarized in this alpha.
 
 ## Try it
 
@@ -155,9 +158,9 @@ install path.
 | `list` | List healthy and unhealthy space entries without hiding siblings |
 | `status [NAME]` | Observe cooperative freeze, lease and private-agent state |
 | `current` | Print the current space or `host` |
-| `env NAME` | Prepare and show the exact computed environment; explicit inherited values are redacted |
-| `enter NAME` | Open the space's interactive shell |
-| `exec NAME -- COMMAND` | Run one native command |
+| `env NAME [--confinement filesystem]` | Show the exact environment and optional non-mutating Landlock policy plan |
+| `enter NAME [--confinement filesystem]` | Open the shell; confined Linux mode starts in the Quarter home |
+| `exec NAME [--confinement filesystem] -- COMMAND` | Run one command; requested confinement never degrades silently |
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
 | `agent status\|start\|stop\|restart [NAME]` | Manage a protocol-verified private OpenSSH agent |
 | `agent recover NAME --confirm NAME` | Reconcile only dead or protocol-verified private-agent state |
@@ -195,8 +198,8 @@ misclassify active state. Repairing such corruption remains a manual
 filesystem-recovery operation.
 `current` is a convenience report, never proof of identity or confinement. It
 matches the space marker to a healthy store entry in baseline mode. Linux
-home-view cannot reopen the store hidden by its mount, so there it reports the
-validated marker established by the Quarters launcher.
+home-view and filesystem confinement do not reopen the store, so they report
+only the grammar-validated marker established by the launcher.
 If the stored entry name itself is invalid, copy its exact value from
 the filesystem only after inspecting it safely; JSON and human diagnostics
 escape and bound untrusted names rather than replaying terminal controls. `rm`
@@ -330,6 +333,13 @@ and `Library` subdirectories. These are state-location conventions backed by
 HOME/XDG and platform adapters, not containment; applications may still use
 passwd-home, Keychain, TCC, app containers or absolute host paths.
 
+Linux filesystem confinement is a separate earned capability. It denies
+content reads, directory listing and mutation outside explicit grants, but it
+does not hide known-path metadata: `stat`, `readlink`, existence checks and
+`O_PATH` remain outside Landlock ABI 3. `/proc`, selected terminal devices,
+network and IPC remain shared; already-open descriptors remain usable. The
+real account and unconfined same-UID processes retain their normal authority.
+
 A custom `--root` is an operator-selected trust anchor. Put it beneath a
 directory that is owned by the current user and not writable by another user;
 Quarters validates the selected root and its control files, but does not claim
@@ -344,7 +354,8 @@ authority over every ancestor directory.
 - programs that insist on `getpwuid()` paths on macOS
 - explicit absolute paths into the real home
 
-`sudo` escapes a baseline profile. Linux `--home-view` is unavailable when the
+`sudo` escapes a baseline profile. Landlock confinement sets `no_new_privs`, so
+ordinary set-id elevation is disabled. Linux `--home-view` is unavailable when the
 account has supplementary groups; when it is available, ordinary `sudo` cannot
 cross the unmapped root identity and is expected to fail. `quarters host`
 restores default host state paths only; it cannot recover credential variables
@@ -426,7 +437,7 @@ is old, new, or explicitly `rollback_in_progress`; `doctor` reports the exact
 recovery action. This still adds no containment boundary. Display-name rename
 is a separate recoverable transaction that retains stable identity and snapshot
 binding. Cooperative freeze is implemented; enforceable filesystem freeze,
-encryption and confinement remain unavailable.
+encrypted-at-rest storage and supported macOS confinement remain unavailable.
 
 ## Documentation
 
@@ -438,6 +449,7 @@ encryption and confinement remain unavailable.
 - [Host inheritance and fork policy](docs/architecture/ADR-0004-INHERITANCE-AND-HOST-FORK.md)
 - [Private agent lifecycle](docs/architecture/ADR-0005-PRIVATE-AGENT-LIFECYCLE.md)
 - [Storage migration and runtime identity](docs/architecture/ADR-0006-STORAGE-MIGRATION-AND-RUNTIME-IDENTITY.md)
+- [Linux Landlock confinement](docs/architecture/ADR-0011-LINUX-LANDLOCK-CONFINEMENT.md)
 - [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
 - [Lifecycle artifacts and rollback](docs/architecture/ADR-0008-LIFECYCLE-ARTIFACTS-AND-ROLLBACK.md)
 - [Authenticated portable bundles](docs/architecture/ADR-0009-AUTHENTICATED-BUNDLES.md)

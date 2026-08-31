@@ -575,8 +575,8 @@ fn refuse_space_mutation(operation: &str) -> Result<()> {
 }
 
 fn context() -> &'static str {
-    if env::var_os("QUARTERS_NO_HOST_ESCAPE").is_some() {
-        "home-view"
+    if let Some(context) = crate::context::RestrictedContext::current() {
+        context.label()
     } else if env::var_os("QUARTERS_SPACE").is_some() {
         "space"
     } else {
