@@ -806,3 +806,26 @@ Final local evidence on the accepted checkpoint:
 The macOS host cannot execute Landlock. Hosted Ubuntu with
 `QUARTERS_REQUIRE_LANDLOCK=1` remains the required real enforcement gate after
 publication; source checks and reviewer acceptance do not substitute for it.
+
+The first hosted execution proved the required Ubuntu enforcement matrix after
+the POSIX shell witness repair, then exposed a static-musl portability failure:
+the headless runner had no controlling terminal and policy preparation refused
+`/dev/tty`. A first attempted repair used `PathFd` as a usability preflight.
+Opus rejected it because `O_PATH` does not prove device usability and because
+silently omitting every open error would hide descriptor exhaustion, permission
+failure and path races.
+
+The accepted repair probes only optional `/dev/tty` with ordinary read-write
+access. It omits only an absent node or Linux `ENXIO` (no controlling terminal),
+while every other probe failure remains fatal. Available terminals rejoin the
+ordinary canonical grant path, and Landlock separately opens every reported
+anchor or aborts the launch. Direct Linux-target tests pin the omittable and
+fatal errno classes. A final read-only maximum-effort Opus pass re-read the
+complete launch ordering, policy builder, tests and ADR, found no high or medium
+issue and returned:
+
+> VERDICT: ACCEPT
+
+Fresh hosted Ubuntu and static-musl execution remain mandatory for the repaired
+checkpoint; the prior successful Ubuntu gate does not substitute for that
+rerun.

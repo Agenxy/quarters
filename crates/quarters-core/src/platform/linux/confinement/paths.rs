@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::fs::OpenOptions;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 
@@ -63,6 +64,8 @@ pub(super) fn build_plan(
         let required = *path == "/dev/null";
         if required {
             push_canonical(&mut grants, Path::new(path), "device", "compatibility-device", true)?;
+        } else if *path == "/dev/tty" {
+            push_optional_terminal(&mut grants, &mut omitted, Path::new(path))?;
         } else {
             push_optional(
                 &mut grants,
@@ -188,6 +191,24 @@ fn push_optional(
         }
     }
     Ok(())
+}
+
+fn push_optional_terminal(grants: &mut Vec<ConfinementGrant>, omitted: &mut Vec<PathBuf>, path: &Path) -> Result<()> {
+    match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(descriptor) => {
+            drop(descriptor);
+            push_optional(grants, omitted, path, "device", "compatibility-device")
+        }
+        Err(error) if terminal_is_unavailable(&error) => {
+            omitted.push(path.to_path_buf());
+            Ok(())
+        }
+        Err(error) => Err(QuartersError::io("probe optional terminal device", path, error)),
+    }
+}
+
+fn terminal_is_unavailable(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(nix::libc::ENXIO) || error.kind() == std::io::ErrorKind::NotFound
 }
 
 fn add_resolver_target(grants: &mut Vec<ConfinementGrant>, omitted: &mut Vec<PathBuf>) -> Result<()> {
@@ -325,7 +346,7 @@ fn limitations() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfinementGrant, omitted_path_count, overlaps_executable_root};
+    use super::{ConfinementGrant, omitted_path_count, overlaps_executable_root, terminal_is_unavailable};
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
 
@@ -361,5 +382,15 @@ mod tests {
             Path::new("/etc/quarters/spaces/demo/home"),
             &[configuration],
         ));
+    }
+
+    #[test]
+    fn terminal_omission_is_limited_to_absence_and_no_controlling_terminal() {
+        for code in [nix::libc::ENOENT, nix::libc::ENXIO] {
+            assert!(terminal_is_unavailable(&std::io::Error::from_raw_os_error(code)));
+        }
+        for code in [nix::libc::EACCES, nix::libc::EMFILE, nix::libc::ENOMEM] {
+            assert!(!terminal_is_unavailable(&std::io::Error::from_raw_os_error(code)));
+        }
     }
 }

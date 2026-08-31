@@ -36,7 +36,11 @@ before immediately executing the program. Executable resolution uses the same
 reported roots and the mounted Quarter-home alias. Relative program paths
 containing a separator are refused. `quarters env ... --confinement filesystem
 --json` reports the complete planned grant, readable PATH-entry array and
-omission set before enforcement.
+omission set before enforcement. Quarters probes `/dev/tty` with ordinary
+read-write access and omits it when the process has no controlling terminal.
+Unexpected probe failures remain fatal. Landlock opens every admitted rule
+anchor separately and fails closed if any required or optional anchor cannot be
+prepared exactly as reported.
 
 Inside the domain, `current`, prompt generation, shortcut inspection and
 managed OpenSSH adapters use a no-store route; shortcut mutation still refuses

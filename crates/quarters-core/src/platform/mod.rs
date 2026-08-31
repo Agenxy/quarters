@@ -70,7 +70,7 @@ pub struct ConfinementPlan {
     pub working_directory: PathBuf,
     /// Exact rules that would be applied.
     pub grants: Vec<ConfinementGrant>,
-    /// Optional fixed paths absent from this host.
+    /// Optional fixed paths absent or unavailable on this host.
     pub omitted_paths: Vec<PathBuf>,
     /// Ordered PATH entries used inside the confined process tree.
     pub executable_path: Vec<PathBuf>,
