@@ -54,13 +54,11 @@ pub(super) fn enforce(ruleset: RulesetCreated) -> Result<()> {
 
 fn grant_access(grant: &ConfinementGrant) -> Result<landlock::BitFlags<AccessFs>> {
     let access = match grant.access.as_str() {
-        "read-file" => AccessFs::ReadFile.into(),
-        "read" => AccessFs::from_read(ABI::V3) & !AccessFs::Execute,
+        "read-file" | "data-read-file" => AccessFs::ReadFile.into(),
+        "read" | "data-read" => AccessFs::from_read(ABI::V3) & !AccessFs::Execute,
         "read-execute" => AccessFs::from_read(ABI::V3),
         "read-write" => AccessFs::from_all(ABI::V3),
-        "data-read" => AccessFs::from_read(ABI::V3) & !AccessFs::Execute,
         "data-read-write" => AccessFs::from_all(ABI::V3) & !AccessFs::Execute,
-        "data-read-file" => AccessFs::ReadFile.into(),
         "data-read-write-file" => AccessFs::ReadFile | AccessFs::WriteFile | AccessFs::Truncate,
         "device" => AccessFs::ReadFile | AccessFs::WriteFile,
         _ => {
