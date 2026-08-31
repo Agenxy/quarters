@@ -56,6 +56,21 @@ jobs:
       - name: Audit locked dependencies
         run: cargo audit --deny warnings
 
+  linux-default-userns:
+    name: Linux default user-namespace policy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Prove home view fails closed under distribution policy
+        env:
+          QUARTERS_REQUIRE_HOME_VIEW_UNAVAILABLE: "1"
+        run: >-
+          cargo test --locked --package quarters --test linux_runtime_acceptance
+          home_view_mounts_space_state_and_disables_host_escape -- --exact
+
   linux-musl:
     name: Linux x86_64 musl
     runs-on: ubuntu-24.04

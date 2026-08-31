@@ -2,7 +2,7 @@
 
 mod confinement;
 
-use super::{Capabilities, CapabilityStatus, ConfinementPlan};
+use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use nix::mount::{MsFlags, mount};
 use nix::sched::{CloneFlags, unshare};
@@ -37,13 +37,8 @@ pub(super) fn platform_capabilities() -> Capabilities {
     }
 }
 
-pub(super) fn platform_confinement_plan(
-    space_home: &Path,
-    effective_home: &Path,
-    runtime: &Path,
-    host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
-    confinement::plan(space_home, effective_home, runtime, host_path)
+pub(super) fn platform_confinement_plan(request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
+    confinement::plan(request)
 }
 
 pub(super) fn platform_prepare_filesystem_confinement(plan: &ConfinementPlan) -> Result<PlatformPreparedConfinement> {

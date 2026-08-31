@@ -51,12 +51,70 @@ pub struct CapabilityStatus {
 pub struct ConfinementGrant {
     /// Canonical path used to anchor the kernel rule.
     pub path: PathBuf,
-    /// Stable access class: `read-file`, `read`, `read-execute`, `read-write` or `device`.
+    /// Stable built-in or data-only access class.
     pub access: String,
     /// Stable reason for the grant, including derived resolver targets.
     pub source: String,
     /// Whether policy construction fails when this path is unavailable.
     pub required: bool,
+    /// Device recorded when this exact anchor was validated.
+    #[serde(skip)]
+    pub(crate) anchor_device: u64,
+    /// Inode recorded when this exact anchor was validated.
+    #[serde(skip)]
+    pub(crate) anchor_inode: u64,
+}
+
+/// Access requested for one invocation-local host data grant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UserGrantAccess {
+    /// Permit data reads without executable authority.
+    ReadOnly,
+    /// Permit data reads and writes without executable authority.
+    ReadWrite,
+}
+
+impl UserGrantAccess {
+    /// Stable command-line spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "ro",
+            Self::ReadWrite => "rw",
+        }
+    }
+}
+
+/// One explicit invocation-local host data grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserConfinementGrant {
+    /// User-selected existing absolute path.
+    pub path: PathBuf,
+    /// Requested data access.
+    pub access: UserGrantAccess,
+}
+
+/// Inputs used to construct one filesystem-confinement policy.
+pub struct ConfinementRequest<'a> {
+    /// Stored Quarter home before an optional home-view mount.
+    pub space_home: &'a Path,
+    /// HOME visible to the launched process.
+    pub effective_home: &'a Path,
+    /// Private per-space runtime directory.
+    pub runtime: &'a Path,
+    /// Authoritative Quarters store root.
+    pub store_root: &'a Path,
+    /// Executable which accepted the user request.
+    pub current_executable: &'a Path,
+    /// Captured host PATH used only to retain reviewed executable roots.
+    pub host_path: Option<&'a OsString>,
+    /// Explicit invocation-local data grants.
+    pub user_grants: &'a [UserConfinementGrant],
+    /// Optional requested initial directory.
+    pub working_directory: Option<&'a Path>,
+    /// Whether the passwd-home bind view was requested.
+    pub home_view: bool,
 }
 
 /// Non-mutating description of the Linux filesystem-confinement policy.
@@ -76,6 +134,8 @@ pub struct ConfinementPlan {
     pub executable_path: Vec<PathBuf>,
     /// Number of resolvable host PATH entries intentionally excluded.
     pub omitted_host_path_entries: usize,
+    /// Linux legacy terminal-injection sysctl evidence for this launch plan.
+    pub legacy_tiocsti: CapabilityStatus,
     /// Stable, explicit limitations on the protection claim.
     pub limitations: Vec<String>,
 }
@@ -314,13 +374,8 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
 ///
 /// Returns an error when the platform, kernel ABI or required path cannot
 /// support the complete policy.
-pub fn confinement_plan(
-    space_home: &Path,
-    effective_home: &Path,
-    runtime: &Path,
-    host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
-    platform_confinement_plan(space_home, effective_home, runtime, host_path)
+pub fn confinement_plan(request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
+    platform_confinement_plan(request)
 }
 
 /// Open every anchor and prepare the complete Linux filesystem policy.

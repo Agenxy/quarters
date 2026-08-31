@@ -42,6 +42,22 @@ Unexpected probe failures remain fatal. Landlock opens every admitted rule
 anchor separately and fails closed if any required or optional anchor cannot be
 prepared exactly as reported.
 
+An invocation may add up to 32 explicit data roots with
+`--grant-path ABSOLUTE_PATH:ro|rw`. These grants are never persisted or read
+from the environment. Their rules omit executable access, so an executable in
+a granted workspace cannot become a command root. Quarters canonicalizes each
+path, reports the requested access and rejects overlap with its store, runtime,
+running executable, passwd-home SSH/GnuPG roots or a passwd home hidden by
+`--home-view`. Each anchor's validated device and inode must match the opened
+Landlock descriptor, so replacement between review and enforcement fails
+closed. `--workdir` is portable process behavior; in confined mode an external
+directory must be covered by one of these data grants.
+
+The policy report also records the observed
+`/proc/sys/dev/tty/legacy_tiocsti` state. Landlock ABI 3 does not mediate that
+terminal ioctl, so an enabled legacy setting remains a host-policy limitation,
+not an unreported part of the filesystem claim.
+
 Inside the domain, `current`, prompt generation, shortcut inspection and
 managed OpenSSH adapters use a no-store route; shortcut mutation still refuses
 Quarter context. Store management, `doctor`, MCP and `host` are refused
@@ -72,13 +88,16 @@ home/runtime operations and hostile host/store/sibling denials, and exercises
 the shell plus Git, OpenSSH, Python and Node paths when those tools are present.
 Hosted Linux sets
 `QUARTERS_REQUIRE_LANDLOCK=1`; unavailable or partial enforcement fails the
-job. macOS and older-kernel behavior is fail-closed capability evidence, not a
+job. A separate Ubuntu job retains the distribution's default unprivileged
+user-namespace policy and proves `--home-view` is unavailable and fails closed.
+macOS and older-kernel behavior is fail-closed capability evidence, not a
 substitute for Linux enforcement.
 
 ## Consequences
 
-This is an earned filesystem-policy capability, not a container. Its initial
-working directory is always the Quarter home, so host-repository work awaits a
-separate explicit workspace-grant design. Host-home tool shims are omitted;
-tools installed inside the Quarter and fixed system roots remain usable.
-Encrypted-at-rest storage remains a separate capability.
+This is an earned filesystem-policy capability, not a container. The default
+working directory remains the Quarter home; explicit data-only grants allow a
+reviewed host workspace without turning it into an executable search root.
+Host-home tool shims are omitted; tools installed inside the Quarter and fixed
+system roots remain usable. Encrypted-at-rest storage remains a separate
+capability.

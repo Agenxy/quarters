@@ -155,6 +155,19 @@ quarters --json env studio --confinement filesystem
 quarters enter studio --confinement filesystem
 ```
 
+To work on one host repository without admitting the rest of the host home,
+grant it for that invocation and make it the initial directory:
+
+```sh
+quarters --json env studio --confinement filesystem \
+  --grant-path "$PWD:rw" --workdir "$PWD"
+quarters enter studio --confinement filesystem \
+  --grant-path "$PWD:rw" --workdir "$PWD"
+```
+
+The grant is not saved in the Quarter. It permits data access only; commands
+must still resolve from the Quarter or a reported system executable root.
+
 The shell starts in the Quarter home. Its PATH contains Quarter-local tools and
 reported fixed system roots, not host-home shims. Ungranted file contents,
 directory listings and mutations are denied, but known-path metadata can remain

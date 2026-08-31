@@ -95,10 +95,14 @@ policy.
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Requested Linux confinement silently degrades | ABI-3 hard requirement, `no_new_privs`, `FullyEnforced` check and required hosted-kernel gate |
 | Confined child reads or mutates host/store content | Fixed descriptor-anchored allowlist; exact Quarter home/runtime are writable while ungranted content reads, directory enumeration and mutation are denied |
+| User grant expands confinement unexpectedly | Invocation-local absolute path plus explicit `ro`/`rw`; canonical data-only rule, bounded count, JSON disclosure, validated device/inode match on the opened rule anchor and overlap rejection for store/runtime/executable/passwd credential/home-view roots |
+| Granted workspace supplies an executable | User grants omit Landlock execute rights and executable resolution accepts only Quarter-local or reviewed system executable roots |
+| External confined working directory is ambient | `--workdir` is canonicalized and must lie below the Quarter home or an explicit directory data grant |
 | Confinement is mistaken for invisibility | Policy JSON and docs state that known-path metadata, `stat`, `readlink`, existence checks, `O_PATH` and path traversal alone remain observable |
 | Confinement launcher leaks store or host handles | Parent retains the cooperative lease; policy anchors are close-on-exec; launcher is single-threaded and immediately execs after restriction; inherited caller descriptors remain an explicit limitation |
 | Host PATH bypasses the policy | Confined PATH is reconstructed from Quarter-local bins and entries whose canonical directories fall beneath fixed executable grants; omitted host entries are counted |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
+| Terminal injection is mistaken for filesystem mediation | Policy output reports `dev.tty.legacy_tiocsti`; Landlock ABI 3 is not claimed to mediate terminal ioctls |
 | Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
 | Secret diagnostics | No state content reads; explicit inherited values render as redacted |
 | MCP lifecycle confusion | Exact 2026/2025 families; cross-family methods and version metadata fail closed |
@@ -130,6 +134,7 @@ policy.
   were quiescent
 - treating workspace directories or a stable space ID as containment or authorization
 - claiming network, IPC, device, process or credential isolation from Linux filesystem confinement
+- treating a user-granted path as inspected, trusted, or executable authority
 - hiding known-path metadata or revoking file descriptors opened before Landlock enforcement
 - treating a private SSH agent as protection from another process with the same UID
 - treating host-fork preview or provenance as authentication against the same UID

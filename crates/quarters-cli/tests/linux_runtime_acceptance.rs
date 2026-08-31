@@ -102,6 +102,12 @@ fn home_view_mounts_space_state_and_disables_host_escape() -> Result<(), Box<dyn
         .args(["--json", "doctor"]))?;
     let doctor: Value = serde_json::from_slice(&doctor.stdout)?;
     let available = doctor["result"]["platform"]["home_view"]["available"] == true;
+    if std::env::var_os("QUARTERS_REQUIRE_HOME_VIEW_UNAVAILABLE").is_some() {
+        assert!(
+            !available,
+            "the distribution-default user-namespace policy unexpectedly allowed home view"
+        );
+    }
     let output = quarters(&root)
         .env("HOME", &host_home)
         .env_remove("XDG_RUNTIME_DIR")
@@ -193,6 +199,163 @@ fn landlock_confines_content_and_mutation_or_fails_closed() -> Result<(), Box<dy
     Ok(())
 }
 
+#[test]
+fn user_grants_are_data_only_explicit_and_workdir_bound() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let root = temporary.path().join("store");
+    let host_home = temporary.path().join("host-home");
+    let read_only = temporary.path().join("read-only");
+    let read_write = temporary.path().join("read-write");
+    let sibling = temporary.path().join("ungranted");
+    for directory in [&host_home, &read_only, &read_write, &sibling] {
+        fs::create_dir(directory)?;
+    }
+    fs::write(read_only.join("input"), b"readable\n")?;
+    fs::write(sibling.join("secret"), b"denied\n")?;
+    let executable = read_write.join("workspace-command");
+    fs::write(&executable, b"#!/bin/sh\nprintf 'escaped\\n' > executed\n")?;
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))?;
+    create(&root, &host_home, "granted")?;
+    if !confinement_available(&root, &host_home)? {
+        if landlock_required() {
+            return Err("hosted Linux requires user-grant confinement evidence".into());
+        }
+        return Ok(());
+    }
+
+    let read_only_arg = format!("{}:ro", read_only.display());
+    let read_write_arg = format!("{}:rw", read_write.display());
+    let plan = run(quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .arg("--json")
+        .args(["env", "granted", "--confinement", "filesystem", "--grant-path"])
+        .arg(&read_only_arg)
+        .arg("--grant-path")
+        .arg(&read_write_arg)
+        .arg("--workdir")
+        .arg(&read_write))?;
+    let plan: Value = serde_json::from_slice(&plan.stdout)?;
+    verify_user_grant_plan(&plan, &read_only, &read_write)?;
+
+    let script = r#"
+test "$PWD" = "$1" || exit 30
+cat "$2/input" >/dev/null || exit 31
+if printf 'no\n' > "$2/blocked" 2>/dev/null; then exit 32; fi
+printf 'yes\n' > "$1/output" || exit 33
+if cat "$3/secret" >/dev/null 2>&1; then exit 34; fi
+"#;
+    run(quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .arg("exec")
+        .arg("granted")
+        .args(["--confinement", "filesystem", "--grant-path"])
+        .arg(&read_only_arg)
+        .arg("--grant-path")
+        .arg(&read_write_arg)
+        .arg("--workdir")
+        .arg(&read_write)
+        .args(["--", "/bin/sh", "-c", script, "_"])
+        .arg(&read_write)
+        .arg(&read_only)
+        .arg(&sibling))?;
+    assert_eq!(fs::read(read_write.join("output"))?, b"yes\n");
+    assert!(!read_only.join("blocked").exists());
+
+    let refused = quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .arg("exec")
+        .arg("granted")
+        .args(["--confinement", "filesystem", "--grant-path"])
+        .arg(&read_write_arg)
+        .args(["--"])
+        .arg(&executable)
+        .output()?;
+    assert_eq!(refused.status.code(), Some(6));
+    assert!(!read_write.join("executed").exists());
+    remove(&root, &host_home, "granted")?;
+    Ok(())
+}
+
+fn verify_user_grant_plan(plan: &Value, read_only: &Path, read_write: &Path) -> Result<(), Box<dyn Error>> {
+    assert_eq!(
+        plan["result"]["confinement"]["working_directory"],
+        read_write.canonicalize()?.to_string_lossy().as_ref()
+    );
+    let grants = plan["result"]["confinement"]["grants"]
+        .as_array()
+        .ok_or("confinement grants are not an array")?;
+    for (path, requested) in [(read_only, "ro"), (read_write, "rw")] {
+        let canonical = path.canonicalize()?;
+        let grant = grants
+            .iter()
+            .find(|grant| grant["path"] == canonical.to_string_lossy().as_ref())
+            .ok_or("missing user grant")?;
+        assert_eq!(grant["source"], "user-granted");
+        assert_eq!(grant["requested_access"], requested);
+        assert_eq!(grant["required"], true);
+    }
+    assert!(
+        plan["result"]["confinement"]["limitations"]
+            .as_array()
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str().is_some_and(|text| text.contains("does not inspect"))))
+    );
+    Ok(())
+}
+
+#[test]
+fn user_grants_reject_inert_and_reserved_authority() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let root = temporary.path().join("store");
+    let host_home = temporary.path().join("host-home");
+    fs::create_dir(&host_home)?;
+    create(&root, &host_home, "reserved")?;
+    let root_grant = format!("{}:ro", root.display());
+    let inert = quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .args(["--json", "env", "reserved", "--grant-path", &root_grant])
+        .output()?;
+    assert_eq!(inert.status.code(), Some(2));
+
+    if !confinement_available(&root, &host_home)? {
+        if landlock_required() {
+            return Err("hosted Linux requires reserved-grant evidence".into());
+        }
+        return Ok(());
+    }
+    let executable_grant = format!("{}:ro", env!("CARGO_BIN_EXE_quarters"));
+    for grant in [root_grant, executable_grant] {
+        let output = quarters(&root)
+            .env("HOME", &host_home)
+            .env_remove("XDG_RUNTIME_DIR")
+            .args([
+                "--json",
+                "env",
+                "reserved",
+                "--confinement",
+                "filesystem",
+                "--grant-path",
+                &grant,
+            ])
+            .output()?;
+        assert_eq!(output.status.code(), Some(6));
+        let error: Value = serde_json::from_slice(&output.stderr)?;
+        assert_eq!(error["error"]["kind"], "unsupported");
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("overlaps"))
+        );
+    }
+    remove(&root, &host_home, "reserved")?;
+    Ok(())
+}
+
 fn verify_policy(policy: &Value, home: &Path) -> Result<ToolCoverage, Box<dyn Error>> {
     assert_eq!(policy["result"]["confinement"]["minimum_abi"], 3);
     assert_eq!(
@@ -205,6 +368,18 @@ fn verify_policy(policy: &Value, home: &Path) -> Result<ToolCoverage, Box<dyn Er
     assert!(!executable_path.is_empty());
     assert!(executable_path.iter().all(Value::is_string));
     assert!(policy["result"]["environment"].get("QUARTERS_HOST_PATH").is_none());
+    let tiocsti = &policy["result"]["confinement"]["legacy_tiocsti"];
+    assert!(matches!(
+        tiocsti["status"].as_str(),
+        Some("enabled" | "disabled" | "unavailable" | "unknown")
+    ));
+    if let Ok(value) = fs::read_to_string("/proc/sys/dev/tty/legacy_tiocsti") {
+        match value.trim() {
+            "1" => assert_eq!(tiocsti["status"], "enabled"),
+            "0" => assert_eq!(tiocsti["status"], "disabled"),
+            _ => assert_eq!(tiocsti["status"], "unknown"),
+        }
+    }
     let available = ["ssh", "git", "python3", "node"]
         .into_iter()
         .filter(|command| plan_has_command(policy, command))
@@ -280,6 +455,22 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
     if !available {
         return Ok(());
     }
+    let hidden_grant = format!("{}:ro", passwd_home.display());
+    let refused = quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .args([
+            "--json",
+            "env",
+            "combined",
+            "--home-view",
+            "--confinement",
+            "filesystem",
+            "--grant-path",
+            &hidden_grant,
+        ])
+        .output()?;
+    assert_eq!(refused.status.code(), Some(6));
     let plan = run(quarters(&root)
         .env("HOME", &host_home)
         .env_remove("XDG_RUNTIME_DIR")

@@ -334,17 +334,20 @@ reopening the hidden store. Other management commands remain disabled, and no
 security decision may use `current` as proof of process identity.
 
 `--confinement filesystem` is a separate Landlock ABI-3 policy described by
-ADR 0011. A single-threaded internal launcher validates the Quarter home and
-runtime, resolves fixed system and device rules, reconstructs PATH, optionally
-enters home-view, changes to the Quarter home, requires full kernel enforcement
-and immediately execs. The baseline and namespace path view never imply this
-boundary when the option is absent.
+ADR 0011. A single-threaded internal launcher validates the Quarter home,
+runtime and invocation-local data grants, opens identity-matched rule anchors,
+resolves fixed system and device rules, reconstructs PATH, optionally enters
+home-view, changes to the validated working directory, requires full kernel
+enforcement and immediately execs. Data grants never add executable authority.
+The baseline and namespace path view never imply this boundary when the option
+is absent.
 
 The policy denies handled content, enumeration and mutation operations outside
 its grants. It does not hide known-path metadata, virtualize `/proc`, isolate
-network or IPC, revoke inherited descriptors, or restrict other same-UID
-processes. Store commands are routed off inside the domain; this environment
-route is UX, while Landlock is the irreversible boundary.
+network or IPC, mediate terminal ioctls, revoke inherited descriptors, or
+restrict other same-UID processes. Store commands are routed off inside the
+domain; this environment route is UX, while Landlock is the irreversible
+boundary.
 
 ## Lifecycle copy and artifact contract
 

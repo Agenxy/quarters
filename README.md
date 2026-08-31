@@ -78,9 +78,12 @@ OpenSSH links into the private runtime directory that remains reachable after
 the host home is covered.
 
 Linux also offers experimental, opt-in `--confinement filesystem`. It requires
-Landlock ABI 3, starts in the Quarter home, reconstructs PATH from Quarter and
-granted system locations, and fails closed unless the complete policy is
-enforced. Inspect it first with
+Landlock ABI 3, defaults to the Quarter home, reconstructs PATH from Quarter
+and reviewed system locations, and fails closed unless the complete policy is
+enforced. Invocation-local `--grant-path /absolute/path:ro|rw` options admit
+data without making that path executable; `--workdir` selects the initial
+directory and must be covered by a grant when it is outside the Quarter home.
+Inspect the complete policy first with
 `quarters --json env NAME --confinement filesystem`. macOS remains unsupported;
 Seatbelt and App Sandbox are not portable CLI foundations. The prebuilt macOS
 npm binaries are unsigned and unnotarized in this alpha.
@@ -158,9 +161,9 @@ publication is not yet available and is not advertised as an install path.
 | `list` | List healthy and unhealthy space entries without hiding siblings |
 | `status [NAME]` | Observe cooperative freeze, lease and private-agent state |
 | `current` | Print the current space or `host` |
-| `env NAME [--confinement filesystem]` | Show the exact environment and optional non-mutating Landlock policy plan |
-| `enter NAME [--confinement filesystem]` | Open the shell; confined Linux mode starts in the Quarter home |
-| `exec NAME [--confinement filesystem] -- COMMAND` | Run one command; requested confinement never degrades silently |
+| `env NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH]` | Show the exact environment and optional non-mutating Landlock policy plan |
+| `enter NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH]` | Open the shell with an optional explicit initial directory |
+| `exec NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH] -- COMMAND` | Run one command; requested confinement never degrades silently |
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
 | `agent status\|start\|stop\|restart [NAME]` | Manage a protocol-verified private OpenSSH agent |
 | `agent recover NAME --confirm NAME` | Reconcile only dead or protocol-verified private-agent state |

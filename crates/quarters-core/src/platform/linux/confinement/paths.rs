@@ -1,6 +1,6 @@
 //! Policy path discovery, reporting and executable resolution.
 
-use crate::platform::{ConfinementGrant, ConfinementPlan};
+use crate::platform::{ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess};
 use crate::{ErrorKind, QuartersError, Result};
 use nix::unistd::Uid;
 use std::collections::BTreeSet;
@@ -10,6 +10,8 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
+
+const MAX_USER_GRANTS: usize = 32;
 
 const EXECUTABLE_ROOTS: &[&str] = &[
     "/usr",
@@ -35,18 +37,13 @@ const DEVICE_PATHS: &[&str] = &[
     "/dev/pts",
 ];
 
-pub(super) fn build_plan(
-    space_home: &Path,
-    effective_home: &Path,
-    runtime: &Path,
-    host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
-    validate_private_directory(space_home, "Quarter home")?;
-    validate_private_directory(runtime, "Quarter runtime")?;
+pub(super) fn build_plan(request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
+    validate_private_directory(request.space_home, "Quarter home")?;
+    validate_private_directory(request.runtime, "Quarter runtime")?;
     let mut grants = Vec::new();
     let mut omitted = Vec::new();
-    push_canonical(&mut grants, space_home, "read-write", "quarter-home", true)?;
-    push_canonical(&mut grants, runtime, "read-write", "quarter-runtime", true)?;
+    push_canonical(&mut grants, request.space_home, "read-write", "quarter-home", true)?;
+    push_canonical(&mut grants, request.runtime, "read-write", "quarter-runtime", true)?;
     for path in EXECUTABLE_ROOTS {
         push_optional(
             &mut grants,
@@ -59,7 +56,7 @@ pub(super) fn build_plan(
     push_canonical(&mut grants, Path::new("/etc"), "read", "system-configuration", true)?;
     push_canonical(&mut grants, Path::new("/proc"), "read", "process-compatibility", true)?;
     add_resolver_target(&mut grants, &mut omitted)?;
-    ensure_store_disjoint(space_home, &grants)?;
+    ensure_store_disjoint(request.store_root, request.space_home, &grants)?;
     for path in DEVICE_PATHS {
         let required = *path == "/dev/null";
         if required {
@@ -76,6 +73,7 @@ pub(super) fn build_plan(
             )?;
         }
     }
+    add_user_grants(request, &mut grants)?;
     deduplicate_grants(&mut grants);
     if !grants.iter().any(|grant| grant.access == "read-execute") {
         return Err(QuartersError::new(
@@ -83,19 +81,18 @@ pub(super) fn build_plan(
             "filesystem confinement found no executable system root",
         ));
     }
-    let executable_path = reconstructed_path(effective_home, runtime, &grants, host_path);
-    let omitted_host_path_entries = omitted_path_count(host_path, &executable_path);
+    let executable_path = reconstructed_path(request.effective_home, request.runtime, &grants, request.host_path);
+    let omitted_host_path_entries = omitted_path_count(request.host_path, &executable_path);
     Ok(ConfinementPlan {
         mode: "filesystem".to_owned(),
         minimum_abi: 3,
-        working_directory: effective_home
-            .canonicalize()
-            .map_err(|error| QuartersError::io("resolve confinement working directory", effective_home, error))?,
+        working_directory: resolve_working_directory(request, &grants)?,
         grants,
         omitted_paths: omitted,
         executable_path,
         omitted_host_path_entries,
-        limitations: limitations(),
+        legacy_tiocsti: legacy_tiocsti_status(),
+        limitations: limitations(!request.user_grants.is_empty()),
     })
 }
 
@@ -156,11 +153,15 @@ fn push_canonical(
     let canonical = path
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve required filesystem policy path", path, error))?;
+    let metadata = fs::metadata(&canonical)
+        .map_err(|error| QuartersError::io("inspect required filesystem policy path", &canonical, error))?;
     grants.push(ConfinementGrant {
         path: canonical,
         access: access.to_owned(),
         source: source.to_owned(),
         required,
+        anchor_device: metadata.dev(),
+        anchor_inode: metadata.ino(),
     });
     Ok(())
 }
@@ -174,11 +175,15 @@ fn push_optional(
 ) -> Result<()> {
     match path.canonicalize() {
         Ok(canonical) => {
+            let metadata = fs::metadata(&canonical)
+                .map_err(|error| QuartersError::io("inspect optional filesystem policy path", &canonical, error))?;
             grants.push(ConfinementGrant {
                 path: canonical,
                 access: access.to_owned(),
                 source: source.to_owned(),
                 required: false,
+                anchor_device: metadata.dev(),
+                anchor_inode: metadata.ino(),
             });
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => omitted.push(path.to_path_buf()),
@@ -224,14 +229,161 @@ fn add_resolver_target(grants: &mut Vec<ConfinementGrant>, omitted: &mut Vec<Pat
     Ok(())
 }
 
-fn ensure_store_disjoint(space_home: &Path, grants: &[ConfinementGrant]) -> Result<()> {
-    let store = space_home
-        .parent()
-        .and_then(Path::parent)
-        .and_then(Path::parent)
-        .ok_or_else(|| QuartersError::new(ErrorKind::CorruptState, "Quarter home has no store root"))?
+fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<ConfinementGrant>) -> Result<()> {
+    if request.user_grants.len() > MAX_USER_GRANTS {
+        return Err(QuartersError::new(
+            ErrorKind::ResourceLimit,
+            format!("filesystem confinement accepts at most {MAX_USER_GRANTS} user grants"),
+        ));
+    }
+    let reserved = reserved_paths(request)?;
+    for requested in request.user_grants {
+        if !requested.path.is_absolute() {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--grant-path requires an existing absolute path",
+            ));
+        }
+        let canonical = requested
+            .path
+            .canonicalize()
+            .map_err(|error| QuartersError::io("resolve user-granted path", &requested.path, error))?;
+        reject_reserved_grant(&canonical, &reserved)?;
+        let metadata = fs::metadata(&canonical)
+            .map_err(|error| QuartersError::io("inspect user-granted path", &canonical, error))?;
+        let access = user_access_class(requested.access, &metadata, &canonical)?;
+        grants.push(ConfinementGrant {
+            path: canonical,
+            access: access.to_owned(),
+            source: "user-granted".to_owned(),
+            required: true,
+            anchor_device: metadata.dev(),
+            anchor_inode: metadata.ino(),
+        });
+    }
+    Ok(())
+}
+
+fn user_access_class(access: UserGrantAccess, metadata: &fs::Metadata, path: &Path) -> Result<&'static str> {
+    match (metadata.is_dir(), metadata.is_file(), access) {
+        (true, _, UserGrantAccess::ReadOnly) => Ok("data-read"),
+        (true, _, UserGrantAccess::ReadWrite) => Ok("data-read-write"),
+        (_, true, UserGrantAccess::ReadOnly) => Ok("data-read-file"),
+        (_, true, UserGrantAccess::ReadWrite) => Ok("data-read-write-file"),
+        _ => Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            format!(
+                "user-granted path is not a regular file or directory: {}",
+                path.display()
+            ),
+        )),
+    }
+}
+
+fn reserved_paths(request: &ConfinementRequest<'_>) -> Result<Vec<PathBuf>> {
+    let mut reserved = Vec::new();
+    for (path, operation) in [
+        (request.store_root, "resolve the Quarters store root"),
+        (request.runtime, "resolve the Quarter runtime"),
+        (request.current_executable, "resolve the running Quarters executable"),
+    ] {
+        reserved.push(
+            path.canonicalize()
+                .map_err(|error| QuartersError::io(operation, path, error))?,
+        );
+    }
+    let user = nix::unistd::User::from_uid(Uid::current())
+        .map_err(|error| {
+            QuartersError::new(ErrorKind::System, "could not resolve the current account").with_source(error)
+        })?
+        .ok_or_else(|| QuartersError::new(ErrorKind::Unsupported, "the current account has no passwd record"))?;
+    let passwd_home = user
+        .dir
         .canonicalize()
-        .map_err(|error| QuartersError::io("resolve confinement store root", space_home, error))?;
+        .map_err(|error| QuartersError::io("resolve the current account home", &user.dir, error))?;
+    for name in [".ssh", ".gnupg"] {
+        let lexical = passwd_home.join(name);
+        reserved.push(lexical.canonicalize().unwrap_or_else(|_error| lexical.clone()));
+        reserved.push(lexical);
+    }
+    if request.home_view {
+        reserved.push(passwd_home);
+    }
+    Ok(reserved)
+}
+
+fn reject_reserved_grant(grant: &Path, reserved: &[PathBuf]) -> Result<()> {
+    if reserved.iter().all(|path| !paths_overlap(grant, path)) {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        "user grant overlaps Quarters management, runtime, executable, credential, or home-view state",
+    )
+    .with_hint("select a narrower data path outside the reported protected roots"))
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left.starts_with(right) || right.starts_with(left)
+}
+
+fn resolve_working_directory(request: &ConfinementRequest<'_>, grants: &[ConfinementGrant]) -> Result<PathBuf> {
+    let effective = request.effective_home.canonicalize().map_err(|error| {
+        QuartersError::io(
+            "resolve confinement default working directory",
+            request.effective_home,
+            error,
+        )
+    })?;
+    let Some(requested) = request.working_directory else {
+        return Ok(effective);
+    };
+    if !requested.is_absolute() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--workdir requires an existing absolute directory",
+        ));
+    }
+    let canonical = requested
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve requested working directory", requested, error))?;
+    if !canonical.is_dir() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--workdir must identify an existing directory",
+        ));
+    }
+    let space = request
+        .space_home
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve Quarter home for working directory", request.space_home, error))?;
+    if canonical.starts_with(&space) {
+        let relative = canonical.strip_prefix(&space).unwrap_or(Path::new(""));
+        return Ok(if request.home_view {
+            effective.join(relative)
+        } else {
+            canonical
+        });
+    }
+    let data_granted = grants.iter().any(|grant| {
+        grant.source == "user-granted"
+            && matches!(grant.access.as_str(), "data-read" | "data-read-write")
+            && canonical.starts_with(&grant.path)
+    });
+    if data_granted {
+        return Ok(canonical);
+    }
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        "a confined --workdir outside the Quarter home requires an explicit data grant",
+    )
+    .with_hint("repeat --grant-path for the working directory with :ro or :rw"))
+}
+
+fn ensure_store_disjoint(store_root: &Path, space_home: &Path, grants: &[ConfinementGrant]) -> Result<()> {
+    let store = store_root
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve confinement store root", store_root, error))?;
     let home = space_home
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve confinement Quarter home", space_home, error))?;
@@ -329,8 +481,8 @@ fn resolve_name(program: &OsStr, search_path: &OsStr) -> Result<PathBuf> {
     .with_hint("install it inside the Quarter or choose a system command"))
 }
 
-fn limitations() -> Vec<String> {
-    [
+fn limitations(has_user_grants: bool) -> Vec<String> {
+    let mut items = vec![
         "known-path metadata, stat, readlink, access checks and O_PATH remain observable",
         "the policy grants /proc for compatibility; process visibility also depends on kernel ptrace policy",
         "network, IPC and device isolation are not provided",
@@ -338,10 +490,40 @@ fn limitations() -> Vec<String> {
         "no_new_privs disables set-id elevation such as ordinary sudo",
         "same-UID unconfined processes retain their normal access to Quarter state",
         "/sys and /dev/shm are omitted, which can affect topology probes and multiprocessing",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect()
+    ];
+    if has_user_grants {
+        items.push(
+            "user-granted host paths are exposed to the confined process tree; Quarters does not inspect their content",
+        );
+    }
+    items.into_iter().map(str::to_owned).collect()
+}
+
+fn legacy_tiocsti_status() -> crate::platform::CapabilityStatus {
+    let path = Path::new("/proc/sys/dev/tty/legacy_tiocsti");
+    let value = fs::read_to_string(path);
+    match value.as_deref().map(str::trim) {
+        Ok("0") => crate::platform::CapabilityStatus {
+            available: true,
+            status: "disabled".to_owned(),
+            detail: "dev.tty.legacy_tiocsti is 0; legacy TIOCSTI injection is disabled".to_owned(),
+        },
+        Ok("1") => crate::platform::CapabilityStatus {
+            available: true,
+            status: "enabled".to_owned(),
+            detail: "dev.tty.legacy_tiocsti is 1; Landlock ABI 3 does not mediate this terminal ioctl".to_owned(),
+        },
+        Ok(_) => crate::platform::CapabilityStatus {
+            available: false,
+            status: "unknown".to_owned(),
+            detail: "dev.tty.legacy_tiocsti returned an unrecognized value".to_owned(),
+        },
+        Err(error) => crate::platform::CapabilityStatus {
+            available: false,
+            status: "unavailable".to_owned(),
+            detail: format!("dev.tty.legacy_tiocsti could not be read: {error}"),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -365,6 +547,8 @@ mod tests {
             access: "read-execute".to_owned(),
             source: "system-executable-root".to_owned(),
             required: false,
+            anchor_device: 0,
+            anchor_inode: 0,
         };
         assert!(overlaps_executable_root(
             Path::new("/opt/quarters"),
@@ -376,6 +560,8 @@ mod tests {
             access: "read".to_owned(),
             source: "system-configuration".to_owned(),
             required: true,
+            anchor_device: 0,
+            anchor_inode: 0,
         };
         assert!(overlaps_executable_root(
             Path::new("/etc/quarters"),

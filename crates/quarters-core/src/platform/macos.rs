@@ -1,6 +1,6 @@
 //! macOS profile backend.
 
-use super::{Capabilities, CapabilityStatus, ConfinementPlan, unsupported_home_view};
+use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest, unsupported_home_view};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -67,12 +67,7 @@ pub(super) fn platform_enter_home_view(_space_home: &Path, _host_home: &Path) ->
     Err(unsupported_home_view())
 }
 
-pub(super) fn platform_confinement_plan(
-    _space_home: &Path,
-    _effective_home: &Path,
-    _runtime: &Path,
-    _host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
+pub(super) fn platform_confinement_plan(_request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
     Err(unsupported_confinement())
 }
 

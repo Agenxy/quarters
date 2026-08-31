@@ -3,7 +3,7 @@
 mod paths;
 mod policy;
 
-use super::super::{CapabilityStatus, ConfinementPlan};
+use super::super::{CapabilityStatus, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, QuartersError, Result};
 use landlock::{ABI, Access, AccessFs, CompatLevel, Compatible, Ruleset, RulesetAttr};
 use std::ffi::{OsStr, OsString};
@@ -28,14 +28,9 @@ pub(super) fn capability_status() -> CapabilityStatus {
     }
 }
 
-pub(super) fn plan(
-    space_home: &Path,
-    effective_home: &Path,
-    runtime: &Path,
-    host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
+pub(super) fn plan(request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
     policy::create_ruleset()?;
-    paths::build_plan(space_home, effective_home, runtime, host_path)
+    paths::build_plan(request)
 }
 
 pub(super) fn prepare(plan: &ConfinementPlan) -> Result<PreparedConfinement> {

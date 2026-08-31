@@ -23,6 +23,11 @@ compatibility notes will be called out here.
   available in restricted contexts while shortcut mutation remains refused.
 - Keep the private Linux runtime outside both environment and passwd homes so
   an alternate `HOME` cannot place the launcher beneath a later home-view mount.
+- Add invocation-local Linux `--grant-path PATH:ro|rw` data grants and portable
+  `--workdir`; reject executable authority, reserved-state overlap and changed
+  rule-anchor identity, and report the host's legacy TIOCSTI policy.
+- Add hosted Ubuntu evidence that the distribution-default unprivileged user
+  namespace policy makes optional home-view fail closed without a sysctl override.
 
 - Add identity-bound cooperative freeze/unfreeze, immediate stationery capture
   from a current Quarter holding a cooperative lease, and explicit
