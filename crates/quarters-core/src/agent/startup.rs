@@ -15,6 +15,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+const MAXIMUM_TOTAL_STARTUP_WAIT: Duration = Duration::from_secs(10);
+const MAXIMUM_LAUNCH_ATTEMPTS: usize = 2;
 pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Result<AgentStatus> {
     store.ensure_no_rename_target(&space.manifest().name)?;
     store.ensure_no_rollback_target(&space.manifest().name)?;
@@ -30,7 +32,9 @@ pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Res
     match reservation {
         Reservation::Active(status) => Ok(status),
         Reservation::Observe(starting) => reconcile(space, &runtime, &starting),
-        Reservation::Spawned { child, starting, owner } => await_spawned(space, &runtime, child, &starting, owner),
+        Reservation::Spawned { child, starting, owner } => {
+            await_spawned(store, space, &runtime, child, starting, owner)
+        }
         Reservation::Cleanup {
             mut child,
             error,
@@ -46,12 +50,19 @@ pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Res
 
 pub(super) fn reconcile(space: &Space, runtime: &Path, starting: &AgentRecord) -> Result<AgentStatus> {
     validate_starting(starting)?;
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
+    let mut current_starting = starting.clone();
+    let absolute_deadline = Instant::now() + MAXIMUM_TOTAL_STARTUP_WAIT;
+    let mut deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
-        let observed = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid).ok();
-        let alive = process::process_is_alive(starting.pid)?;
-        if let Some(status) = reconcile_orphan(space, runtime, starting, observed, alive)? {
-            return Ok(status);
+        let observed = protocol::verified_socket_identity(&registry::socket_path(runtime), current_starting.pid).ok();
+        let alive = process::process_is_alive(current_starting.pid)?;
+        match reconcile_orphan(space, runtime, &current_starting, observed, alive)? {
+            ReconcileStep::Ready(status) => return Ok(status),
+            ReconcileStep::Follow(replacement) => {
+                current_starting = replacement;
+                deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
+            }
+            ReconcileStep::Pending => {}
         }
         if Instant::now() >= deadline {
             return Err(QuartersError::new(
@@ -70,22 +81,25 @@ fn reconcile_orphan(
     starting: &AgentRecord,
     observed: Option<protocol::SocketIdentity>,
     alive: bool,
-) -> Result<Option<AgentStatus>> {
+) -> Result<ReconcileStep> {
     let _lock = agent_lock(runtime)?;
     let record = registry::read(runtime, space)?.ok_or_else(missing_registry)?;
-    if same_activation(&record, starting) {
+    if record.state == StoredAgentState::Active {
         let current = inspect_at(space, runtime)?;
-        return if current.state == AgentState::Active && current.pid == Some(starting.pid) {
-            Ok(Some(current))
+        return if current.state == AgentState::Active && current.pid == Some(record.pid) {
+            Ok(ReconcileStep::Ready(current))
         } else {
-            Ok(None)
+            Ok(ReconcileStep::Pending)
         };
+    }
+    if record.state == StoredAgentState::Starting && record != *starting {
+        return Ok(ReconcileStep::Follow(record));
     }
     if record != *starting {
         return Err(changed_startup_error());
     }
     let Some(_orphan_guard) = orphan_startup_guard(runtime)? else {
-        return Ok(None);
+        return Ok(ReconcileStep::Pending);
     };
     if let Some(observed) = observed {
         let verified = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid)?;
@@ -100,12 +114,12 @@ fn reconcile_orphan(
         active.socket_inode = Some(verified.inode);
         active.socket_device = Some(verified.device);
         registry::replace(runtime, starting, &active)?;
-        return inspect_at(space, runtime).map(Some);
+        return inspect_at(space, runtime).map(ReconcileStep::Ready);
     }
     if alive {
-        return Ok(None);
+        return Ok(ReconcileStep::Pending);
     }
-    recover_inactive_record(space, runtime, starting).map(Some)
+    recover_inactive_record(space, runtime, starting).map(ReconcileStep::Ready)
 }
 
 fn reserve(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> {
@@ -125,7 +139,20 @@ fn reserve(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> 
             recover_inactive_record(space, runtime, &record)?;
         }
         AgentState::Unset => {}
-        AgentState::Stopping | AgentState::Failed | AgentState::Stale => {
+        AgentState::Stale => {
+            if let Some(record) = registry::read(runtime, space)?
+                && record.state == StoredAgentState::Starting
+                && orphan_startup_guard(runtime)?.is_none()
+            {
+                return Ok(Reservation::Observe(record));
+            }
+            return Err(QuartersError::new(
+                ErrorKind::CorruptState,
+                format!("private SSH-agent state is {}; start refused", current.state.as_str()),
+            )
+            .with_hint("run 'quarters agent status NAME' and resolve the reported state before retrying"));
+        }
+        AgentState::Stopping | AgentState::Failed => {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 format!("private SSH-agent state is {}; start refused", current.state.as_str()),
@@ -162,18 +189,20 @@ fn reserve_new(store: &Store, space: &Space, runtime: &Path) -> Result<Reservati
 }
 
 fn await_spawned(
+    store: &Store,
     space: &Space,
     runtime: &Path,
     mut child: Child,
-    starting: &AgentRecord,
+    mut starting: AgentRecord,
     _owner: File,
 ) -> Result<AgentStatus> {
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
+    let mut attempts = 1_usize;
+    let mut deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
         if let Ok(identity) = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid) {
-            return match commit_activation(space, runtime, starting, identity) {
+            return match commit_activation(space, runtime, &starting, identity) {
                 Ok(status) => Ok(status),
-                Err(error) => abort_spawned(space, runtime, &mut child, starting, error),
+                Err(error) => abort_spawned(space, runtime, &mut child, &starting, error),
             };
         }
         if child
@@ -183,10 +212,32 @@ fn await_spawned(
             })?
             .is_some()
         {
-            match commit_failure(space, runtime, starting, AgentFailure::LaunchExited) {
+            if attempts < MAXIMUM_LAUNCH_ATTEMPTS {
+                cleanup_exited_socket(runtime)?;
+                match retry_exited_launch(store, space, runtime, &starting) {
+                    Ok(RetryLaunch::Active(status)) => return Ok(status),
+                    Ok(RetryLaunch::Spawned(replacement_child, replacement_starting)) => {
+                        child = replacement_child;
+                        starting = replacement_starting;
+                        attempts += 1;
+                        deadline = Instant::now() + STARTUP_TIMEOUT;
+                        continue;
+                    }
+                    Err(error) => {
+                        return match commit_failure(space, runtime, &starting, AgentFailure::LaunchExited) {
+                            Ok(Some(active)) => Ok(active),
+                            Ok(None) => Err(error),
+                            Err(failure) => Err(error.with_hint(format!(
+                                "replacement launch failed and its ownership record could not be finalized: {failure}"
+                            ))),
+                        };
+                    }
+                }
+            }
+            match commit_failure(space, runtime, &starting, AgentFailure::LaunchExited) {
                 Ok(Some(active)) => return Ok(active),
                 Ok(None) => {}
-                Err(error) => return abort_spawned(space, runtime, &mut child, starting, error),
+                Err(error) => return abort_spawned(space, runtime, &mut child, &starting, error),
             }
             return Err(QuartersError::new(
                 ErrorKind::System,
@@ -194,10 +245,10 @@ fn await_spawned(
             ));
         }
         if Instant::now() >= deadline {
-            match commit_failure(space, runtime, starting, AgentFailure::StartupTimeout) {
+            match commit_failure(space, runtime, &starting, AgentFailure::StartupTimeout) {
                 Ok(Some(active)) => return Ok(active),
                 Ok(None) => {}
-                Err(error) => return abort_spawned(space, runtime, &mut child, starting, error),
+                Err(error) => return abort_spawned(space, runtime, &mut child, &starting, error),
             }
             let cleanup = cleanup_spawned_child(runtime, &mut child);
             if let Err(error) = cleanup {
@@ -210,6 +261,42 @@ fn await_spawned(
         }
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn retry_exited_launch(store: &Store, space: &Space, runtime: &Path, starting: &AgentRecord) -> Result<RetryLaunch> {
+    let token = generate_token()?;
+    let created_unix_ms = epoch_millis()?;
+    let _lock = agent_lock(runtime)?;
+    let current = inspect_at(space, runtime)?;
+    if current.state == AgentState::Active && current.pid == Some(starting.pid) {
+        return Ok(RetryLaunch::Active(current));
+    }
+    let record = registry::read(runtime, space)?.ok_or_else(missing_registry)?;
+    if record != *starting {
+        return Err(changed_startup_error());
+    }
+    let mut child = process::spawn_helper(store, space, &token)?;
+    let replacement = AgentRecord {
+        schema_version: REGISTRY_SCHEMA_VERSION,
+        state: StoredAgentState::Starting,
+        space_id: starting.space_id.clone(),
+        token,
+        pid: child.id(),
+        created_unix_ms,
+        socket_inode: None,
+        socket_device: None,
+        failure: None,
+    };
+    if let Err(error) = registry::replace(runtime, starting, &replacement) {
+        if registry::read(runtime, space)?.as_ref() == Some(&replacement) {
+            return Ok(RetryLaunch::Spawned(child, replacement));
+        }
+        if let Err(cleanup) = cleanup_spawned_child(runtime, &mut child) {
+            return Err(error.with_hint(format!("replacement launcher cleanup also failed: {cleanup}")));
+        }
+        return Err(error);
+    }
+    Ok(RetryLaunch::Spawned(child, replacement))
 }
 
 fn abort_spawned(
@@ -362,6 +449,14 @@ fn cleanup_spawned_child(runtime: &Path, child: &mut Child) -> Result<()> {
     Ok(())
 }
 
+fn cleanup_exited_socket(runtime: &Path) -> Result<()> {
+    let socket = registry::socket_path(runtime);
+    let Some(identity) = protocol::existing_socket_identity(&socket)? else {
+        return Ok(());
+    };
+    process::remove_matching_socket(&socket, identity.device, identity.inode)
+}
+
 fn generate_token() -> Result<String> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut random = [0_u8; 16];
@@ -417,4 +512,15 @@ enum Reservation {
         error: QuartersError,
         owner: File,
     },
+}
+
+enum ReconcileStep {
+    Ready(AgentStatus),
+    Follow(AgentRecord),
+    Pending,
+}
+
+enum RetryLaunch {
+    Active(AgentStatus),
+    Spawned(Child, AgentRecord),
 }

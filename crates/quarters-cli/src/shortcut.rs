@@ -9,7 +9,15 @@ use std::path::{Path, PathBuf};
 
 const PARENT_SHELL_LIMITATION: &str =
     "a child process cannot inspect transient aliases or functions in its parent shell";
-type ShortcutIdentity = (u64, u64);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ShortcutIdentity {
+    device: u64,
+    inode: u64,
+    change_seconds: i64,
+    change_nanoseconds: i64,
+}
+
 type EntryInspection = (ShortcutState, Option<PathBuf>, Option<ShortcutIdentity>);
 
 /// Shortcut operation used by presentation code.
@@ -83,8 +91,7 @@ pub(crate) struct ShortcutReport {
     pub(crate) entry: Option<PathBuf>,
     /// Current symlink target, if the entry is a symlink.
     pub(crate) link_target: Option<PathBuf>,
-    entry_device: Option<u64>,
-    entry_inode: Option<u64>,
+    entry_identity: Option<ShortcutIdentity>,
     /// Every executable match for the shortcut in PATH order.
     pub(crate) shortcut_matches: Vec<PathBuf>,
     /// Every executable `quarters` match in PATH order.
@@ -175,9 +182,10 @@ fn remove(arguments: &ShortcutTargetArgs) -> Result<ShortcutReport> {
         .link_target
         .as_deref()
         .ok_or_else(|| collision_error(&report, "remove"))?;
-    let device = report.entry_device.ok_or_else(|| collision_error(&report, "remove"))?;
-    let inode = report.entry_inode.ok_or_else(|| collision_error(&report, "remove"))?;
-    remove_exact_shortcut(directory, entry, target, device, inode)?;
+    let identity = report
+        .entry_identity
+        .ok_or_else(|| collision_error(&report, "remove"))?;
+    remove_exact_shortcut(directory, entry, target, identity)?;
     sync_directory(directory).map_err(|error| {
         error.with_hint(format!(
             "shortcut '{}' was removed, but directory durability could not be confirmed; inspect it before retrying",
@@ -215,8 +223,7 @@ fn inspect(arguments: &ShortcutTargetArgs) -> Result<ShortcutReport> {
         directory: Some(directory),
         entry: Some(entry),
         link_target,
-        entry_device: identity.map(|value| value.0),
-        entry_inode: identity.map(|value| value.1),
+        entry_identity: identity,
         shortcut_matches,
         quarters_matches,
         parent_shell_check: format!("type -a {name}"),
@@ -234,7 +241,7 @@ fn inspect_entry(entry: &Path, directory: &Path, desired: Option<&Path>) -> Resu
         Err(error) => return Err(QuartersError::io("inspect shortcut entry", entry, error)),
     };
     if !metadata.file_type().is_symlink() {
-        return Ok((ShortcutState::Collision, None, Some((metadata.dev(), metadata.ino()))));
+        return Ok((ShortcutState::Collision, None, None));
     }
     let target = fs::read_link(entry).map_err(|error| QuartersError::io("read shortcut link", entry, error))?;
     let state = if desired == Some(target.as_path()) {
@@ -247,12 +254,12 @@ fn inspect_entry(entry: &Path, directory: &Path, desired: Option<&Path>) -> Resu
         ShortcutState::Collision
     };
     let identity = nix::sys::stat::lstat(entry)
-        .ok()
-        .map(|status| (normalized_device(status.st_dev), status.st_ino));
-    Ok((state, Some(target), identity))
+        .map(|status| shortcut_stat_identity(&status))
+        .map_err(|error| QuartersError::io("reinspect shortcut identity", entry, std::io::Error::from(error)))?;
+    Ok((state, Some(target), Some(identity)))
 }
 
-fn remove_exact_shortcut(directory: &Path, entry: &Path, target: &Path, device: u64, inode: u64) -> Result<()> {
+fn remove_exact_shortcut(directory: &Path, entry: &Path, target: &Path, identity: ShortcutIdentity) -> Result<()> {
     let name = entry
         .file_name()
         .ok_or_else(|| QuartersError::new(ErrorKind::InvalidInput, "shortcut entry has no file name"))?;
@@ -263,10 +270,7 @@ fn remove_exact_shortcut(directory: &Path, entry: &Path, target: &Path, device: 
     let actual = nix::fcntl::readlinkat(&directory_file, name)
         .map(PathBuf::from)
         .map_err(|error| QuartersError::io("reinspect shortcut target", entry, std::io::Error::from(error)))?;
-    if link_type != nix::sys::stat::SFlag::S_IFLNK
-        || normalized_device(metadata.st_dev) != device
-        || metadata.st_ino != inode
-        || actual != target
+    if link_type != nix::sys::stat::SFlag::S_IFLNK || shortcut_stat_identity(&metadata) != identity || actual != target
     {
         return Err(QuartersError::new(
             ErrorKind::CorruptState,
@@ -275,6 +279,15 @@ fn remove_exact_shortcut(directory: &Path, entry: &Path, target: &Path, device: 
     }
     nix::unistd::unlinkat(&directory_file, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
         .map_err(|error| QuartersError::io("remove shortcut", entry, std::io::Error::from(error)))
+}
+
+fn shortcut_stat_identity(metadata: &nix::libc::stat) -> ShortcutIdentity {
+    ShortcutIdentity {
+        device: normalized_device(metadata.st_dev),
+        inode: metadata.st_ino,
+        change_seconds: metadata.st_ctime,
+        change_nanoseconds: metadata.st_ctime_nsec,
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -579,8 +592,7 @@ fn unavailable_report(name: &str, error: &QuartersError) -> ShortcutReport {
         directory: None,
         entry: None,
         link_target: None,
-        entry_device: None,
-        entry_inode: None,
+        entry_identity: None,
         shortcut_matches: Vec::new(),
         quarters_matches: executable_matches("quarters"),
         directory_on_path: false,
@@ -602,7 +614,7 @@ fn missing_directory_error() -> QuartersError {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
     fn shortcut_names_are_path_safe() {
@@ -633,20 +645,12 @@ mod tests {
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("protect directory");
         let entry = directory.join("q");
         symlink("quarters", &entry).expect("create managed shortcut");
-        let metadata = fs::symlink_metadata(&entry).expect("inspect shortcut");
+        let metadata = nix::sys::stat::lstat(&entry).expect("inspect shortcut");
+        let identity = shortcut_stat_identity(&metadata);
         fs::remove_file(&entry).expect("remove original shortcut");
         fs::write(&entry, b"replacement").expect("create replacement");
 
-        assert!(
-            remove_exact_shortcut(
-                &directory,
-                &entry,
-                Path::new("quarters"),
-                metadata.dev(),
-                metadata.ino()
-            )
-            .is_err()
-        );
+        assert!(remove_exact_shortcut(&directory, &entry, Path::new("quarters"), identity).is_err());
         assert_eq!(fs::read(&entry).expect("replacement retained"), b"replacement");
     }
 
@@ -659,19 +663,14 @@ mod tests {
         let entry = directory.join("q");
         symlink("quarters", &entry).expect("create managed shortcut");
         let metadata = nix::sys::stat::lstat(&entry).expect("inspect shortcut");
+        let identity = shortcut_stat_identity(&metadata);
         fs::remove_file(&entry).expect("remove original shortcut");
+        std::thread::sleep(std::time::Duration::from_millis(10));
         symlink("quarters", &entry).expect("create replacement shortcut");
+        let replacement = nix::sys::stat::lstat(&entry).expect("inspect replacement shortcut");
+        assert_ne!(identity, shortcut_stat_identity(&replacement));
 
-        assert!(
-            remove_exact_shortcut(
-                &directory,
-                &entry,
-                Path::new("quarters"),
-                normalized_device(metadata.st_dev),
-                metadata.st_ino
-            )
-            .is_err()
-        );
+        assert!(remove_exact_shortcut(&directory, &entry, Path::new("quarters"), identity).is_err());
         assert_eq!(
             fs::read_link(&entry).expect("replacement retained"),
             Path::new("quarters")

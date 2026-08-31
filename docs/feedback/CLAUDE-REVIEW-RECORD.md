@@ -576,3 +576,27 @@ ceilings. It again returned `VERDICT: SHIP P0`. The complete local gate passed
 rustdoc, formatting and structural ceilings. Dependency advisory, licence and
 source policy also passed; the approved transitive `syn` 2/3 duplication is the
 only `cargo deny` warning. Hosted Linux and macOS results remain required.
+
+### First hosted run and repair
+
+GitHub Actions run `33136834820` supplied the missing host evidence and failed
+usefully. Ubuntu and static-musl tests reproduced immediate shortcut inode reuse;
+macOS reproduced one pre-readiness OpenSSH-agent exit during repeated six-caller
+startup. The implementation was not accepted on the earlier source review alone.
+
+Shortcut removal now compares a symmetric platform-normalized device, inode,
+target and change timestamp while documenting that a matching tuple and the
+final check/unlink race remain inside the same-UID boundary. Agent startup keeps
+one owner lease across one bounded replacement generation, publishes the fresh
+token and PID atomically while already holding the lifecycle lock, lets observers
+follow only a validated replacement, and caps all followed generations at ten
+seconds. A debug-only, private-runtime fault marker forces the first launcher to
+exit; separate 20-round tests cover both injected and ordinary six-caller starts.
+
+Opus first returned `VERDICT: REVISE P0 REPAIR` with four blockers: release-only
+unused import failure, an overclaim about change-time discrimination, a retry
+spawn/deadline inversion and asymmetric macOS device normalization. All four
+were corrected. Its complete re-review returned `VERDICT: SHIP P0 REPAIR`; the
+three remaining nonblocking observations were then closed. The final delta-only
+pass again returned `VERDICT: SHIP P0 REPAIR` with no blockers. Claude remained
+read-only and did not execute compiler gates.

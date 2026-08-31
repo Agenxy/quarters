@@ -7,6 +7,8 @@ use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use std::fs;
+#[cfg(debug_assertions)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -50,6 +52,10 @@ pub(super) fn run_helper(host: &HostEnvironment, space: &Space, token: &str) -> 
     validate_socket_path(&socket)?;
     let pid = std::process::id();
     wait_for_ownership(&runtime, space, token, pid)?;
+    #[cfg(debug_assertions)]
+    if inject_one_test_exit(&runtime)? {
+        return Ok(75);
+    }
     validate_agent_executable(Path::new(SSH_AGENT))?;
     let mut command = Command::new(SSH_AGENT);
     command
@@ -64,6 +70,25 @@ pub(super) fn run_helper(host: &HostEnvironment, space: &Space, token: &str) -> 
         "could not replace the launcher with the OpenSSH agent",
     )
     .with_source(error))
+}
+
+#[cfg(debug_assertions)]
+fn inject_one_test_exit(runtime: &Path) -> Result<bool> {
+    if std::env::var_os("QUARTERS_TEST_AGENT_EXIT_ONCE").as_deref() != Some(std::ffi::OsStr::new("1")) {
+        return Ok(false);
+    }
+    let marker = runtime.join(".test-agent-exit-once");
+    let mut options = fs::OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_CLOEXEC | nix::libc::O_NOFOLLOW);
+    match options.open(&marker) {
+        Ok(_file) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(QuartersError::io("create private-agent test marker", &marker, error)),
+    }
 }
 
 pub(super) fn process_is_alive(pid: u32) -> Result<bool> {

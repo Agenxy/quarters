@@ -48,6 +48,12 @@ lock; observers retake it briefly before any recovery publication. Shutdown
 remains separately serialized, with bounded protocol checks and a three-second
 process-exit deadline.
 
+One launcher that exits before protocol readiness receives one bounded retry.
+The owner keeps its lease, removes only the exact leftover socket, and atomically
+replaces the old `starting` reservation with a fresh token and PID. Observers
+follow that validated replacement rather than treating it as corruption. A
+second exit remains a recorded failure; retry is not unbounded.
+
 Orphan observers serialize through the lifecycle lock before probing the
 startup-owner lease. Owner-lease acquisition is always nonblocking, which
 prevents a wait cycle even while the startup owner later retakes the lifecycle
