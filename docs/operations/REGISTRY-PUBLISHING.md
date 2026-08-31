@@ -12,7 +12,7 @@ PyPI supports a pending trusted publisher for a new project. Configure project
 environment `pypi`, then dispatch the workflow with `publish` enabled.
 
 npm requires a package to exist before its trusted publisher can be configured.
-The first versions of `quarters-cli` and its three architecture packages must
+The first versions of `quarters-cli` and its four architecture packages must
 therefore be published with npm's interactive web login and hardware-backed
 two-factor check. Publish the tested native packages first and the launcher
 last, always with the `alpha` distribution tag. Then configure each package to
@@ -44,7 +44,7 @@ notarization path exists.
 
 Before publishing a version:
 
-1. Keep the Cargo workspace and all four npm manifests on the same SemVer.
+1. Keep the Cargo workspace and all five npm manifests on the same SemVer.
 2. Run `make check`, `make dependencies` and both distribution workflows in
    build-only mode.
 3. Install and exercise the wheel and the npm launcher with a matching native
@@ -57,7 +57,10 @@ Before publishing a version:
    is a separate, explicit workflow dispatch with `publish` enabled.
 7. Update and verify the separate Homebrew tap from the immutable GitHub tag.
 
-The npm registry has no transaction spanning four packages. The workflow
+The npm registry has no transaction spanning five packages. The workflow
 dry-runs every tarball before its first write, publishes native packages before
 the launcher that depends on them, and stops on the first failure. A partial
 publication requires a version increment; published versions are never reused.
+After prerelease verification, move both `alpha` and `latest` to the accepted
+launcher version. Bare `npm install quarters-cli` is part of the public
+clean-install gate and must not remain pinned to an older alpha.

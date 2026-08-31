@@ -127,10 +127,10 @@ cargo install --locked --version 0.1.0-alpha.2 quarters
 npm install --global quarters-cli@alpha
 ```
 
-The npm package selects native builds for macOS arm64, macOS x64 and Linux x64.
-Linux arm64 is not yet published through npm, which rejects that target
-directly. PyPI publication is not yet available and is not advertised as an
-install path.
+Alpha 4 adds native npm builds for macOS arm64, macOS x64, Linux arm64 and
+Linux x64. Linux arm64 is absent from the public Alpha 2 package because the
+earlier Quarters workflow did not build it; npm supports the target. PyPI
+publication is not yet available and is not advertised as an install path.
 
 ## Commands
 

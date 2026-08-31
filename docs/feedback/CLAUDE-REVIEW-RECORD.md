@@ -829,3 +829,35 @@ issue and returned:
 Fresh hosted Ubuntu and static-musl execution remain mandatory for the repaired
 checkpoint; the prior successful Ubuntu gate does not substitute for that
 rerun.
+
+## Remaining-program architecture, 2026-08-31
+
+Claude Code used Claude Opus 5 at maximum effort in three read-only passes over
+the complete post-Alpha-4 program. The first pass returned `VERDICT: REVISE`.
+It rejected physical store migration while released Alpha 1 and Alpha 2 readers
+can ignore the marker, rejected an encryption capability whose online lock
+cannot be guaranteed, and found no supportable macOS confinement backend under
+the project's public-API and distribution constraints. It also required Linux
+workspace grants to remain data-only, default-Ubuntu user-namespace evidence,
+truthful Linux arm64 registry documentation, a discovery privacy contract,
+TIOCSTI reporting and macOS refusal tests.
+
+The second pass found that fresh dotted stores have the same old-reader hazard
+as migrated stores, that the unreleased dotted-store error promised a migration
+release no longer scheduled, and that cross-platform grant flags needed an
+explicit macOS contract. The plan now gates every dotted writer and physical
+migration until incompatible readers can be prevented from mutating the shared
+store, corrects the Alpha 4 error before publication, refuses Linux-only grants
+on macOS and keeps portable working-directory selection separate from access
+authority.
+
+The third pass re-read the revised plan and current diff, confirmed that all
+high and medium blockers were closed, and returned:
+
+> VERDICT: APPROVE
+
+The accepted order completes four-target npm and PyPI distribution before new
+capabilities, then implements invocation-local Linux data grants, default-policy
+CI evidence, storage-contract cleanup and privacy-bounded CLI discovery.
+Seatbelt, App Sandbox, idmapped mounts, per-space encryption and LaunchServices
+GUI capture are not represented as weaker features under stronger names.
