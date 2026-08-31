@@ -28,6 +28,9 @@ jobs:
           - runner: ubuntu-24.04
             package: linux-x64
             target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            package: linux-arm64
+            target: aarch64-unknown-linux-musl
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out source
@@ -106,10 +109,60 @@ jobs:
           name: npm-launcher
           path: npm-dist/*.tgz
 
+  install-smoke:
+    name: Installed npm smoke (${{ matrix.package }})
+    needs:
+      - launcher
+      - native
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            package: darwin-arm64
+          - runner: macos-15-intel
+            package: darwin-x64
+          - runner: ubuntu-24.04
+            package: linux-x64
+          - runner: ubuntu-24.04-arm
+            package: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.2.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - name: Download native package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-${{ matrix.package }}
+          path: npm-smoke
+      - name: Download launcher package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-launcher
+          path: npm-smoke
+      - name: Install and exercise packaged command
+        env:
+          NATIVE_PACKAGE: ${{ matrix.package }}
+        run: |
+          prefix="$RUNNER_TEMP/quarters-npm-prefix"
+          store="$RUNNER_TEMP/quarters-npm-store"
+          npm install --global --prefix "$prefix" \
+            ./npm-smoke/quarters-cli-${NATIVE_PACKAGE}-*.tgz \
+            ./npm-smoke/quarters-cli-[0-9]*.tgz
+          export PATH="$prefix/bin:$PATH"
+          quarters --version
+          QUARTERS_ROOT="$store" quarters create smoke
+          QUARTERS_ROOT="$store" quarters exec smoke -- /bin/sh -c 'test "$QUARTERS_SPACE" = smoke'
+
   publish:
     name: Publish to npm
     if: inputs.publish
     needs:
+      - install-smoke
       - launcher
       - native
     runs-on: ubuntu-24.04
@@ -139,6 +192,7 @@ jobs:
         run: |
           npm publish npm-dist/quarters-cli-darwin-arm64-*.tgz --access public --tag alpha --provenance
           npm publish npm-dist/quarters-cli-darwin-x64-*.tgz --access public --tag alpha --provenance
+          npm publish npm-dist/quarters-cli-linux-arm64-*.tgz --access public --tag alpha --provenance
           npm publish npm-dist/quarters-cli-linux-x64-*.tgz --access public --tag alpha --provenance
       - name: Publish launcher package
         run: npm publish npm-dist/quarters-cli-[0-9]*.tgz --access public --tag alpha --provenance

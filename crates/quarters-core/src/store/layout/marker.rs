@@ -267,7 +267,7 @@ pub(super) fn dotted_read_only_error() -> QuartersError {
         ErrorKind::Unsupported,
         "this Quarters build opens dotted-format stores for inspection only",
     )
-    .with_hint("use a migration-capable Quarters release for mutations; do not create visible store directories")
+    .with_hint("no released Quarters version currently mutates dotted stores; do not create visible store directories")
 }
 
 fn read_marker(root: &Path) -> Result<Option<RootFormat>> {
@@ -663,7 +663,7 @@ fn reject_active_migration(root: &Path) -> Result<()> {
             ErrorKind::SpaceActive,
             "the store has an active root-format migration marker",
         )
-        .with_hint("use the migration-capable Quarters release that created this marker")),
+        .with_hint("run 'quarters doctor' to inspect this unsupported marker; do not remove it by hand")),
         Err(error) => Err(QuartersError::io("inspect root-format migration marker", &path, error)),
     }
 }

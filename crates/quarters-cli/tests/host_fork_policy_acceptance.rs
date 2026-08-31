@@ -105,27 +105,35 @@ fn a_source_change_after_staging_leaves_no_destination_or_staging() -> Result<()
     let temporary = TempDir::new()?;
     let home = protected_home(&temporary)?;
     let store = temporary.path().join("store");
+    let padding = (0..7).map(|index| format!("aa-padding-{index}")).collect::<Vec<_>>();
+    for path in &padding {
+        File::create(home.join(path))?.set_len(MIB)?;
+    }
     let source = home.join("zz-large");
     File::create(&source)?.set_len(MIB)?;
-    let preview = preview(&store, &home, "raced", &["zz-large"])?;
+    let mut selected = padding.iter().map(String::as_str).collect::<Vec<_>>();
+    selected.push("zz-large");
+    let preview = preview(&store, &home, "raced", &selected)?;
     let preview: Value = serde_json::from_slice(&preview.stdout)?;
     let digest = preview["result"]["plan_digest"].as_str().ok_or("missing digest")?;
 
-    let mut child = quarters(&store)
-        .env("HOME", &home)
-        .args([
-            "create",
-            "raced",
-            "--shell",
-            "/bin/sh",
-            "--from-host",
-            "shell",
-            "--from-host-path",
-            "zz-large",
-            "--confirm-plan",
-            digest,
-        ])
-        .spawn()?;
+    let mut child = quarters(&store);
+    child.env("HOME", &home).args([
+        "create",
+        "raced",
+        "--shell",
+        "/bin/sh",
+        "--from-host",
+        "shell",
+        "--from-host-path",
+        "zz-large",
+        "--confirm-plan",
+        digest,
+    ]);
+    for path in &padding {
+        child.arg("--from-host-path").arg(path);
+    }
+    let mut child = child.spawn()?;
     wait_for_staging(&store)?;
     let file = OpenOptions::new().write(true).open(&source)?;
     file.set_len(12)?;
