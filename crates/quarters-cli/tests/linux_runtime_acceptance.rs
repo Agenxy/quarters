@@ -74,8 +74,8 @@ cat "$HOME/known-host-link" >/dev/null 2>&1 && exit 16
 cat "$2" >/dev/null 2>&1 && exit 17
 cat "$3/sibling-secret" >/dev/null 2>&1 && exit 18
 ls "$4" >/dev/null 2>&1 && exit 19
-if : > "$1" 2>/dev/null; then exit 20; fi
-if : > "/tmp/quarters-landlock-denied-$$" 2>/dev/null; then exit 21; fi
+if ( : > "$1" ) 2>/dev/null; then exit 20; fi
+if ( : > "/tmp/quarters-landlock-denied-$$" ) 2>/dev/null; then exit 21; fi
 test "$(quarters current)" = confined || exit 22
 quarters doctor >/dev/null 2>&1; test $? -eq 6 || exit 23
 if [ "$5" = true ]; then ssh -V >/dev/null 2>&1 || exit 24; fi
