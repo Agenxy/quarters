@@ -1,5 +1,6 @@
 //! Portable working-directory and platform grant-option acceptance.
 
+#[cfg(target_os = "macos")]
 use serde_json::Value;
 use std::error::Error;
 use std::path::Path;
