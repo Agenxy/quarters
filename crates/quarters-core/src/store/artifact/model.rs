@@ -1,14 +1,16 @@
 //! Versioned artifact model and validated identifiers.
 
 use crate::{
-    CloneCounts, CloneExclusions, CloneLimits, CloneMode, ErrorKind, QuartersError, Result, Space, SpaceId,
-    SpaceLayout, SpaceName,
+    CloneCounts, CloneExclusions, CloneLimits, CloneMode, ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result,
+    STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceLayout, SpaceName, WORKSPACE_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
-pub(super) const ARTIFACT_SCHEMA_VERSION: u32 = 1;
+pub(super) const LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+pub(super) const IMPORTED_ARTIFACT_SCHEMA_VERSION: u32 = 2;
+pub(super) const LOCAL_ARTIFACT_SCHEMA_VERSION: u32 = 3;
 pub(super) const INTEGRITY_ALGORITHM: &str = "blake3-256:quarters-canonical-v1";
 
 /// Opaque 128-bit artifact identity.
@@ -156,6 +158,28 @@ pub enum ArtifactOrigin {
     User,
     /// Automatically captured before rollback.
     AutomaticRollbackRecovery,
+    /// Authenticated external bundle imported as a local creation source.
+    ImportedBundle,
+}
+
+/// Authenticated historical provenance for an imported bundle.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedBundleProvenance {
+    /// Quarters bundle format version.
+    pub format_version: u32,
+    /// Export operation identity.
+    pub export_id: ArtifactId,
+    /// Physical identity of the exported artifact.
+    pub source_artifact_id: ArtifactId,
+    /// Original artifact category.
+    pub source_artifact_kind: ArtifactKind,
+    /// Historical source identity; never interpreted as local authority.
+    pub source_identity: SourceIdentity,
+    /// Lowercase keyed-BLAKE3 bundle tag.
+    pub authenticated_tag: String,
+    /// Host family that performed the import.
+    pub import_platform: String,
 }
 
 /// Stable source identity recorded by an artifact.
@@ -186,7 +210,21 @@ impl SourceIdentity {
     /// Whether this identity names the exact stored space generation.
     #[must_use]
     pub fn matches(&self, space: &Space) -> bool {
-        *self == Self::for_space(space)
+        let current = Self::for_space(space);
+        match (&self.space_id, &current.space_id) {
+            (Some(captured), Some(opened)) => {
+                captured == opened
+                    && self.created_unix_ms == current.created_unix_ms
+                    && self.schema_version == current.schema_version
+            }
+            (None, None) => *self == current,
+            (None, Some(_)) => {
+                self.schema_version == PROFILE_SCHEMA_VERSION
+                    && self.name == current.name
+                    && self.created_unix_ms == current.created_unix_ms
+            }
+            (Some(_), None) => false,
+        }
     }
 }
 
@@ -218,6 +256,27 @@ pub struct ContentIntegrity {
     pub counts: ArtifactCounts,
 }
 
+/// Cooperative source-state evidence recorded at capture time.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceQuiescence {
+    /// Quarters held the source's exclusive lifecycle lease.
+    Inactive,
+    /// New managed activity was frozen while already-running writers remained possible.
+    FrozenActive,
+}
+
+impl SourceQuiescence {
+    /// Stable representation used by command output and provenance.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inactive => "inactive",
+            Self::FrozenActive => "frozen-active",
+        }
+    }
+}
+
 /// Strict artifact manifest schema.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -233,7 +292,8 @@ pub struct ArtifactManifest {
     /// Capture timestamp in Unix milliseconds.
     pub created_unix_ms: u128,
     /// Exact source generation.
-    pub source_identity: SourceIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_identity: Option<SourceIdentity>,
     /// Source space layout.
     pub source_layout: SpaceLayout,
     /// Host family that created the artifact.
@@ -246,13 +306,22 @@ pub struct ArtifactManifest {
     pub includes_sensitive_state: bool,
     /// User-created or automatic recovery origin.
     pub origin: ArtifactOrigin,
+    /// External authenticated provenance for schema-2 imported templates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_bundle: Option<ImportedBundleProvenance>,
+    /// Cooperative source-state evidence for schema-3 local artifacts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_quiescence: Option<SourceQuiescence>,
     /// Canonical content integrity evidence.
     pub content_integrity: ContentIntegrity,
 }
 
 impl ArtifactManifest {
     pub(super) fn validate(&self, expected_kind: ArtifactKind) -> Result<()> {
-        if self.schema_version != ARTIFACT_SCHEMA_VERSION {
+        if !matches!(
+            self.schema_version,
+            LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION | LOCAL_ARTIFACT_SCHEMA_VERSION
+        ) {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 format!("unsupported artifact schema {}", self.schema_version),
@@ -264,13 +333,13 @@ impl ArtifactManifest {
                 "artifact kind and store root differ",
             ));
         }
-        if self.created_unix_ms == 0 || self.source_identity.created_unix_ms == 0 {
+        if self.created_unix_ms == 0 {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 "artifact timestamps must be positive Unix milliseconds",
             ));
         }
-        validate_source_identity(self)?;
+        validate_source_binding(self)?;
         if !matches!(self.source_platform.as_str(), "macos" | "linux") {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
@@ -295,38 +364,90 @@ impl ArtifactManifest {
                 "automatic rollback recovery origin is valid only for snapshots",
             ));
         }
-        if self.content_integrity.algorithm != INTEGRITY_ALGORITHM {
-            return Err(QuartersError::new(
-                ErrorKind::CorruptState,
-                format!(
-                    "unsupported artifact integrity algorithm '{}'",
-                    self.content_integrity.algorithm
-                ),
-            ));
-        }
-        if !valid_digest(&self.content_integrity.digest) {
-            return Err(QuartersError::new(
-                ErrorKind::CorruptState,
-                "artifact digest is not lowercase BLAKE3-256",
-            ));
-        }
-        validate_counts(self.content_integrity.counts)?;
-        Ok(())
+        validate_imported_provenance(self)?;
+        validate_source_quiescence(self)?;
+        validate_content_integrity(&self.content_integrity)
     }
 }
 
-fn validate_source_identity(manifest: &ArtifactManifest) -> Result<()> {
-    let source = &manifest.source_identity;
-    let valid = match manifest.source_layout {
-        SpaceLayout::Profile => source.schema_version == 1 && source.space_id.is_none(),
-        SpaceLayout::Workspace => source.schema_version == 2 && source.space_id.is_some(),
+fn validate_source_binding(manifest: &ArtifactManifest) -> Result<()> {
+    if manifest.schema_version == IMPORTED_ARTIFACT_SCHEMA_VERSION {
+        if manifest.source_identity.is_none() {
+            return Ok(());
+        }
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "imported artifacts cannot bind a local source identity",
+        ));
+    }
+    let source = manifest
+        .source_identity
+        .as_ref()
+        .ok_or_else(|| QuartersError::new(ErrorKind::CorruptState, "local artifact source identity is missing"))?;
+    if valid_source_identity(source, manifest.source_layout) {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "artifact source identity and layout are inconsistent",
+    ))
+}
+
+pub(super) fn valid_source_identity(source: &SourceIdentity, layout: SpaceLayout) -> bool {
+    if source.created_unix_ms == 0 {
+        return false;
+    }
+    match layout {
+        SpaceLayout::Profile => {
+            (source.schema_version == PROFILE_SCHEMA_VERSION && source.space_id.is_none())
+                || (source.schema_version == STABLE_SCHEMA_VERSION && source.space_id.is_some())
+        }
+        SpaceLayout::Workspace => {
+            (source.schema_version == WORKSPACE_SCHEMA_VERSION || source.schema_version == STABLE_SCHEMA_VERSION)
+                && source.space_id.is_some()
+        }
+    }
+}
+
+fn validate_imported_provenance(manifest: &ArtifactManifest) -> Result<()> {
+    match (manifest.schema_version, &manifest.imported_bundle, manifest.origin) {
+        (
+            LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | LOCAL_ARTIFACT_SCHEMA_VERSION,
+            None,
+            ArtifactOrigin::User | ArtifactOrigin::AutomaticRollbackRecovery,
+        ) => Ok(()),
+        (IMPORTED_ARTIFACT_SCHEMA_VERSION, Some(provenance), ArtifactOrigin::ImportedBundle)
+            if manifest.kind == ArtifactKind::Template
+                && provenance.format_version == 1
+                && valid_source_identity(&provenance.source_identity, manifest.source_layout)
+                && matches!(provenance.import_platform.as_str(), "macos" | "linux")
+                && valid_digest(&provenance.authenticated_tag) =>
+        {
+            Ok(())
+        }
+        (IMPORTED_ARTIFACT_SCHEMA_VERSION, _, _) => Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "schema-2 artifacts must be imported templates with authenticated provenance",
+        )),
+        _ => Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "local artifact provenance is inconsistent",
+        )),
+    }
+}
+
+fn validate_source_quiescence(manifest: &ArtifactManifest) -> Result<()> {
+    let valid = match manifest.schema_version {
+        LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION => manifest.source_quiescence.is_none(),
+        LOCAL_ARTIFACT_SCHEMA_VERSION => manifest.source_quiescence.is_some(),
+        _ => false,
     };
     if valid {
         return Ok(());
     }
     Err(QuartersError::new(
         ErrorKind::CorruptState,
-        "artifact source identity and layout are inconsistent",
+        "artifact source-quiescence evidence is inconsistent with its schema",
     ))
 }
 
@@ -342,6 +463,22 @@ fn validate_counts(counts: ArtifactCounts) -> Result<()> {
         ErrorKind::CorruptState,
         "artifact terminal entry counts are inconsistent",
     ))
+}
+
+pub(super) fn validate_content_integrity(integrity: &ContentIntegrity) -> Result<()> {
+    if integrity.algorithm != INTEGRITY_ALGORITHM {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            format!("unsupported artifact integrity algorithm '{}'", integrity.algorithm),
+        ));
+    }
+    if !valid_digest(&integrity.digest) {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "artifact digest is not lowercase BLAKE3-256",
+        ));
+    }
+    validate_counts(integrity.counts)
 }
 
 /// One validated published artifact.
@@ -383,6 +520,8 @@ pub enum SourceStatus {
     Present,
     /// Source is absent or a same-name replacement has a different identity.
     Orphaned,
+    /// Authenticated external provenance with no local source binding.
+    External,
 }
 
 /// One independently inspected artifact entry.
@@ -427,6 +566,8 @@ pub struct ArtifactReport {
     pub exclusions: CloneExclusions,
     /// Canonical stored counts after execution.
     pub stored_counts: Option<ArtifactCounts>,
+    /// Cooperative source-state evidence used for this capture.
+    pub source_quiescence: SourceQuiescence,
     /// Fixed walk limits.
     pub limits: CloneLimits,
     /// Cooperative activity does not discover detached writers.
@@ -564,7 +705,7 @@ pub struct RollbackInventory {
     pub issues: Vec<RollbackIssue>,
 }
 
-fn valid_digest(value: &str) -> bool {
+pub(super) fn valid_digest(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -573,7 +714,12 @@ fn valid_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ArtifactId, ArtifactName};
+    use super::{
+        ArtifactCounts, ArtifactId, ArtifactKind, ArtifactManifest, ArtifactName, ArtifactOrigin, ContentIntegrity,
+        ImportedBundleProvenance, SourceIdentity, SourceQuiescence,
+    };
+    use crate::{STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceLayout, SpaceManifest, SpaceName};
+    use std::path::PathBuf;
 
     #[test]
     fn artifact_names_and_ids_are_strict() {
@@ -581,5 +727,89 @@ mod tests {
         assert!(ArtifactName::parse("../daily").is_err());
         assert!(ArtifactId::parse("0123456789abcdef0123456789abcdef").is_ok());
         assert!(ArtifactId::parse("0123456789ABCDEF0123456789ABCDEF").is_err());
+    }
+
+    #[test]
+    fn stable_source_identity_survives_a_display_name_change() -> Result<(), Box<dyn std::error::Error>> {
+        let id = SpaceId::parse("0123456789abcdef0123456789abcdef")?;
+        let captured = SourceIdentity {
+            schema_version: STABLE_SCHEMA_VERSION,
+            name: SpaceName::parse("before")?,
+            created_unix_ms: 42,
+            space_id: Some(id.clone()),
+        };
+        let renamed = Space::new(
+            PathBuf::from("/tmp/renamed"),
+            SpaceManifest {
+                schema_version: STABLE_SCHEMA_VERSION,
+                layout: Some(SpaceLayout::Profile),
+                space_id: Some(id),
+                name: SpaceName::parse("after")?,
+                created_unix_ms: 42,
+                default_shell: PathBuf::from("/bin/sh"),
+                authority_model: "host-account-state-profile".to_owned(),
+            },
+        );
+        assert!(captured.matches(&renamed));
+        Ok(())
+    }
+
+    #[test]
+    fn imported_schema_cannot_acquire_local_source_authority() -> Result<(), Box<dyn std::error::Error>> {
+        let mut local = local_manifest()?;
+        assert!(local.validate(ArtifactKind::Template).is_ok());
+        local.source_identity = None;
+        assert!(local.validate(ArtifactKind::Template).is_err());
+
+        let mut imported = local_manifest()?;
+        let historical = imported.source_identity.take().ok_or("missing fixture identity")?;
+        imported.schema_version = super::IMPORTED_ARTIFACT_SCHEMA_VERSION;
+        imported.origin = ArtifactOrigin::ImportedBundle;
+        imported.source_quiescence = None;
+        imported.imported_bundle = Some(ImportedBundleProvenance {
+            format_version: 1,
+            export_id: ArtifactId::parse("11111111111111111111111111111111")?,
+            source_artifact_id: ArtifactId::parse("22222222222222222222222222222222")?,
+            source_artifact_kind: ArtifactKind::Snapshot,
+            source_identity: historical.clone(),
+            authenticated_tag: "b".repeat(64),
+            import_platform: "macos".to_owned(),
+        });
+        assert!(imported.validate(ArtifactKind::Template).is_ok());
+        imported.source_identity = Some(historical);
+        assert!(imported.validate(ArtifactKind::Template).is_err());
+        imported.source_identity = None;
+        imported.kind = ArtifactKind::Snapshot;
+        assert!(imported.validate(ArtifactKind::Snapshot).is_err());
+        Ok(())
+    }
+
+    fn local_manifest() -> Result<ArtifactManifest, Box<dyn std::error::Error>> {
+        Ok(ArtifactManifest {
+            schema_version: super::LOCAL_ARTIFACT_SCHEMA_VERSION,
+            artifact_id: ArtifactId::parse("0123456789abcdef0123456789abcdef")?,
+            kind: ArtifactKind::Template,
+            name: ArtifactName::parse("fixture")?,
+            created_unix_ms: 42,
+            source_identity: Some(SourceIdentity {
+                schema_version: STABLE_SCHEMA_VERSION,
+                name: SpaceName::parse("source")?,
+                created_unix_ms: 41,
+                space_id: Some(SpaceId::parse("abcdef0123456789abcdef0123456789")?),
+            }),
+            source_layout: SpaceLayout::Profile,
+            source_platform: "macos".to_owned(),
+            default_shell: PathBuf::from("/bin/sh"),
+            include_cache: false,
+            includes_sensitive_state: true,
+            origin: ArtifactOrigin::User,
+            imported_bundle: None,
+            source_quiescence: Some(SourceQuiescence::Inactive),
+            content_integrity: ContentIntegrity {
+                algorithm: super::INTEGRITY_ALGORITHM.to_owned(),
+                digest: "a".repeat(64),
+                counts: ArtifactCounts::default(),
+            },
+        })
     }
 }

@@ -5,7 +5,7 @@ use quarters_core::{EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,21 +17,54 @@ pub(crate) struct ProfileLaunch<'a> {
     pub(crate) space: &'a Space,
     pub(crate) host: &'a HostEnvironment,
     pub(crate) home_view: bool,
+    pub(crate) confinement: bool,
     pub(crate) inherited_names: &'a [String],
 }
 
 impl ProfileLaunch<'_> {
-    pub(crate) fn environment(&self) -> Result<EnvironmentPlan> {
+    pub(crate) fn environment_and_confinement(
+        &self,
+    ) -> Result<(EnvironmentPlan, Option<quarters_core::ConfinementPlan>)> {
+        if self.confinement {
+            let status = platform::capabilities().confinement;
+            if !status.available {
+                return Err(QuartersError::new(
+                    ErrorKind::Unsupported,
+                    format!(
+                        "--confinement filesystem is {} on this host: {}",
+                        status.status, status.detail
+                    ),
+                )
+                .with_hint("omit --confinement filesystem for portable state redirection"));
+            }
+        }
         let effective_home = self.effective_home()?;
-        EnvironmentPlan::for_space(self.space, self.host, &effective_home, self.inherited_names)
+        let mut environment = EnvironmentPlan::for_space(self.space, self.host, &effective_home, self.inherited_names)?;
+        let plan = self.confinement_plan(&environment)?;
+        if let Some(plan) = plan.as_ref() {
+            environment.apply_filesystem_confinement(plan, &effective_home)?;
+        }
+        Ok((environment, plan))
+    }
+
+    pub(crate) fn confinement_plan(
+        &self,
+        environment: &EnvironmentPlan,
+    ) -> Result<Option<quarters_core::ConfinementPlan>> {
+        if !self.confinement {
+            return Ok(None);
+        }
+        let effective_home = self.effective_home()?;
+        let runtime = required_environment_path(environment, "XDG_RUNTIME_DIR")?;
+        platform::confinement_plan(&self.space.home(), &effective_home, &runtime, self.host.get("PATH")).map(Some)
     }
 
     pub(crate) fn run(&self, raw_command: &[OsString]) -> Result<i32> {
         let (program, arguments) = split_command(raw_command)?;
-        let environment = self.environment()?;
         let _lease = self.store.lease(self.space)?;
-        let status = if self.home_view {
-            self.run_home_view(program, arguments, &environment)?
+        let (environment, confinement) = self.environment_and_confinement()?;
+        let status = if self.home_view || self.confinement {
+            self.run_linux_launcher(program, arguments, &environment, confinement.as_ref())?
         } else {
             run_direct(program, arguments, &environment)?
         };
@@ -53,42 +86,68 @@ impl ProfileLaunch<'_> {
             )
             .with_hint("omit --home-view for portable state redirection"));
         }
-        self.host_home()
+        Self::host_home()
     }
 
-    fn run_home_view(
+    fn run_linux_launcher(
         &self,
         program: &OsStr,
         arguments: &[OsString],
         environment: &EnvironmentPlan,
+        confinement: Option<&quarters_core::ConfinementPlan>,
     ) -> Result<ExitStatus> {
         let current_executable = std::env::current_exe().map_err(|error| {
             QuartersError::new(ErrorKind::System, "could not locate the Quarters executable").with_source(error)
         })?;
         install_runtime_binary(&current_executable, environment)?;
-        let host_home = self.host_home()?;
+        let runtime = required_environment_path(environment, "XDG_RUNTIME_DIR")?;
         let mut command = Command::new(current_executable);
         command
             .arg("__linux-launch")
             .arg("--space-home")
             .arg(self.space.home())
-            .arg("--host-home")
-            .arg(host_home)
-            .arg("--")
-            .arg(program)
-            .args(arguments);
+            .arg("--runtime-dir")
+            .arg(runtime);
+        if self.home_view {
+            command.arg("--host-home").arg(Self::host_home()?);
+        }
+        if self.confinement {
+            command.arg("--confinement");
+            if let Some(plan) = confinement
+                && plan.omitted_host_path_entries > 0
+            {
+                eprintln!(
+                    "quarters: filesystem confinement omitted {} resolvable host PATH entr{}; inspect 'quarters env {} --confinement filesystem'",
+                    plan.omitted_host_path_entries,
+                    if plan.omitted_host_path_entries == 1 {
+                        "y"
+                    } else {
+                        "ies"
+                    },
+                    self.space.manifest().name
+                );
+            }
+        }
+        command.arg("--").arg(program).args(arguments);
         environment.apply(&mut command);
         command
             .status()
-            .map_err(|error| process_error("start Linux home-view launcher", program, error))
+            .map_err(|error| process_error("start Linux namespace launcher", program, error))
     }
 
-    fn host_home(&self) -> Result<PathBuf> {
-        self.host
-            .get("HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .ok_or_else(|| QuartersError::new(ErrorKind::InvalidInput, "host HOME is unset or not absolute"))
+    fn host_home() -> Result<PathBuf> {
+        let user = nix::unistd::User::from_uid(nix::unistd::Uid::current())
+            .map_err(|error| {
+                QuartersError::new(ErrorKind::System, "could not resolve the current account home").with_source(error)
+            })?
+            .ok_or_else(|| QuartersError::new(ErrorKind::Unsupported, "the current account has no passwd record"))?;
+        if user.dir.is_absolute() {
+            return Ok(user.dir);
+        }
+        Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "the current account passwd home is not absolute",
+        ))
     }
 }
 
@@ -143,11 +202,55 @@ pub(crate) fn run_host(raw_command: &[OsString]) -> Result<i32> {
     Ok(status_code(status))
 }
 
-pub(crate) fn linux_launch(space_home: &Path, host_home: &Path, raw_command: &[OsString]) -> Result<i32> {
+pub(crate) fn linux_launch(
+    space_home: &Path,
+    host_home: Option<&Path>,
+    runtime: &Path,
+    confinement: bool,
+    raw_command: &[OsString],
+) -> Result<i32> {
     let (program, arguments) = split_command(raw_command)?;
-    platform::enter_home_view(space_home, host_home)?;
-    let error = std::os::unix::process::CommandExt::exec(Command::new(program).args(arguments));
-    Err(process_error("replace the namespace launcher", program, error))
+    let effective_home = host_home.unwrap_or(space_home);
+    let confinement_plan = if confinement {
+        Some(platform::confinement_plan(space_home, effective_home, runtime, None)?)
+    } else {
+        None
+    };
+    let prepared_confinement = confinement_plan
+        .as_ref()
+        .map(platform::prepare_filesystem_confinement)
+        .transpose()?;
+    if let Some(host_home) = host_home {
+        platform::enter_home_view(space_home, host_home)?;
+    } else if confinement {
+        std::env::set_current_dir(space_home)
+            .map_err(|error| QuartersError::io("enter the confined Quarter home", space_home, error))?;
+    }
+    let program = if let Some(plan) = confinement_plan.as_ref() {
+        let mapped = map_home_view_program(program, space_home, effective_home);
+        let path = std::env::var_os("PATH")
+            .ok_or_else(|| QuartersError::new(ErrorKind::CorruptState, "confined launcher has no executable PATH"))?;
+        platform::resolve_confined_executable(&mapped, &path, plan)?
+    } else {
+        PathBuf::from(program)
+    };
+    if let Some(prepared) = prepared_confinement {
+        platform::enter_filesystem_confinement(prepared)?;
+    }
+    let error = std::os::unix::process::CommandExt::exec(Command::new(&program).args(arguments));
+    Err(process_error(
+        "replace the namespace launcher",
+        program.as_os_str(),
+        error,
+    ))
+}
+
+fn map_home_view_program(program: &OsStr, space_home: &Path, effective_home: &Path) -> OsString {
+    let path = Path::new(program);
+    path.strip_prefix(space_home).map_or_else(
+        |_error| program.to_owned(),
+        |relative| effective_home.join(relative).into_os_string(),
+    )
 }
 
 fn run_direct(program: &OsStr, arguments: &[OsString], environment: &EnvironmentPlan) -> Result<ExitStatus> {
@@ -159,27 +262,88 @@ fn run_direct(program: &OsStr, arguments: &[OsString], environment: &Environment
         .map_err(|error| process_error("start profile command", program, error))
 }
 
+fn required_environment_path(environment: &EnvironmentPlan, name: &str) -> Result<PathBuf> {
+    environment
+        .value(name)
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| {
+            QuartersError::new(
+                ErrorKind::CorruptState,
+                format!("profile environment has no absolute {name}"),
+            )
+        })
+}
+
 fn install_runtime_binary(source: &Path, environment: &EnvironmentPlan) -> Result<()> {
     let runtime = environment.value("XDG_RUNTIME_DIR").ok_or_else(|| {
         QuartersError::new(
             ErrorKind::CorruptState,
-            "home-view environment has no runtime directory",
+            "namespace-launch environment has no runtime directory",
         )
     })?;
-    let destination = PathBuf::from(runtime).join("bin/quarters");
+    let command_directory = PathBuf::from(runtime).join("bin");
+    install_runtime_command_set(source, &command_directory)
+}
+
+fn install_runtime_command_set(source: &Path, command_directory: &Path) -> Result<()> {
+    validate_runtime_command_directory(command_directory)?;
+    let destination = command_directory.join("quarters");
     let sequence = RUNTIME_COPY_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temporary = destination.with_extension(format!("tmp-{}-{sequence}", std::process::id()));
     if let Err(error) = copy_private_executable(source, &temporary) {
         let _cleanup = fs::remove_file(&temporary);
         return Err(error);
     }
-    fs::rename(&temporary, &destination)
-        .map_err(|error| QuartersError::io("publish the home-view launcher", &destination, error))
+    if let Err(error) = fs::rename(&temporary, &destination) {
+        let _cleanup = fs::remove_file(&temporary);
+        return Err(QuartersError::io("publish the namespace launcher", &destination, error));
+    }
+    for tool in ["ssh", "scp", "sftp", "ssh-add"] {
+        install_runtime_adapter(&command_directory.join(tool))?;
+    }
+    File::open(command_directory)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| QuartersError::io("sync namespace command directory", command_directory, error))
+}
+
+fn validate_runtime_command_directory(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("inspect namespace command directory", path, error))?;
+    let valid = metadata.is_dir()
+        && !metadata.file_type().is_symlink()
+        && metadata.uid() == nix::unistd::Uid::current().as_raw()
+        && metadata.permissions().mode() & 0o777 == 0o700;
+    if valid {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "the namespace command directory is not a protected current-user directory",
+    ))
+}
+
+fn install_runtime_adapter(path: &Path) -> Result<()> {
+    match symlink("quarters", path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(QuartersError::io("install namespace OpenSSH adapter", path, error)),
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("inspect namespace OpenSSH adapter", path, error))?;
+    if metadata.file_type().is_symlink() && fs::read_link(path).is_ok_and(|target| target == Path::new("quarters")) {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::AlreadyExists,
+        format!("namespace adapter entry is not managed: {}", path.display()),
+    )
+    .with_hint("inspect the exact private runtime entry; Quarters never replaces an unverified command"))
 }
 
 fn copy_private_executable(source: &Path, destination: &Path) -> Result<()> {
     let mut source_file =
-        File::open(source).map_err(|error| QuartersError::io("open the home-view launcher", source, error))?;
+        File::open(source).map_err(|error| QuartersError::io("open the namespace launcher", source, error))?;
     let mut options = OpenOptions::new();
     options
         .write(true)
@@ -188,15 +352,15 @@ fn copy_private_executable(source: &Path, destination: &Path) -> Result<()> {
         .custom_flags(nix::libc::O_CLOEXEC | nix::libc::O_NOFOLLOW);
     let mut destination_file = options
         .open(destination)
-        .map_err(|error| QuartersError::io("stage the home-view launcher", destination, error))?;
+        .map_err(|error| QuartersError::io("stage the namespace launcher", destination, error))?;
     std::io::copy(&mut source_file, &mut destination_file)
-        .map_err(|error| QuartersError::io("copy the home-view launcher", destination, error))?;
+        .map_err(|error| QuartersError::io("copy the namespace launcher", destination, error))?;
     destination_file
         .flush()
-        .map_err(|error| QuartersError::io("flush the home-view launcher", destination, error))?;
+        .map_err(|error| QuartersError::io("flush the namespace launcher", destination, error))?;
     destination_file
         .sync_all()
-        .map_err(|error| QuartersError::io("sync the home-view launcher", destination, error))
+        .map_err(|error| QuartersError::io("sync the namespace launcher", destination, error))
 }
 
 fn split_command(raw_command: &[OsString]) -> Result<(&OsStr, &[OsString])> {
@@ -223,4 +387,34 @@ fn process_error(operation: &str, program: &OsStr, source: std::io::Error) -> Qu
     )
     .with_hint("check that the executable exists and is permitted by the host account")
     .with_source(source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::install_runtime_command_set;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn home_view_command_set_is_complete_and_collision_safe() -> Result<(), Box<dyn std::error::Error>> {
+        let temporary = tempfile::tempdir()?;
+        let directory = temporary.path().join("bin");
+        std::fs::create_dir(&directory)?;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        std::fs::create_dir(directory.join("quarters"))?;
+        assert!(install_runtime_command_set(&std::env::current_exe()?, &directory).is_err());
+        assert_eq!(std::fs::read_dir(&directory)?.count(), 1);
+        std::fs::remove_dir(directory.join("quarters"))?;
+        install_runtime_command_set(&std::env::current_exe()?, &directory)?;
+        for tool in ["ssh", "scp", "sftp", "ssh-add"] {
+            assert_eq!(
+                std::fs::read_link(directory.join(tool))?,
+                std::path::Path::new("quarters")
+            );
+        }
+        std::fs::remove_file(directory.join("ssh"))?;
+        std::fs::write(directory.join("ssh"), b"collision")?;
+        assert!(install_runtime_command_set(&std::env::current_exe()?, &directory).is_err());
+        assert_eq!(std::fs::read(directory.join("ssh"))?, b"collision");
+        Ok(())
+    }
 }

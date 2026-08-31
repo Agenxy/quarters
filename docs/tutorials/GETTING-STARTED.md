@@ -34,7 +34,59 @@ This adds private personal directories such as `Desktop`, `Documents` and
 `Downloads`; macOS also gets conventional `Applications` and selected
 `Library` paths. It is still the same OS account and filesystem authority.
 
-## 3. Clone a space safely
+Every new space has an opaque stable ID. For a schema-1 profile created by an
+older release, preview and confirm the metadata-only upgrade while it is
+inactive:
+
+```sh
+quarters upgrade old-space --preview
+quarters upgrade old-space --confirm old-space
+```
+
+You can then change only its display name without breaking artifacts captured
+after the upgrade:
+
+```sh
+quarters rename old-space new-name --preview
+quarters rename old-space new-name --confirm old-space
+```
+
+If the space still has templates or snapshots captured before the upgrade,
+rename refuses to orphan those name-bound artifacts. Recreate the artifacts
+from the upgraded space and intentionally remove the legacy copies before
+renaming, or retain the original display name.
+
+## 3. Fork selected host shell state
+
+To begin with familiar shell settings, preview the closed `shell` policy. The
+preview reads only metadata into its output and creates no destination:
+
+```sh
+quarters --json create familiar --from-host shell --preview
+```
+
+Review the paths, exclusions, transformations, conflict flags and optional
+presets marked ineligible because they were linked or unsafe. Then pass the
+exact returned `plan_digest`:
+
+```sh
+quarters create familiar --from-host shell --confirm-plan DIGEST
+```
+
+If `.zshrc` or `.bashrc` is selected, it conflicts with Quarters' generated
+prompt startup file. Repeat the preview with `--replace-generated`, review the
+new digest, and confirm that exact plan. Add a non-sensitive regular file with
+`--from-host-path .customrc`; credentials, histories, directories, links and
+broadly writable files are refused when their path or type is recognizable.
+Selected file contents are not inspected and may still embed secrets; the
+preview reports this explicitly.
+
+Creation never evaluates copied startup code. Entering the new Quarter may do
+so, and the process retains the real account's access to absolute host paths.
+This workflow protects originals from ordinary redirected writes; it is not a
+sandbox or a trust transition.
+
+## 4. Clone a space safely
 
 Preview the included state and exclusions without creating anything:
 
@@ -58,7 +110,7 @@ still unknown. It is an atomic independent copy, not a live database snapshot or
 containment boundary. Embedded absolute paths are copied unchanged and may still
 point at the source.
 
-## 4. Create a template, snapshot and guarded rollback
+## 5. Create a template, snapshot and guarded rollback
 
 Capture reusable stationery after reviewing the preview:
 
@@ -72,6 +124,44 @@ quarters template use studio-clean new-studio --confirm-sensitive-state studio-c
 Templates omit derived caches unless `--include-cache` is explicit and create a
 fresh space identity. They can contain credentials; Quarters does not guess at
 a safe scrub policy.
+
+To capture stationery from the Quarter you are currently using, freeze new
+Quarters-managed activity, preview and capture immediately, then unfreeze:
+
+```sh
+quarters enter studio
+quarters freeze
+quarters template create studio-live --from-active --preview
+quarters template create studio-live --from-active --confirm-sensitive-state studio
+quarters unfreeze --confirm studio
+```
+
+Run the last four commands inside `studio`. Freeze does not stop that running
+shell or its children; it blocks new managed launches and Quarters mutations
+of that space. The capture holds a shared lease and records `frozen-active`
+source evidence. Already-running, detached and direct same-UID writers can
+still change files during the walk, so this is self-verifying stationery, not
+a crash-consistent snapshot or filesystem freeze. If the shell exits while the
+marker remains, run `quarters unfreeze studio --confirm studio` from the host.
+Inside Linux `--home-view`, the authoritative store root is intentionally
+overmounted and management commands such as `freeze` fail closed; run them from
+a portable Quarter entry or the host shell.
+
+On Linux with Landlock ABI 3, inspect and then enter the experimental
+filesystem policy:
+
+```sh
+quarters --json env studio --confinement filesystem
+quarters enter studio --confinement filesystem
+```
+
+The shell starts in the Quarter home. Its PATH contains Quarter-local tools and
+reported fixed system roots, not host-home shims. Ungranted file contents,
+directory listings and mutations are denied, but known-path metadata can remain
+visible; `/proc`, network, IPC and selected terminal devices remain shared.
+`sudo`, store management, `doctor`, MCP and `quarters host` are unavailable
+inside this mode. Exit the shell to return to the unrestricted host process.
+macOS rejects the option rather than falling back.
 
 Create and independently verify a recovery point:
 
@@ -100,7 +190,58 @@ that snapshot is deliberately retained. Inspect it, then retry with a new
 `--recovery-name`; alternatively verify and explicitly remove the retained
 snapshot before reusing the old name.
 
-## 5. Add an optional short command
+## 6. Move a verified artifact between stores
+
+Create a separate authentication key in a private directory. Quarters creates
+exactly 32 random bytes with mode `0600` and will not replace an existing file:
+
+```sh
+umask 077
+mkdir -p "$HOME/private"
+chmod 700 "$HOME/private"
+quarters export-key create "$HOME/private/quarters-bundle.key"
+```
+
+Preview, then export a verified template. The bundle path must be absolute and
+outside the Quarters store:
+
+```sh
+quarters export template studio-clean \
+  --to "$HOME/private/studio-clean.qbundle" \
+  --key "$HOME/private/quarters-bundle.key" --preview
+quarters export template studio-clean \
+  --to "$HOME/private/studio-clean.qbundle" \
+  --key "$HOME/private/quarters-bundle.key" \
+  --confirm-sensitive-state studio-clean
+```
+
+Copy the bundle and key through separate trusted channels when practical. On
+the receiving host, place both beneath a mode-`0700` directory and restore each
+file to mode `0600`; Quarters refuses group- or world-accessible bundles and
+keys. The bundle is authenticated plaintext: anyone who can read it can read
+its files. Then preview the destination and pass back the exact digest:
+
+```sh
+umask 077
+mkdir -p "$HOME/private"
+chmod 700 "$HOME/private"
+chmod 600 "$HOME/private/quarters-bundle.key" \
+  "$HOME/private/studio-clean.qbundle"
+quarters import "$HOME/private/studio-clean.qbundle" received \
+  --key "$HOME/private/quarters-bundle.key" --preview
+quarters import "$HOME/private/studio-clean.qbundle" received \
+  --key "$HOME/private/quarters-bundle.key" --confirm-plan DIGEST
+quarters template use received new-studio --preview
+```
+
+Every import becomes a fresh external template, including a bundle exported
+from a snapshot. Historical source identity is retained only as provenance; it
+cannot authorize rollback or bind to a local space. Authentication detects a
+wrong key or modified bytes but does not make imported startup files safe to
+execute. Inspect content from an untrusted sender before creating or entering a
+space from it.
+
+## 7. Add an optional short command
 
 Install Quarters first. When `~/.local/bin` is already on the host PATH:
 
@@ -116,7 +257,25 @@ check matters because a child cannot see aliases and functions defined only in
 its parent shell. Remove only the managed link with
 `quarters shortcut remove qts`. The shorter `q` name is opt-in.
 
-## 6. Prove state separation
+## 8. Prove state separation
+
+New spaces place a managed Quarters launcher and OpenSSH adapters first on
+their private PATH. Inspect them, then start the private agent only if this
+space needs agent-backed keys:
+
+```sh
+quarters adapter status clean
+quarters agent status clean
+quarters agent start clean
+quarters exec clean -- ssh-add -l
+quarters agent stop clean
+```
+
+An empty agent makes `ssh-add -l` return its ordinary no-identities status.
+Quarters does not import the host agent or its keys. Use `quarters host -- ssh`
+for an intentional host-config escape. If an interrupted lifecycle is reported,
+inspect it first; `quarters agent recover clean --confirm clean` removes only
+state whose ownership is safe to reconcile.
 
 ```sh
 target/release/quarters exec clean -- sh -c 'printf "%s\n" "$HOME" "$QUARTERS_SPACE"'
@@ -127,7 +286,7 @@ git config --global user.name
 The last command runs on the host and should retain the host value. File
 permissions and access are still those of the same account.
 
-## 7. Enter the shell
+## 9. Enter the shell
 
 ```sh
 target/release/quarters enter clean
@@ -155,7 +314,7 @@ target/release/quarters enter clean --login
 
 Host system profiles can run in login mode.
 
-## 8. Pass a variable deliberately
+## 10. Pass a variable deliberately
 
 The baseline does not inherit arbitrary variables:
 
@@ -166,7 +325,7 @@ MY_SETTING=present target/release/quarters exec clean --inherit MY_SETTING -- en
 
 `env clean --inherit MY_SETTING` shows the value as redacted.
 
-## 9. Use host state explicitly
+## 11. Use host state explicitly
 
 Inside a baseline shell:
 
@@ -177,7 +336,7 @@ quarters host -- sh -c 'printf "%s\n" "$HOME"'
 This restores host path variables only. It does not restore blocked credential
 variables. Exit the space when you need the exact original host environment.
 
-## 10. Remove the space
+## 12. Remove the space
 
 Exit every process launched in the space, inspect the name, then run:
 
@@ -192,14 +351,16 @@ after that supervisor exits, so `status` reports detached processes as unknown
 and you must stop those processes first. Removal is not
 secure erasure from backups or filesystem snapshots.
 
-If a home or manifest is unhealthy, `list` and `status` show the exact issue and
-`rm` can still remove the named entry after validating its private root and
-activity lock. Quarters fails closed and requires manual inspection when either
-of those removal anchors is invalid.
+If a home or manifest is unhealthy, `list` and `status` show the exact issue.
+`rm` can still remove an entry with an unhealthy home after validating its
+private root, activity lock and stable manifest identity and proving no private
+SSH-agent state exists. An unreadable, malformed or mis-permissioned manifest
+cannot provide that proof; repair it from trusted evidence before retrying.
+Quarters also fails closed when the root or activity lock is invalid.
 For an invalid stored name, obtain the exact value from `quarters --json list`.
 Removal accepts one literal entry name but never a path, `.` or `..`.
 
-## 11. Connect a local agent
+## 13. Connect a local agent
 
 Build or install Quarters, then configure the agent host to run the absolute
 binary path with the single `mcp` argument. Quarters communicates only over the
@@ -207,8 +368,9 @@ host-provided standard input/output pipes.
 
 Ask the agent to read `quarters://security` before using a mutating tool. It can
 inspect, run doctor and create a space. It cannot enter that space, execute a
-command, clone state, pass host credentials or remove anything. Use the human
-CLI for those operations after reviewing their authority implications.
+command, clone or fork host state, pass host credentials or remove anything.
+Use the human CLI for those operations after reviewing their authority
+implications.
 
 The create tool accepts an optional closed `layout` value of `profile` or
 `workspace` under both supported protocol revisions.

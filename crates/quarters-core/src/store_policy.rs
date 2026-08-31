@@ -7,7 +7,8 @@ use std::path::Path;
 use nix::unistd::Uid;
 
 use crate::{
-    ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result, SpaceLayout, SpaceManifest, WORKSPACE_SCHEMA_VERSION,
+    ErrorKind, PROFILE_SCHEMA_VERSION, QuartersError, Result, STABLE_SCHEMA_VERSION, SpaceLayout, SpaceManifest,
+    WORKSPACE_SCHEMA_VERSION,
 };
 
 pub(crate) fn validate_store_root(path: &Path, metadata: &fs::Metadata) -> Result<()> {
@@ -117,6 +118,7 @@ fn validate_manifest_layout(manifest: &SpaceManifest) -> Result<()> {
     let valid = match manifest.schema_version {
         PROFILE_SCHEMA_VERSION => manifest.layout.is_none() && manifest.space_id.is_none(),
         WORKSPACE_SCHEMA_VERSION => manifest.layout == Some(SpaceLayout::Workspace) && manifest.space_id.is_some(),
+        STABLE_SCHEMA_VERSION => manifest.layout.is_some() && manifest.space_id.is_some(),
         _ => false,
     };
     if valid {

@@ -35,7 +35,9 @@ The default root is `~/.quarters`:
 ```text
 .quarters/
   .observe
+  .quarters-store.json  # optional expand-phase authoritative format marker
   spaces/
+    .freeze-<space-id>.json  # cooperative policy marker, not filesystem immutability
     work/
       .quarters.json
       .quarters-provenance.json  # clone destinations only
@@ -52,15 +54,35 @@ The default root is `~/.quarters`:
   .snapshots/<artifact-id>/{.quarters-artifact.json,home/}
 ```
 
+The expand-phase reader resolves both `spaces`/`trash` and future
+`.spaces`/`.trash` category layouts. Writers remain on the visible layout.
+Unmarked visible stores are permanently compatible; a dotted layout requires
+the strict root marker, and dual layouts fail closed. Current-schema markers
+are bounded, current-user regular files. Their steady state has one link; the
+exact two-link no-clobber publication state remains readable and is repaired
+only under the management lease. Newer schema headers are reported as an
+upgrade requirement before strict parsing. `doctor` diagnoses the raw marker,
+migration and reserved-staging state without repairing it, caps itemized
+staging names while retaining a lower-bound count, and never materializes an
+observation lock in a dotted store. Every mutation obtains a non-cloneable
+writable-layout token under the bounded management lease; dotted stores are
+inspection-only in this release.
+
+Reserved staging damage is reported separately from the authoritative format:
+a visible store remains truthfully writable while `doctor` itemizes the issue,
+and marker publication or cleanup reports its exact failure instead of silently
+falling back. Missing optional trash state is created only by an operation that
+needs it; an existing trash entry must still pass private-directory validation.
+
 Creation builds a complete directory under `.creating-<name>-<unique>` on the
 same filesystem, syncs private files and publishes it with `rename()`. A schema
 marker and matching directory name are required when opening a space.
-Schema 1 remains the minimal `profile` layout and deliberately serializes no
-layout or stable-ID fields. Schema 2 is reserved for the explicit `workspace`
-layout and requires both `"layout": "workspace"` and a random 128-bit opaque
-ID. New readers accept both; unsupported versions and inconsistent field sets
-fail closed before a space becomes healthy. The ID is future lifecycle
-identity, not an authentication secret.
+Schemas 1 and 2 remain readable legacy profile and workspace forms. Every new
+profile or workspace uses schema 3, records its layout explicitly and receives
+a random 128-bit opaque ID. Unsupported versions and inconsistent field sets
+fail closed before a space becomes healthy. The ID binds runtime and artifact
+lifecycle across display-name changes; it is not an authentication secret.
+Inactive schema-1 profiles can receive it through atomic `upgrade`.
 Creation, lifecycle publication, recovery, lease acquisition and removal share
 the bounded root management lock. Rename losers
 clean their skeleton immediately; interrupted `.creating-*` state and
@@ -99,6 +121,13 @@ Directory inspection treats every published entry independently. A damaged
 home or manifest is reported as unhealthy without hiding valid siblings.
 Removal deliberately validates only the invariants it needs: the exact named
 private root and cooperative lock. A damaged root or lock remains fail-closed.
+Stable spaces can be renamed through a private durable marker, same-filesystem
+directory move and atomic manifest replacement. Recovery aborts before the
+move or completes after it; malformed and ambiguous markers are retained
+without blocking unrelated names. Each recovery pass scans the complete
+same-UID marker namespace so ambiguous records cannot starve later actionable
+work, while limiting successful filesystem mutations to 128. The scan is
+therefore linear in retained marker count, not constant-time.
 
 ## Environment authority
 
@@ -111,10 +140,11 @@ This prevents accidental reuse of common and unknown credential variables. It
 does not stop a child from reading credentials directly from any host path its
 real account can access.
 
-`SSH_AUTH_SOCK` is intentionally not inherited and remains unset in the
-baseline. The alpha does not present a reserved path as an active private
-agent. Agent-backed SSH is unavailable until reviewed agent lifecycle
-management exists; explicit key paths in the per-space SSH config still work.
+`SSH_AUTH_SOCK` is intentionally not inherited. It remains unset unless the
+space has an explicitly started private OpenSSH agent whose PID, socket inode
+and device, kernel-reported socket peer PID and SSH identities protocol response
+all verify. Stale, starting or stopping state blocks process launch rather than
+advertising ambiguous authority. Status does not create a missing runtime.
 
 The generated Git config starts with an empty credential helper. This resets
 helpers inherited from host or system policy before any per-space choice. It
@@ -136,6 +166,48 @@ current managed target, a relocated live launcher and a stale target. Every
 observed PATH match is reported. Parent-shell aliases and functions require the printed
 `type -a` check because a child cannot observe them.
 
+New spaces receive a machine-local absolute `quarters` launcher and relative
+`ssh`, `scp`, `sftp` and `ssh-add` links in private `.local/bin`. Lifecycle
+copies omit this closed five-link set and recreate it against the destination's
+launcher. Network-client adapters force the protected per-space SSH config and
+reject competing `-F`. Because OpenSSH's defaults use the passwd home rather
+than HOME, adapters also force a current-space user-known-hosts path and
+`IdentityFile=none` while retaining `IdentitiesOnly=no`, so only explicitly
+named files and keys intentionally loaded into the private agent are offered.
+They initially resolve host executables through the captured absolute host
+PATH, canonicalizing candidates and skipping both the running Quarters
+device/inode and any candidate whose resolved basename is `quarters`. The
+basename rule also covers Linux home-view's deliberately distinct runtime copy.
+A parent-PID handoff stops direct recursive dispatch. The child can change the
+host-path environment value under the same-UID boundary.
+Baseline dispatch reopens the declared store and validates the space, home,
+SSH config and managed-command ancestry. Exact adapter links report stale when
+their launcher is unavailable, and `doctor NAME` folds that observation into
+the SSH route instead of claiming a managed path statically. Absolute tool
+paths remain an intentional bypass.
+`exec` and `enter` emit a warning when the observed managed launcher or adapter
+set is incomplete, preventing a relocated installation from degrading silently.
+Shortcut-spelled CLI and MCP launchers are canonicalized before managed-command
+installation, so creation through `qts` still records the stable `quarters`
+executable.
+
+### Host-fork transaction
+
+`create --from-host shell` is a separate file-selection authority from child
+environment inheritance. Preview anchors the host `HOME` with a protected
+directory descriptor and opens each closed-preset or explicit regular file one
+component at a time with no-follow semantics. Credentials, directories,
+history, runtime and caches are outside this policy.
+
+The confirmation digest binds the request and every observed source and parent
+directory generation. Execution recomputes that plan, keeps the exact source
+descriptors open through a bounded copy, checks them again, then reopens each
+path and compares its generation before atomic publication. A generated startup
+file is replaced only when `--replace-generated` was part of the preview. The
+private provenance file stores selection metadata and exclusions, not source
+contents or secret-derived hashes. This narrows accidental state selection; it
+does not restrict the authority of the resulting same-UID process.
+
 ## Process boundary
 
 `enter` and `exec` spawn the requested native executable directly. No shell is
@@ -144,12 +216,26 @@ forwards the child's terminal naturally through inherited file descriptors.
 
 `host` is an explicit baseline escape. It restores the captured host `HOME`,
 `PATH`, `TMPDIR` and runtime path, clears profile variables and runs the target.
-It does not restore variables that were omitted by the allowlist.
+It does not restore variables that were omitted by the allowlist. Nested spaces
+preserve the original backup chain, so this returns to the real host rather
+than merely to the outer space.
+
+The private SSH-agent helper is a narrow process boundary of its own. Quarters
+spawns its current executable with an unguessable handoff token and registered
+PID, then that helper uses `exec` to become fixed `/usr/bin/ssh-agent -D`.
+Lifecycle control is serialized per stable space ID. Stop and recovery never
+signal or unlink from PID data alone; full active socket ownership is required,
+including the kernel-reported peer PID, and unowned links or malformed records
+are retained.
 
 ## Agent protocol boundary
 
 `quarters mcp` is a local stdio adapter built on the official Rust SDK. It
-supports exactly `2026-07-28` and `2025-11-25`. A connection commits to one
+requires the canonical installed `quarters` launcher before accepting input,
+so MCP creation and CLI creation apply the same machine-local link policy.
+The in-memory library test transport has no launcher authority and explicitly
+omits those links. The adapter supports exactly `2026-07-28` and `2025-11-25`.
+A connection commits to one
 lifecycle family: 2026 uses stateless `server/discover` and per-request
 metadata; 2025 uses `initialize` and the initialized notification. Cross-family
 methods and version metadata fail closed.
@@ -197,8 +283,9 @@ so Quarters reports it as best effort and never treats it as the correctness
 anchor.
 
 macOS has no per-process mount namespace. Programs using `getpwuid()` can still
-find the real home. SSH is therefore Class C and needs `ssh -F` with the space
-config. Keychain, TCC, app containers and login services remain host-bound.
+find the real home. SSH is therefore Class C and uses managed invocation links
+that force `ssh -F` with the space config. Keychain, TCC, app containers and
+login services remain host-bound.
 
 Seatbelt is not part of the alpha's guarantee. `doctor` can report the deprecated
 `sandbox-exec` binary, but no confinement flag exists without a reviewed policy.
@@ -222,6 +309,10 @@ or imply that programs using passwd records have been redirected. Linux
 the real UID and GID to the same numeric values, creates a private mount
 namespace, makes propagation private and bind-mounts the space home over the
 passwd home. The target still has the same numeric user and host DAC authority.
+Before the mount, Quarters publishes a private runtime copy of itself plus
+relative `ssh`, `scp`, `sftp` and `ssh-add` links and prepends that runtime bin.
+This keeps managed OpenSSH policy reachable even when the installed launcher
+was beneath the host home that the mount covers.
 
 This mode is opt-in for three reasons:
 
@@ -242,8 +333,18 @@ portable, grammar-validated space marker established at launch instead of
 reopening the hidden store. Other management commands remain disabled, and no
 security decision may use `current` as proof of process identity.
 
-Landlock is future work. The build does not equate namespace path changes with
-filesystem confinement.
+`--confinement filesystem` is a separate Landlock ABI-3 policy described by
+ADR 0011. A single-threaded internal launcher validates the Quarter home and
+runtime, resolves fixed system and device rules, reconstructs PATH, optionally
+enters home-view, changes to the Quarter home, requires full kernel enforcement
+and immediately execs. The baseline and namespace path view never imply this
+boundary when the option is absent.
+
+The policy denies handled content, enumeration and mutation operations outside
+its grants. It does not hide known-path metadata, virtualize `/proc`, isolate
+network or IPC, revoke inherited descriptors, or restrict other same-UID
+processes. Store commands are routed off inside the domain; this environment
+route is UX, while Landlock is the irreversible boundary.
 
 ## Lifecycle copy and artifact contract
 
@@ -251,8 +352,11 @@ Clone, template capture, snapshot capture, template use and rollback share a
 bounded portable copy engine. Preview and execution
 share a descriptor-relative walker rooted in already-open source and staging
 directories. It uses no-follow `openat`/`fstatat` operations, fixed entry/byte/
-depth/path limits, an exclusive cooperative source lease, private same-filesystem
-staging, fresh control files and one publication rename.
+depth/path limits, a cooperative source lease, private same-filesystem staging,
+fresh control files and one publication rename. Ordinary capture takes the
+lease exclusively. Active stationery capture requires a stable-identity freeze
+marker and an already-held cooperative lease, then takes an additional shared
+lease so it can run inside that process tree.
 
 The default policy recreates derived cache roots empty. Sockets, FIFOs, devices
 and foreign-owned entries are omitted and counted. Regular hard links are copied
@@ -272,11 +376,27 @@ hard-link topology. Embedded absolute paths are copied without rewriting. A free
 cooperative lease cannot discover detached writers, so these copies are not
 live database snapshots or quiescence proof.
 
+Cooperative freeze state is a strict, identity-bound
+`.freeze-<space-id>.json` marker serialized by the store management guard.
+It is published by private temporary plus atomic rename; a confirmed unfreeze
+can remove malformed identity-bound state only while its file anchor remains
+private and single-linked.
+`Store::lease` refuses new managed launches before environment preparation,
+and space lifecycle entry points require unfreeze. Existing activity,
+direct filesystem access and detached same-UID writers continue. The marker is
+therefore a product policy against accidental actions, not write protection.
+Active capture also requires the CLI's current name, root and home evidence to
+match a healthy space and observes a pre-existing held lease before copying.
+Publication rechecks the freeze under the management guard.
+
 Published templates and snapshots use opaque 128-bit physical IDs and strict
 manifests. A canonical BLAKE3 stream binds stored paths, types, ordinary modes,
 file bytes, symlink targets and terminal counts. Every consuming operation
 verifies the complete artifact. Integrity detects change but does not
 authenticate against another process with the same UID.
+Schema-3 local artifacts record `inactive` or `frozen-active` source evidence;
+historical schema-1 and imported schema-2 artifacts remain readable without
+invented local quiescence claims.
 
 Rollback verifies exact source identity, captures an automatic recovery
 snapshot, and replaces the complete target home while preserving its controls.
@@ -285,6 +405,20 @@ recovery. Readers report `rollback_in_progress`; recovery never guesses from an
 ambiguous filesystem tuple. Artifact and rollback staging are included in the
 bounded `doctor`/confirmed `recover` contract.
 
-Platform clonefile/reflink acceleration, schema-1 stable IDs, export,
-encryption, live freeze and live space rename remain deferred. ADR 0003 records
-the copy boundary; ADR 0008 defines lifecycle artifacts and rollback.
+Authenticated bundle export/import builds on the canonical artifact stream.
+Export verifies while emitting a versioned keyed-BLAKE3 plaintext file and
+publishes with a no-clobber link. Import authenticates with compile-time bounds,
+retains only an active-directory metadata stack, keeps one bundle descriptor
+across preview/execution checks, re-authenticates while extracting and publishes
+only a digest-matching schema-2 external template. Key paths inside the store
+fail closed. Foreign source identity remains historical provenance and never
+authorizes local rollback. Post-commit directory-sync or hidden-link cleanup
+failures return the committed object with an explicit warning.
+
+Platform clonefile/reflink acceleration, encryption and enforceable filesystem
+freeze remain deferred. Cooperative freeze and active stationery capture are
+implemented. Stable identity upgrade, inactive display-name rename and the
+expand-phase dual-layout reader are implemented; physical hidden store-root
+migration remains deferred. ADR 0003 records the copy boundary, ADR 0008
+defines lifecycle artifacts and rollback, ADR 0009 defines authenticated
+portable bundles, and ADR 0010 defines cooperative freeze and active capture.

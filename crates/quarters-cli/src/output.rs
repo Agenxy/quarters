@@ -1,17 +1,26 @@
 //! Human and machine output contracts.
 
+mod agents;
 mod artifacts;
+mod bundles;
+mod confinement;
+mod doctor;
+mod freeze;
 
+pub(crate) use agents::{print_adapter, print_agent};
 pub(crate) use artifacts::{
     print_artifact, print_artifact_list, print_artifact_mutation, print_artifact_report, print_artifact_verified,
     print_rollback, print_template_use,
 };
+pub(crate) use bundles::{print_bundle_export, print_bundle_import, print_export_key};
+pub(crate) use freeze::print_freeze;
 
+use crate::adapter::AdapterReport;
 use crate::shortcut::{ShortcutAction, ShortcutReport};
 use clap::error::Error as ClapError;
 use quarters_core::{
-    Capabilities, CloneMode, CloneReport, LeaseState, QuartersError, RecoverySummary, RollbackIssue,
-    RollbackObservation, Space, SpaceInspection, ToolProbe,
+    AgentStatus, Capabilities, CloneMode, CloneReport, FreezeState, LeaseState, QuartersError, RecoverySummary,
+    RollbackIssue, RollbackObservation, Space, SpaceInspection, SpaceRenameReport, SpaceUpgradeReport, ToolProbe,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -19,6 +28,65 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 const OUTPUT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Copy)]
+pub(crate) struct DoctorSpace<'a> {
+    pub(crate) requested: Option<&'a str>,
+    pub(crate) space: Option<&'a Space>,
+    pub(crate) inspection_error: Option<&'a QuartersError>,
+    pub(crate) freeze_error: Option<&'a QuartersError>,
+    pub(crate) environment_validated: Option<bool>,
+    pub(crate) freeze_state: Option<FreezeState>,
+    pub(crate) lease_state: Option<LeaseState>,
+    pub(crate) agent_status: Option<&'a AgentStatus>,
+    pub(crate) adapters: Option<&'a AdapterReport>,
+}
+
+pub(crate) fn print_upgrade(
+    report: &SpaceUpgradeReport,
+    preview: bool,
+    json_output: bool,
+) -> quarters_core::Result<()> {
+    if json_output {
+        return print_success("upgrade", report, true);
+    }
+    println!(
+        "{} {}",
+        if preview { "Upgrade preview" } else { "Upgraded" },
+        report.name
+    );
+    println!("  Schema  {} -> {}", report.previous_schema, report.schema);
+    println!(
+        "  ID      {}",
+        report
+            .space_id
+            .as_deref()
+            .unwrap_or("assigned only during confirmed execution")
+    );
+    println!("  Activity {}", report.activity);
+    println!("  Boundary {}", report.boundary);
+    Ok(())
+}
+
+pub(crate) fn print_space_rename(
+    report: &SpaceRenameReport,
+    preview: bool,
+    json_output: bool,
+) -> quarters_core::Result<()> {
+    if json_output {
+        return print_success("rename", report, true);
+    }
+    println!(
+        "{} {} -> {}",
+        if preview { "Rename preview" } else { "Renamed" },
+        report.previous,
+        report.name
+    );
+    println!("  ID       {}", report.space_id);
+    println!("  Activity {}", report.activity);
+    println!("  Boundary {}", report.boundary);
+    Ok(())
+}
 
 pub(crate) fn print_success<T: Serialize>(command: &str, value: &T, json_output: bool) -> quarters_core::Result<()> {
     if json_output {
@@ -51,6 +119,64 @@ pub(crate) fn print_created(space: &Space, json_output: bool) -> quarters_core::
     Ok(())
 }
 
+pub(crate) fn print_host_fork(report: &quarters_core::HostForkReport, json_output: bool) -> quarters_core::Result<()> {
+    if json_output {
+        return print_success("create", report, true);
+    }
+    println!(
+        "{} {} from host {} policy",
+        if report.mode == quarters_core::HostForkMode::Preview {
+            "Host-fork preview for"
+        } else {
+            "Created"
+        },
+        report.destination,
+        match report.policy {
+            quarters_core::HostForkPolicy::Shell => "shell",
+        }
+    );
+    println!("  Plan       {}", report.plan_digest);
+    println!(
+        "  Selected   {} files, {} logical bytes",
+        report.file_count, report.logical_bytes
+    );
+    println!("  Missing    {} optional preset files", report.absent.len());
+    println!("  Ineligible {} optional preset files", report.ineligible.len());
+    for file in &report.files {
+        println!(
+            "  File       {} ({} bytes, {}, {})",
+            path_for_human(&file.path),
+            file.bytes,
+            file.category,
+            file.transformation
+        );
+    }
+    for entry in &report.ineligible {
+        println!("  Refused    {} ({})", path_for_human(&entry.path), entry.reason);
+    }
+    for path in &report.absent {
+        println!("  Absent     {}", path_for_human(path));
+    }
+    println!(
+        "  Conflicts  {} generated files{}",
+        report.files.iter().filter(|file| file.generated_conflict).count(),
+        if report.replace_generated {
+            " (approved)"
+        } else {
+            " (not approved)"
+        }
+    );
+    println!("  Warning    {}", report.warning);
+    println!("  Boundary   {}", report.authority_boundary);
+    if report.mode == quarters_core::HostForkMode::Preview {
+        println!(
+            "  Next       repeat the same options with --confirm-plan {}",
+            report.plan_digest
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn print_clone(report: &CloneReport, json_output: bool) -> quarters_core::Result<()> {
     if json_output {
         return print_success("clone", report, true);
@@ -77,6 +203,10 @@ pub(crate) fn print_clone(report: &CloneReport, json_output: bool) -> quarters_c
         "  Topology     {} hard-linked files copied independently, {} links into omitted cache roots",
         report.exclusions.hard_linked_files_copied_independently, report.exclusions.symlinks_into_omitted_cache_roots,
     );
+    println!(
+        "  Commands     {} managed links omitted and recreated for the destination",
+        report.exclusions.managed_command_links,
+    );
     if let Some(space_id) = &report.destination_space_id {
         println!("  New ID       {space_id}");
     }
@@ -95,13 +225,16 @@ pub(crate) fn print_recovered(summary: &RecoverySummary, json_output: bool) -> q
         return print_success("recover", summary, true);
     }
     println!(
-        "Recovered {} unfinished space creation(s), {} retired space entry(s), {} rollback transaction(s), {} artifact creation(s), {} artifact deletion(s), and {} manifest temporary file(s); {} rollback issue(s), {} space and {} artifact creation(s) remain",
+        "Recovered {} unfinished space creation(s), {} retired space entry(s), {} rename transaction(s), {} rollback transaction(s), {} artifact creation(s), {} artifact deletion(s), {} manifest temporary file(s), and {} freeze temporary file(s); {} rename issue(s), {} rollback issue(s), {} space and {} artifact creation(s) remain",
         summary.unfinished_creations,
         summary.retired_entries,
+        summary.rename_transactions,
         summary.rollback_transactions,
         summary.unfinished_artifact_creations,
         summary.reclaiming_artifacts,
         summary.artifact_manifest_temps,
+        summary.freeze_marker_temps,
+        summary.rename_issues,
         summary.rollback_issues.len(),
         summary.active_creations,
         summary.active_artifact_creations
@@ -196,7 +329,9 @@ pub(crate) fn print_list(
 pub(crate) enum StatusEntry {
     Healthy {
         space: Space,
+        freeze_state: FreezeState,
         lease_state: LeaseState,
+        agent_state: String,
     },
     Unhealthy {
         name: String,
@@ -248,7 +383,7 @@ pub(crate) fn print_status(
         print_shortcut_summaries(shortcuts);
         return Ok(());
     }
-    println!("NAME                             HEALTH     LAYOUT     LEASE    CURRENT  HOME");
+    println!("NAME                             HEALTH     LAYOUT     POLICY    LEASE    AGENT      CURRENT  HOME");
     for status in statuses {
         print_human_status(status, current);
     }
@@ -283,6 +418,7 @@ pub(crate) fn print_current(current: &str, json_output: bool) -> quarters_core::
 pub(crate) fn print_environment(
     space: &Space,
     values: &BTreeMap<String, String>,
+    confinement: Option<&quarters_core::ConfinementPlan>,
     json_output: bool,
 ) -> quarters_core::Result<()> {
     if json_output {
@@ -295,6 +431,7 @@ pub(crate) fn print_environment(
             &json!({
                 "space": safe_json_text(space.manifest().name.as_str(), 64),
                 "environment": safe_values,
+                "confinement": confinement.map(confinement::value),
             }),
             true,
         );
@@ -302,18 +439,38 @@ pub(crate) fn print_environment(
     for (name, value) in values {
         println!("{}={}", escape_for_human(name), escape_for_human(value));
     }
+    if let Some(plan) = confinement {
+        println!(
+            "Confinement=filesystem (Landlock ABI {}+, cwd {})",
+            plan.minimum_abi,
+            bounded_path_for_human(&plan.working_directory)
+        );
+        println!("ConfinementGrants={}", plan.grants.len());
+        println!("ConfinementOmittedHostPathEntries={}", plan.omitted_host_path_entries);
+    }
     Ok(())
 }
 
 pub(crate) fn print_doctor(
     capabilities: &Capabilities,
+    layout: &quarters_core::StoreLayoutDiagnosis,
     tools: &[ToolProbe],
     shortcuts: &[ShortcutReport],
-    space: Option<&Space>,
-    lease_state: Option<LeaseState>,
+    context: DoctorSpace<'_>,
     recovery: std::result::Result<&RecoverySummary, &QuartersError>,
     json_output: bool,
 ) -> quarters_core::Result<()> {
+    let DoctorSpace {
+        requested,
+        space,
+        inspection_error,
+        freeze_error,
+        environment_validated,
+        freeze_state,
+        lease_state,
+        agent_status,
+        adapters,
+    } = context;
     let recovery_value = recovery.map_or_else(
         |error| {
             json!({
@@ -328,12 +485,15 @@ pub(crate) fn print_doctor(
                 "unfinished_creations": summary.unfinished_creations,
                 "retired_entries": summary.retired_entries,
                 "rollback_transactions": summary.rollback_transactions,
+                "rename_transactions": summary.rename_transactions,
+                "rename_issues": summary.rename_issues,
                 "rollbacks": summary.rollbacks,
                 "rollback_issues": summary.rollback_issues,
                 "active_artifact_creations": summary.active_artifact_creations,
                 "unfinished_artifact_creations": summary.unfinished_artifact_creations,
                 "reclaiming_artifacts": summary.reclaiming_artifacts,
                 "artifact_manifest_temps": summary.artifact_manifest_temps,
+                "freeze_marker_temps": summary.freeze_marker_temps,
                 "orphaned_artifacts": summary.orphaned_artifacts,
                 "template_logical_bytes": summary.template_logical_bytes,
                 "snapshot_logical_bytes": summary.snapshot_logical_bytes,
@@ -343,9 +503,16 @@ pub(crate) fn print_doctor(
     );
     let result = json!({
         "platform": capabilities,
+        "store_layout": layout,
+        "space_requested": requested.map(|name| safe_json_text(name, 64)),
         "space": space.map(space_value),
-        "space_environment_validated": space.map(|_space| true),
+        "space_inspection_error": inspection_error.map(inspection_error_value),
+        "space_freeze_error": freeze_error.map(inspection_error_value),
+        "space_environment_validated": environment_validated,
+        "space_freeze_state": freeze_state.map(FreezeState::as_str),
         "space_lease_state": lease_state.map(LeaseState::as_str),
+        "space_ssh_agent": agent_status,
+        "space_command_links": adapters,
         "detached_processes": space.map(|_space| "unknown"),
         "recovery": recovery_value,
         "shortcuts": shortcuts.iter().map(shortcut_value).collect::<Vec<_>>(),
@@ -355,20 +522,21 @@ pub(crate) fn print_doctor(
     if json_output {
         return print_success("doctor", &result, true);
     }
-    print_doctor_human(capabilities, tools, shortcuts, space, lease_state, recovery);
+    print_doctor_human(capabilities, layout, tools, shortcuts, context, recovery);
     Ok(())
 }
 
 fn print_doctor_human(
     capabilities: &Capabilities,
+    layout: &quarters_core::StoreLayoutDiagnosis,
     tools: &[ToolProbe],
     shortcuts: &[ShortcutReport],
-    space: Option<&Space>,
-    lease_state: Option<LeaseState>,
+    context: DoctorSpace<'_>,
     recovery: std::result::Result<&RecoverySummary, &QuartersError>,
 ) {
     println!("Quarters doctor");
     println!("  Platform       {}", capabilities.platform);
+    doctor::print_store_layout(layout);
     println!("  Baseline       available (HOME and user-state profile)");
     println!(
         "  Workspace      {}: {}",
@@ -385,14 +553,17 @@ fn print_doctor_human(
     println!("  Authority      {}", capabilities.authority_boundary);
     match recovery {
         Ok(summary) => println!(
-            "  Recovery       {} space active, {} space unfinished, {} retired; {} artifact active, {} artifact unfinished, {} reclaiming, {} manifest temp",
+            "  Recovery       {} space active, {} space unfinished, {} retired, {} rename, {} rename issue; {} artifact active, {} artifact unfinished, {} reclaiming, {} manifest temp, {} freeze temp",
             summary.active_creations,
             summary.unfinished_creations,
             summary.retired_entries,
+            summary.rename_transactions,
+            summary.rename_issues,
             summary.active_artifact_creations,
             summary.unfinished_artifact_creations,
             summary.reclaiming_artifacts,
-            summary.artifact_manifest_temps
+            summary.artifact_manifest_temps,
+            summary.freeze_marker_temps
         ),
         Err(error) => println!("  Recovery       unavailable: {}", escape_for_human(error.message())),
     }
@@ -434,16 +605,7 @@ fn print_doctor_human(
             shortcut.context
         );
     }
-    if let (Some(space), Some(lease_state)) = (space, lease_state) {
-        println!(
-            "  Space          {} [{}] ({})",
-            space.manifest().name,
-            space.layout(),
-            path_for_human(&space.home())
-        );
-        println!("  Environment    validated");
-        println!("  Lease          {} (detached processes unknown)", lease_state.as_str());
-    }
+    print_doctor_space(context);
     println!();
     println!("TOOL             CLASS  INSTALLED  STATE ROUTE");
     for tool in tools {
@@ -456,6 +618,53 @@ fn print_doctor_human(
         );
         if let Some(limitation) = &tool.limitation {
             println!("  limitation: {limitation}");
+        }
+    }
+}
+
+fn print_doctor_space(context: DoctorSpace<'_>) {
+    if let (Some(requested), Some(error)) = (context.requested, context.inspection_error) {
+        println!("  Space          {} (not inspected)", escape_for_human(requested));
+        println!("    issue: {}", escape_for_human(error.message()));
+        if let Some(hint) = error.hint() {
+            println!("    hint: {}", escape_for_human(hint));
+        }
+        return;
+    }
+    let (Some(space), Some(lease_state)) = (context.space, context.lease_state) else {
+        return;
+    };
+    println!(
+        "  Space          {} [{}] ({})",
+        space.manifest().name,
+        space.layout(),
+        path_for_human(&space.home())
+    );
+    if context.environment_validated == Some(false) {
+        println!("  Environment    blocked by private-agent state");
+        println!(
+            "  Next           quarters agent recover {} --confirm {}",
+            space.manifest().name,
+            space.manifest().name
+        );
+    } else {
+        println!("  Environment    validated");
+    }
+    println!("  Lease          {} (detached processes unknown)", lease_state.as_str());
+    if let Some(state) = context.freeze_state {
+        println!("  Freeze         {} (cooperative policy only)", state.as_str());
+    }
+    if let Some(error) = context.freeze_error {
+        println!("  Freeze         invalid (policy fails closed)");
+        print_inspection_issue(error);
+    }
+    if let Some(agent) = context.agent_status {
+        println!("  SSH agent      {} ({})", agent.state.as_str(), agent.detail);
+    }
+    if let Some(report) = context.adapters {
+        println!("  Launcher       {}", report.launcher.state.as_str());
+        for entry in &report.tools {
+            println!("  Adapter {:<7} {}", entry.tool, entry.state.as_str());
         }
     }
 }
@@ -579,10 +788,17 @@ fn inspection_value(inspection: &SpaceInspection) -> Value {
 
 fn status_value(status: &StatusEntry, current: Option<&str>) -> Value {
     match status {
-        StatusEntry::Healthy { space, lease_state } => {
+        StatusEntry::Healthy {
+            space,
+            freeze_state,
+            lease_state,
+            agent_state,
+        } => {
             let mut value = space_value(space);
             value["health"] = Value::String("healthy".to_owned());
+            value["freeze_state"] = Value::String(freeze_state.as_str().to_owned());
             value["lease_state"] = Value::String(lease_state.as_str().to_owned());
+            value["ssh_agent_state"] = Value::String(agent_state.clone());
             value["current"] = Value::Bool(current == Some(space.manifest().name.as_str()));
             value
         }
@@ -613,14 +829,21 @@ fn status_value(status: &StatusEntry, current: Option<&str>) -> Value {
 
 fn print_human_status(status: &StatusEntry, current: Option<&str>) {
     match status {
-        StatusEntry::Healthy { space, lease_state } => {
+        StatusEntry::Healthy {
+            space,
+            freeze_state,
+            lease_state,
+            agent_state,
+        } => {
             let is_current = current == Some(space.manifest().name.as_str());
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<8} {}",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} {}",
                 space.manifest().name,
                 "healthy",
                 space.layout(),
+                freeze_state.as_str(),
                 lease_state.as_str(),
+                agent_state,
                 if is_current { "yes" } else { "no" },
                 path_for_human(&space.home())
             );
@@ -628,9 +851,11 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
         StatusEntry::Unhealthy { name, error, .. } => {
             let is_current = current == Some(name.as_str());
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<8} -",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} -",
                 entry_name_for_human(name),
                 "unhealthy",
+                "unknown",
+                "unknown",
                 "unknown",
                 "unknown",
                 if is_current { "yes" } else { "no" }
@@ -640,11 +865,13 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
         StatusEntry::Rollback { observation } => {
             let is_current = current == Some(observation.target.as_str());
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<8} -",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} -",
                 observation.target,
                 "rollback",
                 "unknown",
+                "unknown",
                 "held",
+                "unknown",
                 if is_current { "yes" } else { "no" }
             );
             println!(
@@ -658,9 +885,11 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
                 .as_ref()
                 .map_or(issue.marker.as_str(), quarters_core::SpaceName::as_str);
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<8} -",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} -",
                 entry_name_for_human(name),
                 "rollback",
+                "unknown",
+                "unknown",
                 "unknown",
                 "unknown",
                 "no"
@@ -730,6 +959,10 @@ fn escape_for_human(value: &str) -> String {
 
 fn path_for_human(path: &Path) -> String {
     escape_for_human(&path.to_string_lossy())
+}
+
+fn bounded_path_for_human(path: &Path) -> String {
+    quarters_core::escape_untrusted_text_bounded(&path.to_string_lossy(), 512)
 }
 
 fn safe_json_text(value: &str, maximum: usize) -> String {

@@ -16,25 +16,32 @@ current host. It does not read credentials.
 | bash | A | `HOME`, `.bashrc` | system login profiles can still run |
 | Prompt context | B | validated `QUARTERS_PROMPT_PREFIX` plus `shell-init` | parent themes may need explicit ordering; marker is not proof of isolation |
 | Expanded workspace | A/C | HOME/XDG plus conventional personal directories | passwd-home, platform registration and absolute paths may remain host-bound |
+| Linux filesystem confinement | C | opt-in Landlock ABI-3 policy, Quarter-home cwd, reconstructed PATH and exact policy report | Linux only; metadata, `/proc`, network, IPC, devices and inherited descriptors retain stated visibility |
+| Host shell fork | B/C | previewed descriptor-anchored selection, digest confirmation and atomic publication | entering may execute copied startup code; credentials, history and directories remain excluded |
 | Lifecycle clone | B/C | bounded native copy with explicit policy and atomic publication | detached writers unknown; selected metadata and embedded absolute paths are not transformed |
 | Named templates | B/C | canonical BLAKE3-verified portable copy plus fresh destination controls | arbitrary state may contain credentials; embedded paths are not rewritten |
+| Cooperative freeze | C | identity-bound marker blocks new managed process/agent launches and mutations of that space | existing, detached and direct same-UID writers continue; not filesystem immutability or confinement |
+| Active stationery capture | C | strict current-context evidence, existing held cooperative lease, cooperative freeze and shared-lease copy; schema-3 provenance | already-running same-UID writers may change the source during capture; earlier builds reject schema-3 local artifacts |
 | Named snapshots | B/C | immutable-by-interface recovery point with whole-tree verification | cooperative lease cannot prove detached writers are absent |
 | Rollback | C | verified recovery capture plus durable three-state whole-home replacement | old, new or marked-in-progress visibility; no recursive merge or detached-writer proof |
+| Authenticated bundle | C | keyed-BLAKE3 plaintext export of a verified artifact; retained-descriptor two-pass import as an external template | key travels separately; no confidentiality or content-safety claim; case-colliding or normalizing filesystems may refuse import |
+| Space rename | C | durable marker, same-filesystem directory move and atomic manifest replacement | display name only; detached same-UID processes remain unknown |
 | Private cleanup | C | iterative owner-checked removal with depth/count limits | mode-`000` recovery on Linux may require `/proc` for no-follow `fchmodat` emulation |
 | Git | B | `GIT_CONFIG_GLOBAL` | repository-local config still wins |
 | Git credentials | B/D | empty per-space helper | macOS Keychain is host-bound if a user adds that helper |
-| OpenSSH | C | per-space config used with `ssh -F` | macOS passwd home is unchanged; absolute invocations bypass adapters |
-| SSH agent | D | none; host `SSH_AUTH_SOCK` is cleared | private-agent lifecycle is not implemented in this alpha |
+| OpenSSH | C | managed `ssh`, `scp` and `sftp` links force protected config, user-known-hosts path and no default identity files | passwd home is unchanged; explicit or absolute host paths remain intentional bypasses |
+| `ssh-add` | C | managed link permits explicit per-space keys and agent inspection; bare/default and host-keychain import are refused | explicit host import requires `quarters host -- ssh-add ...` |
+| SSH agent | C/D | explicit private lifecycle and narrow recovery; host socket stays blocked | agent keys remain same-UID state and are not a containment boundary |
 | GitHub CLI | B | `GH_CONFIG_DIR` | environment tokens require explicit `--inherit` |
 | tmux | B | `TMUX_TMPDIR` | host sessions are intentionally not visible |
 | GnuPG | B | `GNUPGHOME`, short runtime | external keychain or hardware identity remains host hardware |
 | Python | A | `HOME`, XDG | system and site packages remain shared |
 | uv | B | cache, Python and tool directory variables | host binaries remain shared |
-| Cargo | B | `CARGO_HOME` | system and rustup toolchains may remain shared |
-| npm | B | user config and cache variables | global system prefix remains shared |
+| Cargo | B | `CARGO_HOME`; confined mode also redirects `RUSTUP_HOME` and keeps Quarter Cargo bins on PATH | baseline system and rustup toolchains may remain shared |
+| npm | B | user config and cache; confined mode uses a Quarter-local prefix | baseline global system prefix remains shared |
 | Codex | B/D | `CODEX_HOME` | OS keychain, permissions and login session remain host-bound |
 | Claude Code | B/D | `CLAUDE_CONFIG_DIR` | OS keychain, permissions and login session remain host-bound |
 | OpenCode | B | XDG and config variable | behavior depends on installed release |
-| `sudo` | D | host authority | escapes baseline; unavailable in Linux home view |
+| `sudo` | D | host authority | escapes baseline; unavailable in Linux home view and disabled by confined `no_new_privs` |
 | systemd user services | D | none | attached to real login user manager |
 | macOS Keychain and TCC | D | none | attached to real login identity and code signature |

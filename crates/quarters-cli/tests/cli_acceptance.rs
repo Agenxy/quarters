@@ -3,10 +3,10 @@
 use serde_json::Value;
 use std::error::Error;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use tempfile::TempDir;
-
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
     command.arg("--root").arg(root);
@@ -28,6 +28,43 @@ fn run(command: &mut Command) -> Result<Output, Box<dyn Error>> {
 
 fn create(root: &Path, name: &str) -> Result<(), Box<dyn Error>> {
     run(quarters(root).args(["create", name]))?;
+    Ok(())
+}
+
+#[test]
+fn shortcut_invocation_creates_a_space_with_managed_commands() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let shortcut = temporary.path().join("qts");
+    let root = temporary.path().join("store");
+    symlink(env!("CARGO_BIN_EXE_quarters"), &shortcut)?;
+    run(Command::new(&shortcut)
+        .arg("--root")
+        .arg(&root)
+        .args(["create", "shortcut"]))?;
+    for command in ["quarters", "ssh", "scp", "sftp", "ssh-add"] {
+        assert!(
+            std::fs::symlink_metadata(root.join("spaces/shortcut/home/.local/bin").join(command))?
+                .file_type()
+                .is_symlink()
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn renamed_mcp_executable_fails_before_serving() -> Result<(), Box<dyn Error>> {
+    let executable = Path::new(env!("CARGO_BIN_EXE_quarters"));
+    let parent = executable.parent().ok_or("test executable has no parent")?;
+    let temporary = tempfile::tempdir_in(parent)?;
+    let renamed = temporary.path().join("renamed-quarters");
+    std::fs::hard_link(executable, &renamed)?;
+    let output = Command::new(renamed)
+        .arg("--root")
+        .arg(temporary.path().join("store"))
+        .arg("mcp")
+        .output()?;
+    assert_eq!(output.status.code(), Some(6));
+    assert!(String::from_utf8(output.stderr)?.contains("not a protected stable Quarters launcher"));
     Ok(())
 }
 
@@ -105,6 +142,13 @@ fn mcp_stdio_serves_the_stateless_2026_path_end_to_end() -> Result<(), Box<dyn E
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
     assert!(completed.stderr.is_empty());
+    for command in ["quarters", "ssh", "scp", "sftp", "ssh-add"] {
+        assert!(
+            std::fs::symlink_metadata(temporary.path().join("spaces/agent/home/.local/bin").join(command))?
+                .file_type()
+                .is_symlink()
+        );
+    }
     Ok(())
 }
 
@@ -207,7 +251,7 @@ fn help_and_version_are_successful_control_flow() -> Result<(), Box<dyn Error>> 
     assert!(clone_help.contains("--confirm-sensitive-state"));
 
     let version = run(quarters(temporary.path()).arg("--version"))?;
-    assert!(String::from_utf8(version.stdout)?.starts_with("quarters 0.1.0-alpha.3"));
+    assert!(String::from_utf8(version.stdout)?.starts_with("quarters 0.1.0-alpha.4"));
     Ok(())
 }
 
@@ -366,11 +410,11 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
         .find(|line| line.starts_with("broken"))
         .ok_or("missing unhealthy current row")?;
     assert_eq!(
-        row.split_whitespace().take(5).collect::<Vec<_>>(),
-        ["broken", "unhealthy", "unknown", "unknown", "no"]
+        row.split_whitespace().take(7).collect::<Vec<_>>(),
+        ["broken", "unhealthy", "unknown", "unknown", "unknown", "unknown", "no"]
     );
 
-    run(quarters(temporary.path()).args(["rm", "broken", "--confirm", "broken"]))?;
+    repair_then_remove_broken_space(temporary.path(), &manifest)?;
     assert!(!temporary.path().join("spaces/broken").exists());
 
     let rogue = "\u{1b}[31mrogue-\u{202e}name-that-is-far-too-long-for-a-space";
@@ -427,6 +471,17 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
             .is_some_and(|name| name.contains("\\u{1b}") && name.contains("\\u{202e}"))
     );
     assert!(!rogue_root.exists());
+    Ok(())
+}
+
+fn repair_then_remove_broken_space(root: &Path, manifest: &Path) -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let refused = quarters(root).args(["rm", "broken", "--confirm", "broken"]).output()?;
+    assert_eq!(refused.status.code(), Some(7));
+    assert!(String::from_utf8(refused.stderr)?.contains("cannot prove private SSH-agent state is absent"));
+    std::fs::set_permissions(manifest, std::fs::Permissions::from_mode(0o600))?;
+    run(quarters(root).args(["rm", "broken", "--confirm", "broken"]))?;
     Ok(())
 }
 
@@ -489,11 +544,19 @@ fn status_reports_supervised_activity_and_current_space() -> Result<(), Box<dyn 
         .find(|line| line.starts_with("work"))
         .ok_or("missing status row")?;
     assert_eq!(
-        row.split_whitespace().take(5).collect::<Vec<_>>(),
-        ["work", "healthy", "profile", "free", "no"]
+        row.split_whitespace().take(7).collect::<Vec<_>>(),
+        ["work", "healthy", "profile", "unfrozen", "free", "unset", "no"]
     );
     assert_eq!(row.find("profile"), Some(44));
-    assert_eq!(row.find("free"), Some(55));
+    assert_eq!(row.find("unfrozen"), Some(55));
+    assert_eq!(row.find("free"), Some(65));
+    let aggregate = run(quarters(temporary.path()).args(["--json", "status"]))?;
+    let aggregate: Value = serde_json::from_slice(&aggregate.stdout)?;
+    assert!(
+        aggregate["result"]["spaces"]
+            .as_array()
+            .is_some_and(|spaces| spaces.iter().all(|space| space["ssh_agent_state"] == "not-inspected"))
+    );
     Ok(())
 }
 
@@ -695,6 +758,73 @@ fn doctor_never_creates_observation_state_through_a_linked_root() -> Result<(), 
 }
 
 #[test]
+fn doctor_reports_root_format_without_repairing_it() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = TempDir::new()?;
+    let absent = temporary.path().join("absent");
+    let doctor = run(quarters(&absent).args(["--json", "doctor"]))?;
+    let report: Value = serde_json::from_slice(&doctor.stdout)?;
+    assert_eq!(report["result"]["store_layout"]["state"], "absent");
+    assert_eq!(report["result"]["store_layout"]["writable"], true);
+    assert!(!absent.exists());
+
+    let dual = temporary.path().join("dual");
+    create(&dual, "work")?;
+    std::fs::create_dir(dual.join(".spaces"))?;
+    std::fs::set_permissions(dual.join(".spaces"), std::fs::Permissions::from_mode(0o700))?;
+    let doctor = run(quarters(&dual).args(["--json", "doctor"]))?;
+    let report: Value = serde_json::from_slice(&doctor.stdout)?;
+    assert_eq!(report["result"]["store_layout"]["state"], "ambiguous-dual-layout");
+    assert_eq!(report["result"]["store_layout"]["writable"], false);
+    assert_eq!(report["result"]["recovery"]["status"], "unavailable");
+    assert!(dual.join("spaces/work").is_dir());
+    assert!(dual.join(".spaces").is_dir());
+    let named = run(quarters(&dual).args(["--json", "doctor", "work"]))?;
+    let named: Value = serde_json::from_slice(&named.stdout)?;
+    assert_eq!(named["result"]["store_layout"]["state"], "ambiguous-dual-layout");
+    assert_eq!(named["result"]["space_requested"], "work");
+    assert_eq!(named["result"]["space"], Value::Null);
+    assert_eq!(named["result"]["space_inspection_error"]["kind"], "corrupt_state");
+
+    let staging = temporary.path().join("staging");
+    create(&staging, "work")?;
+    for index in 0..20 {
+        std::fs::write(
+            staging.join(format!(".quarters-store-staging-invalid-{index}.tmp")),
+            b"reserved",
+        )?;
+    }
+    let doctor = run(quarters(&staging).args(["--json", "doctor"]))?;
+    let report: Value = serde_json::from_slice(&doctor.stdout)?;
+    assert_eq!(
+        report["result"]["store_layout"]["state"],
+        "marked-visible-with-staging-issue"
+    );
+    assert_eq!(report["result"]["store_layout"]["root_format"], "visible");
+    assert_eq!(report["result"]["store_layout"]["writable"], true);
+    assert_eq!(
+        report["result"]["store_layout"]["staging_entries"]
+            .as_array()
+            .map(Vec::len),
+        Some(16)
+    );
+    assert_eq!(report["result"]["store_layout"]["staging_entries_at_least"], 20);
+    for index in 0..20 {
+        assert!(
+            staging
+                .join(format!(".quarters-store-staging-invalid-{index}.tmp"))
+                .is_file()
+        );
+    }
+    let doctor = run(quarters(&staging).arg("doctor"))?;
+    let human = String::from_utf8(doctor.stdout)?;
+    assert!(human.contains("staging issue:"));
+    assert!(human.contains("showing 16 of at least 20 entries"));
+    Ok(())
+}
+
+#[test]
 fn child_json_flag_does_not_change_quarters_error_format() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
     create(temporary.path(), "work")?;
@@ -815,8 +945,16 @@ fn doctor_does_not_advertise_unimplemented_confinement() -> Result<(), Box<dyn E
     let temporary = TempDir::new()?;
     let doctor = run(quarters(temporary.path()).args(["--json", "doctor"]))?;
     let report: Value = serde_json::from_slice(&doctor.stdout)?;
-    assert_eq!(report["result"]["platform"]["confinement"]["available"], false);
-    assert_eq!(report["result"]["platform"]["confinement"]["status"], "not-implemented");
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(report["result"]["platform"]["confinement"]["available"], false);
+        assert_eq!(report["result"]["platform"]["confinement"]["status"], "not-implemented");
+    }
+    #[cfg(target_os = "linux")]
+    assert!(matches!(
+        report["result"]["platform"]["confinement"]["status"].as_str(),
+        Some("experimental" | "unavailable")
+    ));
     assert!(report["result"]["space_environment_validated"].is_null());
     assert!(
         report["result"]["tools"]
@@ -868,7 +1006,7 @@ fn linux_home_view_is_exercised_or_fails_closed() -> Result<(), Box<dyn Error>> 
             "--",
             "/bin/sh",
             "-c",
-            "test -f \"$HOME/.quarters-home-view-marker\" && test \"$(quarters current)\" = work",
+            "test -f \"$HOME/.quarters-home-view-marker\" && test -f .quarters-home-view-marker && test \"$(quarters current)\" = work",
         ])
         .output()?;
 

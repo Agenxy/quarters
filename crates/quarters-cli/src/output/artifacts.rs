@@ -1,6 +1,6 @@
 //! Lifecycle artifact human and JSON presentation.
 
-use super::print_success;
+use super::{print_success, safe_json_path};
 use quarters_core::{
     Artifact, ArtifactInspection, ArtifactKind, ArtifactMutationReport, ArtifactReport, CloneMode, Result,
     RollbackMode, RollbackReport, SourceStatus, TemplateUseReport, escape_untrusted_text_bounded,
@@ -37,7 +37,12 @@ pub(crate) fn print_artifact_report(report: &ArtifactReport, json_output: bool) 
         if report.include_cache { "included" } else { "omitted" }
     );
     println!("  Sensitive    included; arbitrary state may contain credentials");
-    println!("  Activity     detached processes unknown");
+    println!("  Source state {}", report.source_quiescence.as_str());
+    if report.source_quiescence == quarters_core::SourceQuiescence::FrozenActive {
+        println!("  Writers      already-running and direct same-UID writers remain possible");
+    } else {
+        println!("  Writers      detached same-UID processes remain unknown");
+    }
     println!("  Boundary     host account authority is unchanged; this is not containment");
     Ok(())
 }
@@ -86,8 +91,20 @@ pub(crate) fn print_artifact(artifact: &Artifact, source_status: SourceStatus, j
     }
     println!("{} {}", artifact.manifest().kind.as_str(), artifact.manifest().name);
     println!("  ID           {}", artifact.manifest().artifact_id);
-    println!("  Source       {}", artifact.manifest().source_identity.name);
+    let source = artifact
+        .manifest()
+        .source_identity
+        .as_ref()
+        .map_or("external bundle", |identity| identity.name.as_str());
+    println!("  Source       {source}");
     println!("  Source state {}", source_status_text(source_status));
+    println!(
+        "  Quiescence   {}",
+        artifact
+            .manifest()
+            .source_quiescence
+            .map_or("historical-unrecorded", quarters_core::SourceQuiescence::as_str)
+    );
     println!("  Platform     {}", artifact.manifest().source_platform);
     println!("  Digest       {}", artifact.manifest().content_integrity.digest);
     println!(
@@ -204,10 +221,27 @@ fn inspection_value(inspection: &ArtifactInspection) -> Value {
 }
 
 fn artifact_value(artifact: &Artifact, source_status: SourceStatus) -> Value {
+    let manifest = artifact.manifest();
     json!({
         "health": "healthy",
         "source_status": source_status_text(source_status),
-        "manifest": artifact.manifest(),
+        "manifest": {
+            "schema_version": manifest.schema_version,
+            "artifact_id": manifest.artifact_id,
+            "kind": manifest.kind,
+            "name": manifest.name,
+            "created_unix_ms": manifest.created_unix_ms,
+            "source_identity": manifest.source_identity,
+            "source_layout": manifest.source_layout,
+            "source_platform": manifest.source_platform,
+            "default_shell": safe_json_path(&manifest.default_shell),
+            "include_cache": manifest.include_cache,
+            "includes_sensitive_state": manifest.includes_sensitive_state,
+            "origin": manifest.origin,
+            "imported_bundle": manifest.imported_bundle,
+            "source_quiescence": manifest.source_quiescence,
+            "content_integrity": manifest.content_integrity,
+        },
         "integrity_boundary": "detects accidental or out-of-band modification; not same-account authentication",
     })
 }
@@ -216,5 +250,6 @@ const fn source_status_text(status: SourceStatus) -> &'static str {
     match status {
         SourceStatus::Present => "present",
         SourceStatus::Orphaned => "orphaned",
+        SourceStatus::External => "external",
     }
 }

@@ -21,10 +21,12 @@ The baseline is state redirection, not containment.
 
 ## Workflow
 
-Use Rust 1.97.1 and run `make check`. Every warning is an error. The native
-quality gate enforces source files at 1,024 lines, functions at 128 lines, type
-bodies at 512 lines, eight parameters, cyclomatic complexity 16 and nesting
-eight. Never weaken a gate to land a change.
+Use Rust 1.97.1, Bun 1.3.14 and Node.js 26.2.0, then run `make check`. Bun
+manages development dependencies and scripts for the typed npm launcher; npm
+remains its registry packaging and publication interface. Every warning is an
+error. The native quality gate enforces source files at 1,024 lines, functions
+at 128 lines, type bodies at 512 lines, eight parameters, cyclomatic complexity
+16 and nesting eight. Never weaken a gate to land a change.
 
 Read `docs/security/THREAT-MODEL.md` before changing process launching,
 environment policy, filesystem behavior or platform capabilities. Add an ADR

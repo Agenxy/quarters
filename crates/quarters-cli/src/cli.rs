@@ -26,12 +26,26 @@ pub(crate) enum Command {
     Create(CreateArgs),
     /// Clone persistent state into a new independent space.
     Clone(CloneArgs),
+    /// Assign stable identity to an inactive legacy space.
+    Upgrade(UpgradeArgs),
+    /// Change an inactive stable-identity space display name.
+    Rename(RenameArgs),
+    /// Block new Quarters-managed launches and mutations.
+    Freeze(FreezeArgs),
+    /// Remove a cooperative freeze marker after exact confirmation.
+    Unfreeze(UnfreezeArgs),
     /// Create and manage reusable named creation sources.
     Template(TemplateArgs),
     /// Create and manage named recovery points.
     Snapshot(SnapshotArgs),
     /// Replace a Quarter from a snapshot after capturing recovery.
     Rollback(RollbackArgs),
+    /// Export an authenticated plaintext template or snapshot bundle.
+    Export(ExportArgs),
+    /// Authenticate a bundle and import it as a fresh template.
+    Import(ImportArgs),
+    /// Create private authentication keys for portable bundles.
+    ExportKey(ExportKeyArgs),
     /// List each space entry, its health and its stored home.
     List,
     /// Report current and cooperative lease state for spaces.
@@ -46,6 +60,10 @@ pub(crate) enum Command {
     Exec(ExecArgs),
     /// Run a command with host user-state paths from a baseline space.
     Host(RawCommand),
+    /// Manage a verified private OpenSSH agent for one space.
+    Agent(AgentArgs),
+    /// Inspect or manage compiled OpenSSH invocation adapters.
+    Adapter(AdapterArgs),
     /// Inspect capabilities and optionally prepare and validate one environment.
     Doctor(DoctorArgs),
     /// Remove an inactive space after exact-name confirmation.
@@ -61,6 +79,9 @@ pub(crate) enum Command {
     /// Internal Linux launcher used to isolate namespace setup to a child.
     #[command(name = "__linux-launch", hide = true)]
     LinuxLaunch(LinuxLaunchArgs),
+    /// Internal launcher which becomes the fixed OpenSSH agent executable.
+    #[command(name = "__agent-launch", hide = true)]
+    AgentLaunch(AgentLaunchArgs),
 }
 
 #[derive(Debug, Args)]
@@ -75,6 +96,40 @@ pub(crate) struct CreateArgs {
     /// User-directory layout to create.
     #[arg(long, value_enum, default_value_t = CreateLayout::Profile)]
     pub(crate) layout: CreateLayout,
+
+    /// Preview or import a closed set of host-owned state.
+    #[arg(long, value_enum)]
+    pub(crate) from_host: Option<CreateHostPolicy>,
+
+    /// Add one explicit regular file beneath host HOME (maximum 32).
+    #[arg(long, value_name = "RELATIVE_PATH", requires = "from_host")]
+    pub(crate) from_host_path: Vec<PathBuf>,
+
+    /// Validate and print the exact metadata-bound host-fork plan.
+    #[arg(long, requires = "from_host", conflicts_with = "confirm_plan")]
+    pub(crate) preview: bool,
+
+    /// Execute only the exact 64-hex digest returned by preview.
+    #[arg(long, value_name = "DIGEST", requires = "from_host", conflicts_with = "preview")]
+    pub(crate) confirm_plan: Option<String>,
+
+    /// Replace generated files selected by the confirmed plan.
+    #[arg(long, requires = "from_host")]
+    pub(crate) replace_generated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CreateHostPolicy {
+    /// Selected startup and editing convention files; no credentials or history.
+    Shell,
+}
+
+impl From<CreateHostPolicy> for quarters_core::HostForkPolicy {
+    fn from(value: CreateHostPolicy) -> Self {
+        match value {
+            CreateHostPolicy::Shell => Self::Shell,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -96,6 +151,47 @@ pub(crate) struct CloneArgs {
     /// Copy derived cache contents instead of recreating cache roots empty.
     #[arg(long)]
     pub(crate) include_cache: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UpgradeArgs {
+    /// Existing space to inspect or upgrade.
+    pub(crate) name: String,
+    /// Validate lease and schema without changing metadata.
+    #[arg(long, conflicts_with = "confirm")]
+    pub(crate) preview: bool,
+    /// Exactly repeat NAME to execute the metadata upgrade.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RenameArgs {
+    /// Current space name.
+    pub(crate) previous: String,
+    /// New space name.
+    pub(crate) name: String,
+    /// Validate identities, activity and collisions without changing state.
+    #[arg(long, conflicts_with = "confirm")]
+    pub(crate) preview: bool,
+    /// Exactly repeat PREVIOUS to execute the recoverable rename.
+    #[arg(long, value_name = "PREVIOUS")]
+    pub(crate) confirm: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FreezeArgs {
+    /// Space name. Defaults to the current Quarter when inside one.
+    pub(crate) name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UnfreezeArgs {
+    /// Space name. Defaults to the current Quarter when inside one.
+    pub(crate) name: Option<String>,
+    /// Must exactly repeat the resolved space name.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: String,
 }
 
 #[derive(Debug, Args)]
@@ -147,8 +243,16 @@ pub(crate) struct ArtifactCreateArgs {
     /// New artifact display name.
     pub(crate) name: String,
     /// Existing source Quarter.
-    #[arg(long = "from", value_name = "SPACE")]
-    pub(crate) source: String,
+    #[arg(
+        long = "from",
+        value_name = "SPACE",
+        required_unless_present = "from_active",
+        conflicts_with = "from_active"
+    )]
+    pub(crate) source: Option<String>,
+    /// Capture immediately from the current cooperatively frozen Quarter.
+    #[arg(long, conflicts_with = "source")]
+    pub(crate) from_active: bool,
     /// Validate and summarize without creating an artifact.
     #[arg(long, conflicts_with = "confirm_sensitive_state")]
     pub(crate) preview: bool,
@@ -247,6 +351,79 @@ pub(crate) struct RollbackArgs {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ExportKind {
+    /// Reusable creation source.
+    Template,
+    /// Named recovery point; imports as a template.
+    Snapshot,
+}
+
+impl From<ExportKind> for quarters_core::ArtifactKind {
+    fn from(value: ExportKind) -> Self {
+        match value {
+            ExportKind::Template => Self::Template,
+            ExportKind::Snapshot => Self::Snapshot,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ExportArgs {
+    /// Artifact category.
+    #[arg(value_enum)]
+    pub(crate) kind: ExportKind,
+    /// Existing artifact display name.
+    pub(crate) name: String,
+    /// Absolute bundle destination outside the Quarters store.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) to: PathBuf,
+    /// Absolute private 32-byte key file in a protected directory outside the Quarters store.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) key: PathBuf,
+    /// Authenticate inputs and report the exact policy without writing.
+    #[arg(long, conflicts_with = "confirm_sensitive_state")]
+    pub(crate) preview: bool,
+    /// Exactly repeat NAME to acknowledge plaintext sensitive-state export.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm_sensitive_state: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ImportArgs {
+    /// Absolute path to one authenticated bundle.
+    pub(crate) bundle: PathBuf,
+    /// New local template display name.
+    pub(crate) name: String,
+    /// Absolute private 32-byte key file in a protected directory outside the Quarters store.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) key: PathBuf,
+    /// Authenticate and return the exact plan digest without mutation.
+    #[arg(long, conflicts_with = "confirm_plan")]
+    pub(crate) preview: bool,
+    /// Execute only the exact digest returned by preview.
+    #[arg(long, value_name = "DIGEST")]
+    pub(crate) confirm_plan: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ExportKeyArgs {
+    #[command(subcommand)]
+    pub(crate) command: ExportKeyCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ExportKeyCommand {
+    /// Create one no-clobber mode-0600 random key file.
+    Create(ExportKeyCreateArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ExportKeyCreateArgs {
+    /// Absolute destination in a protected current-user directory.
+    pub(crate) path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum CreateLayout {
     /// Minimal shell and CLI state profile.
     Profile,
@@ -278,9 +455,19 @@ pub(crate) struct ProfileArgs {
     #[arg(long)]
     pub(crate) home_view: bool,
 
+    /// Enforce the named native filesystem policy; starts in the Quarter home.
+    #[arg(long, value_enum)]
+    pub(crate) confinement: Option<ConfinementArg>,
+
     /// Explicitly inherit one otherwise-blocked host environment variable.
     #[arg(long = "inherit", value_name = "NAME")]
     pub(crate) inherit: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ConfinementArg {
+    /// Linux Landlock ABI 3 path policy; unavailable on macOS.
+    Filesystem,
 }
 
 #[derive(Debug, Args)]
@@ -312,6 +499,57 @@ pub(crate) struct RawCommand {
     /// Command and arguments. Put `--` before options meant for the command.
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) command: Vec<OsString>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentArgs {
+    #[command(subcommand)]
+    pub(crate) command: AgentCommand,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AdapterArgs {
+    #[command(subcommand)]
+    pub(crate) command: AdapterCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AdapterCommand {
+    /// Inspect the closed managed launcher set without changing it.
+    Status(AgentTargetArgs),
+    /// Install only absent managed launcher links.
+    Install(AgentTargetArgs),
+    /// Remove only verified OpenSSH adapter links.
+    Remove(AgentTargetArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentCommand {
+    /// Inspect process, socket identity and protocol liveness.
+    Status(AgentTargetArgs),
+    /// Start a private OpenSSH agent, or report the verified active agent.
+    Start(AgentTargetArgs),
+    /// Stop only an identity-verified private OpenSSH agent.
+    Stop(AgentTargetArgs),
+    /// Stop and start the private OpenSSH agent.
+    Restart(AgentTargetArgs),
+    /// Reconcile only dead or protocol-verified private-agent state.
+    Recover(AgentRecoverArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentTargetArgs {
+    /// Space name. Defaults to the current Quarter when inside one.
+    pub(crate) name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentRecoverArgs {
+    /// Space whose private-agent state should be reconciled.
+    pub(crate) name: String,
+    /// Must exactly repeat the space name.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: String,
 }
 
 #[derive(Debug, Args)]
@@ -384,7 +622,17 @@ pub(crate) struct LinuxLaunchArgs {
     #[arg(long)]
     pub(crate) space_home: PathBuf,
     #[arg(long)]
-    pub(crate) host_home: PathBuf,
+    pub(crate) host_home: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) runtime_dir: PathBuf,
+    #[arg(long)]
+    pub(crate) confinement: bool,
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) command: Vec<OsString>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentLaunchArgs {
+    #[arg(long)]
+    pub(crate) space: String,
 }

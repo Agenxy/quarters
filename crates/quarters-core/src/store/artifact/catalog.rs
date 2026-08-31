@@ -2,15 +2,20 @@
 
 use super::integrity::{digest_home, verify_home};
 use super::model::{
-    ARTIFACT_SCHEMA_VERSION, Artifact, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest,
-    ArtifactMutationReport, ArtifactName, ArtifactOrigin, ArtifactReport, SourceIdentity, SourceStatus,
-    TemplateUseReport,
+    Artifact, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest, ArtifactMutationReport, ArtifactName,
+    ArtifactOrigin, ArtifactReport, IMPORTED_ARTIFACT_SCHEMA_VERSION, LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION,
+    LOCAL_ARTIFACT_SCHEMA_VERSION, SourceIdentity, SourceQuiescence, SourceStatus, TemplateUseReport,
 };
 use crate::store::create::{acquire_creation_lock, ensure_directory_skeleton, write_manifest};
-use crate::store::lifecycle::{CloneMode, CloneReport, WalkControl, remove_tree_restoring_owner_access, walk_home};
+use crate::store::lifecycle::{
+    CloneMode, CloneReport, StagingIdentity, WalkControl, remove_tree_restoring_owner_access, walk_home,
+};
+use crate::store::scan::ScanBudget;
 use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease};
 use crate::store_policy::{validate_private_dir, validate_shell};
-use crate::{ErrorKind, QuartersError, Result, SpaceId, SpaceLayout, SpaceManifest, SpaceName, Store};
+use crate::{
+    ErrorKind, FreezeState, QuartersError, Result, STABLE_SCHEMA_VERSION, SpaceId, SpaceManifest, SpaceName, Store,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -45,7 +50,14 @@ impl Store {
         let setup = ArtifactSetup::prepare(self, kind, source, name, CloneMode::Preview)?;
         let mut clone = setup.clone_report(include_cache);
         walk_home(&setup.source.home(), None, &mut clone, &artifact_walk_control())?;
-        Ok(report_from_clone(kind, name, &clone, None, None))
+        Ok(report_from_clone(
+            kind,
+            name,
+            &clone,
+            SourceQuiescence::Inactive,
+            None,
+            None,
+        ))
     }
 
     /// Create and atomically publish a named lifecycle artifact.
@@ -66,7 +78,7 @@ impl Store {
         let result = self.execute_artifact(&mut setup, name, include_cache, origin);
         if let Err(original) = &result
             && let Some(staging) = &setup.staging
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(QuartersError::new(
                 original.kind(),
@@ -93,7 +105,7 @@ impl Store {
         let result = self.execute_artifact(&mut setup, name, include_cache, origin);
         if let Err(original) = &result
             && let Some(staging) = &setup.staging
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(QuartersError::new(
                 original.kind(),
@@ -113,7 +125,7 @@ impl Store {
     ///
     /// Fails when the category root cannot be validated or exceeds its bound.
     pub fn inspect_artifacts(&self, kind: ArtifactKind) -> Result<Vec<ArtifactInspection>> {
-        let Some(root) = self.existing_artifact_root(kind)? else {
+        let Some(root) = existing_artifact_root(self, kind)? else {
             return Ok(Vec::new());
         };
         let rollback_inventory = match self.existing_spaces_root()? {
@@ -126,10 +138,26 @@ impl Store {
             .map(|observation| observation.target)
             .chain(rollback_inventory.issues.into_iter().filter_map(|issue| issue.target))
             .collect::<BTreeSet<_>>();
+        let stable_sources = self
+            .inspect()?
+            .into_iter()
+            .filter_map(|inspection| match inspection {
+                crate::SpaceInspection::Healthy(space) => space.id().map(|id| {
+                    (
+                        id.as_str().to_owned(),
+                        space.manifest().created_unix_ms,
+                        space.manifest().schema_version,
+                    )
+                }),
+                crate::SpaceInspection::Unhealthy { .. } => None,
+            })
+            .collect::<BTreeSet<_>>();
         let mut inspections = Vec::new();
         let entries = fs::read_dir(&root).map_err(|error| QuartersError::io("read artifact catalog", &root, error))?;
+        let mut scan = ScanBudget::new("the artifact catalog");
         for entry in entries {
             let entry = entry.map_err(|error| QuartersError::io("read artifact entry", &root, error))?;
+            scan.observe()?;
             let id = entry.file_name().to_string_lossy().into_owned();
             if id.starts_with('.') {
                 continue;
@@ -145,7 +173,7 @@ impl Store {
             }
             let inspection = match Self::open_artifact_path(kind, entry.path()) {
                 Ok(artifact) => ArtifactInspection::Healthy {
-                    source_status: self.source_status(&artifact, &rollback_targets),
+                    source_status: source_status(self, &artifact, &rollback_targets, &stable_sources),
                     artifact: Box::new(artifact),
                 },
                 Err(error) => ArtifactInspection::Unhealthy { id, error },
@@ -162,24 +190,39 @@ impl Store {
     ///
     /// Fails when absent, duplicated or corrupt.
     pub fn open_artifact(&self, kind: ArtifactKind, name: &ArtifactName) -> Result<Artifact> {
+        self.open_artifact_with_status(kind, name)
+            .map(|(artifact, _status)| artifact)
+    }
+
+    /// Resolve one artifact and its source status in one bounded catalog pass.
+    ///
+    /// # Errors
+    ///
+    /// Fails when absent, duplicated or corrupt.
+    pub fn open_artifact_with_status(
+        &self,
+        kind: ArtifactKind,
+        name: &ArtifactName,
+    ) -> Result<(Artifact, SourceStatus)> {
         let mut found = None;
         for inspection in self.inspect_artifacts(kind)? {
             match inspection {
-                ArtifactInspection::Healthy { artifact, .. } if artifact.manifest().name == *name => {
+                ArtifactInspection::Healthy {
+                    artifact,
+                    source_status,
+                } if artifact.manifest().name == *name => {
                     if found.is_some() {
                         return Err(QuartersError::new(
                             ErrorKind::CorruptState,
                             format!("duplicate {} name '{}'", kind.as_str(), name),
                         ));
                     }
-                    found = Some(artifact);
+                    found = Some((*artifact, source_status));
                 }
                 ArtifactInspection::Healthy { .. } | ArtifactInspection::Unhealthy { .. } => {}
             }
         }
-        found
-            .map(|artifact| *artifact)
-            .ok_or_else(|| artifact_not_found(kind, name))
+        found.ok_or_else(|| artifact_not_found(kind, name))
     }
 
     /// Recompute and compare one artifact's canonical integrity record.
@@ -232,7 +275,7 @@ impl Store {
         let staging = prepare_space_staging(self, destination)?;
         let result = self.execute_template_use(&template, destination, &selected_shell, &staging);
         if let Err(original) = &result
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(QuartersError::new(
                 original.kind(),
@@ -258,7 +301,7 @@ impl Store {
         name: &ArtifactName,
     ) -> Result<ArtifactMutationReport> {
         let verified = self.verify_artifact(kind, previous)?;
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         let current = self.open_artifact(kind, previous)?;
         if current.manifest() != verified.manifest() {
             return Err(QuartersError::new(
@@ -287,7 +330,7 @@ impl Store {
     pub fn remove_artifact(&self, kind: ArtifactKind, name: &ArtifactName) -> Result<ArtifactMutationReport> {
         let verified = self.verify_artifact(kind, name)?;
         let (retired, report) = {
-            let _management = self.management_guard()?;
+            let _management = self.begin_mutation()?;
             let current = self.open_artifact(kind, name)?;
             if current.manifest() != verified.manifest() {
                 return Err(QuartersError::new(
@@ -320,7 +363,7 @@ impl Store {
         Ok(report)
     }
 
-    fn execute_artifact(
+    pub(super) fn execute_artifact(
         &self,
         setup: &mut ArtifactSetup,
         name: ArtifactName,
@@ -340,18 +383,20 @@ impl Store {
         )?;
         let integrity = digest_home(&staging.temporary.join("home"))?;
         let manifest = ArtifactManifest {
-            schema_version: ARTIFACT_SCHEMA_VERSION,
+            schema_version: LOCAL_ARTIFACT_SCHEMA_VERSION,
             artifact_id: staging.id.clone(),
             kind: setup.kind,
             name,
             created_unix_ms: epoch_millis()?,
-            source_identity: SourceIdentity::for_space(&setup.source),
+            source_identity: Some(SourceIdentity::for_space(&setup.source)),
             source_layout: setup.source.layout(),
             source_platform: crate::platform::capabilities().platform,
             default_shell: setup.source.manifest().default_shell.clone(),
             include_cache,
             includes_sensitive_state: true,
             origin,
+            imported_bundle: None,
+            source_quiescence: Some(setup.source_quiescence),
             content_integrity: integrity.clone(),
         };
         write_artifact_manifest(&staging.temporary, &manifest)?;
@@ -364,6 +409,7 @@ impl Store {
             setup.kind,
             &manifest.name,
             &clone,
+            setup.source_quiescence,
             Some(&manifest.artifact_id),
             Some(integrity.counts),
         ))
@@ -396,6 +442,7 @@ impl Store {
         write_template_provenance(&staging.temporary, template)?;
         sync_directory(&staging.temporary.join("home"))?;
         sync_directory(&staging.temporary)?;
+        self.verify_artifact(ArtifactKind::Template, &template.manifest().name)?;
         self.publish_template_space(template, &manifest, staging)?;
         Ok(template_use_report(
             template,
@@ -411,7 +458,7 @@ impl Store {
         manifest: &SpaceManifest,
         staging: &SpaceStaging,
     ) -> Result<()> {
-        let _management = self.management_guard()?;
+        let management = self.begin_mutation()?;
         let current = self.open_artifact(ArtifactKind::Template, &template.manifest().name)?;
         if current.manifest() != template.manifest() {
             return Err(QuartersError::new(
@@ -419,14 +466,17 @@ impl Store {
                 "template changed during use",
             ));
         }
-        reject_space_destination(self, &manifest.name)?;
+        reject_space_destination_at(self, &manifest.name, &management.layout().space_path(&manifest.name))?;
+        staging
+            .identity
+            .verify(&staging.temporary, &staging.creation_lock_path)?;
         fs::remove_file(&staging.creation_lock_path)
             .map_err(|error| QuartersError::io("remove template staging lock", &staging.creation_lock_path, error))?;
         sync_directory(&staging.temporary)?;
         super::super::validate_space_anchors(&staging.temporary)?;
         fs::rename(&staging.temporary, &staging.destination)
             .map_err(|error| QuartersError::io("publish template destination", &staging.temporary, error))?;
-        sync_directory(self.layout().spaces_root())
+        sync_directory(management.layout().spaces_root())
     }
 
     fn publish_artifact(&self, setup: &ArtifactSetup, manifest: &ArtifactManifest) -> Result<()> {
@@ -434,13 +484,22 @@ impl Store {
             .staging
             .as_ref()
             .ok_or_else(|| QuartersError::new(ErrorKind::System, "artifact publication has no staging state"))?;
-        let _management = self.management_guard()?;
+        let _management = self.begin_mutation()?;
         let current = self.open(&setup.source.manifest().name)?;
         if current.manifest() != &setup.source_manifest {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 "source manifest changed during artifact creation",
             ));
+        }
+        if setup.source_quiescence == SourceQuiescence::FrozenActive
+            && self.freeze_state(&current)? != FreezeState::Frozen
+        {
+            return Err(QuartersError::new(
+                ErrorKind::SpaceActive,
+                "the cooperative freeze was removed during active artifact capture",
+            )
+            .with_hint("freeze the source again and repeat the capture; nothing was published"));
         }
         self.require_artifact_name_available(setup.kind, &manifest.name)?;
         if entry_exists(&staging.destination)? {
@@ -449,6 +508,9 @@ impl Store {
                 "generated artifact ID already exists",
             ));
         }
+        staging
+            .identity
+            .verify(&staging.temporary, &staging.creation_lock_path)?;
         fs::remove_file(&staging.creation_lock_path)
             .map_err(|error| QuartersError::io("remove artifact staging lock", &staging.creation_lock_path, error))?;
         sync_directory(&staging.temporary)?;
@@ -463,7 +525,9 @@ impl Store {
             .map_err(|error| QuartersError::io("publish artifact", &staging.temporary, error))?;
         sync_directory(&staging.root)
     }
+}
 
+impl Store {
     pub(super) fn require_artifact_name_available(&self, kind: ArtifactKind, name: &ArtifactName) -> Result<()> {
         match self.open_artifact(kind, name) {
             Ok(_artifact) => Err(QuartersError::new(
@@ -475,7 +539,7 @@ impl Store {
         }
     }
 
-    fn open_artifact_path(kind: ArtifactKind, path: PathBuf) -> Result<Artifact> {
+    pub(super) fn open_artifact_path(kind: ArtifactKind, path: PathBuf) -> Result<Artifact> {
         let metadata = fs::symlink_metadata(&path)
             .map_err(|error| QuartersError::io("inspect artifact directory", &path, error))?;
         validate_private_dir(&path, &metadata)?;
@@ -487,10 +551,16 @@ impl Store {
         let header: ArtifactHeader = serde_json::from_slice(&bytes).map_err(|error| {
             QuartersError::new(ErrorKind::CorruptState, "artifact manifest header is invalid").with_source(error)
         })?;
-        if header.schema_version != ARTIFACT_SCHEMA_VERSION {
+        if !matches!(
+            header.schema_version,
+            LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION | LOCAL_ARTIFACT_SCHEMA_VERSION
+        ) {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
-                format!("unsupported artifact schema {}", header.schema_version),
+                format!(
+                    "artifact uses schema {}, but this build supports schemas {} through {}",
+                    header.schema_version, LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION, LOCAL_ARTIFACT_SCHEMA_VERSION
+                ),
             ));
         }
         let manifest: ArtifactManifest = serde_json::from_slice(&bytes).map_err(|error| {
@@ -510,55 +580,78 @@ impl Store {
         }
         Ok(Artifact::new(path, manifest))
     }
+}
 
-    fn source_status(&self, artifact: &Artifact, rollback_targets: &BTreeSet<SpaceName>) -> SourceStatus {
-        let identity = &artifact.manifest().source_identity;
-        if rollback_targets.contains(&identity.name) {
-            return SourceStatus::Orphaned;
-        }
-        match self.inspect_named_without_rollback(&identity.name) {
-            Ok(crate::SpaceInspection::Healthy(space)) if identity.matches(&space) => SourceStatus::Present,
-            Ok(crate::SpaceInspection::Healthy(_) | crate::SpaceInspection::Unhealthy { .. }) | Err(_) => {
-                SourceStatus::Orphaned
-            }
-        }
+fn existing_artifact_root(store: &Store, kind: ArtifactKind) -> Result<Option<PathBuf>> {
+    let root = artifact_root(store, kind);
+    let metadata = match fs::symlink_metadata(&root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(QuartersError::io("inspect artifact root", &root, error)),
+    };
+    validate_private_dir(&root, &metadata)?;
+    Ok(Some(root))
+}
+
+fn source_status(
+    store: &Store,
+    artifact: &Artifact,
+    rollback_targets: &BTreeSet<SpaceName>,
+    stable_sources: &BTreeSet<(String, u128, u32)>,
+) -> SourceStatus {
+    let Some(identity) = &artifact.manifest().source_identity else {
+        return SourceStatus::External;
+    };
+    if rollback_targets.contains(&identity.name) {
+        return SourceStatus::Orphaned;
     }
-
-    fn existing_artifact_root(&self, kind: ArtifactKind) -> Result<Option<PathBuf>> {
-        let root = artifact_root(self, kind);
-        let metadata = match fs::symlink_metadata(&root) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(QuartersError::io("inspect artifact root", &root, error)),
+    if let Some(space_id) = &identity.space_id {
+        let present = stable_sources.contains(&(
+            space_id.as_str().to_owned(),
+            identity.created_unix_ms,
+            identity.schema_version,
+        ));
+        return if present {
+            SourceStatus::Present
+        } else {
+            SourceStatus::Orphaned
         };
-        validate_private_dir(&root, &metadata)?;
-        Ok(Some(root))
+    }
+    match store.inspect_named_without_rollback(&identity.name) {
+        Ok(crate::SpaceInspection::Healthy(space)) if identity.matches(&space) => SourceStatus::Present,
+        Ok(crate::SpaceInspection::Healthy(_) | crate::SpaceInspection::Unhealthy { .. }) | Err(_) => {
+            SourceStatus::Orphaned
+        }
     }
 }
 
-struct ArtifactSetup {
-    kind: ArtifactKind,
-    source: crate::Space,
-    source_manifest: crate::SpaceManifest,
-    _activity_lock: Option<LifecycleLease>,
-    mode: CloneMode,
-    name: ArtifactName,
-    staging: Option<ArtifactStaging>,
+pub(super) struct ArtifactSetup {
+    pub(super) kind: ArtifactKind,
+    pub(super) source: crate::Space,
+    pub(super) source_manifest: crate::SpaceManifest,
+    pub(super) _activity_lock: Option<LifecycleLease>,
+    pub(super) _active_lock: Option<crate::SpaceLease>,
+    pub(super) source_quiescence: SourceQuiescence,
+    pub(super) mode: CloneMode,
+    pub(super) name: ArtifactName,
+    pub(super) staging: Option<ArtifactStaging>,
 }
 
 pub(super) struct SpaceStaging {
     pub(super) temporary: PathBuf,
     pub(super) destination: PathBuf,
     pub(super) creation_lock_path: PathBuf,
+    pub(super) identity: StagingIdentity,
     pub(super) _creation_lock: File,
 }
 
-struct ArtifactStaging {
-    id: ArtifactId,
-    root: PathBuf,
-    temporary: PathBuf,
-    destination: PathBuf,
-    creation_lock_path: PathBuf,
+pub(super) struct ArtifactStaging {
+    pub(super) id: ArtifactId,
+    pub(super) root: PathBuf,
+    pub(super) temporary: PathBuf,
+    pub(super) destination: PathBuf,
+    pub(super) creation_lock_path: PathBuf,
+    pub(super) identity: StagingIdentity,
     _creation_lock: File,
 }
 
@@ -573,7 +666,8 @@ impl ArtifactSetup {
         if mode == CloneMode::Execute {
             store.ensure_layout()?;
         }
-        let management = store.management_guard()?;
+        store.ensure_no_rename_target(source)?;
+        let management = store.begin_mutation()?;
         let source_space = store.open(source)?;
         validate_shell(&source_space.manifest().default_shell)?;
         let activity_lock = acquire_lifecycle_lease(&source_space, source.as_str())?;
@@ -589,6 +683,8 @@ impl ArtifactSetup {
             source_manifest: source_space.manifest().clone(),
             source: source_space,
             _activity_lock: Some(activity_lock),
+            _active_lock: None,
+            source_quiescence: SourceQuiescence::Inactive,
             mode,
             name: name.clone(),
             staging,
@@ -602,7 +698,7 @@ impl ArtifactSetup {
         name: &ArtifactName,
     ) -> Result<Self> {
         store.ensure_layout()?;
-        let management = store.management_guard()?;
+        let management = store.begin_mutation()?;
         let current = store.open(&source.manifest().name)?;
         if current.manifest() != source.manifest() {
             return Err(QuartersError::new(
@@ -618,13 +714,15 @@ impl ArtifactSetup {
             source: source.clone(),
             source_manifest: source.manifest().clone(),
             _activity_lock: None,
+            _active_lock: None,
+            source_quiescence: SourceQuiescence::Inactive,
             mode: CloneMode::Execute,
             name: name.clone(),
             staging,
         })
     }
 
-    fn clone_report(&self, include_cache: bool) -> CloneReport {
+    pub(super) fn clone_report(&self, include_cache: bool) -> CloneReport {
         CloneReport::new(
             self.source.manifest().name.as_str(),
             self.name.as_str(),
@@ -635,7 +733,7 @@ impl ArtifactSetup {
     }
 }
 
-fn prepare_artifact_staging(store: &Store, kind: ArtifactKind) -> Result<ArtifactStaging> {
+pub(super) fn prepare_artifact_staging(store: &Store, kind: ArtifactKind) -> Result<ArtifactStaging> {
     let root = artifact_root(store, kind);
     create_private_dir(&root)?;
     let id = ArtifactId::generate()?;
@@ -650,21 +748,28 @@ fn prepare_artifact_staging(store: &Store, kind: ArtifactKind) -> Result<Artifac
     create_private_dir(&temporary)?;
     let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
     let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
-    create_private_dir(&temporary.join("home"))?;
+    let identity = StagingIdentity::capture(&temporary, &creation_lock)?;
+    if let Err(error) = create_private_dir(&temporary.join("home")) {
+        let _cleanup = identity.cleanup(&temporary);
+        return Err(error);
+    }
     Ok(ArtifactStaging {
         id,
         root,
         temporary,
         destination,
         creation_lock_path,
+        identity,
         _creation_lock: creation_lock,
     })
 }
 
 pub(super) fn prepare_space_staging(store: &Store, destination: &SpaceName) -> Result<SpaceStaging> {
-    let _management = store.management_guard()?;
-    reject_space_destination(store, destination)?;
-    let temporary = store.temporary_path(destination)?;
+    let management = store.begin_mutation()?;
+    let layout = management.layout();
+    let destination_path = layout.space_path(destination);
+    reject_space_destination_at(store, destination, &destination_path)?;
+    let temporary = layout.temporary_path(destination)?;
     if entry_exists(&temporary)? {
         return Err(
             QuartersError::new(ErrorKind::CorruptState, "reserved template staging path already exists")
@@ -674,19 +779,29 @@ pub(super) fn prepare_space_staging(store: &Store, destination: &SpaceName) -> R
     create_private_dir(&temporary)?;
     let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
     let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
-    create_private_dir(&temporary.join("home"))?;
+    let identity = StagingIdentity::capture(&temporary, &creation_lock)?;
+    if let Err(error) = create_private_dir(&temporary.join("home")) {
+        let _cleanup = identity.cleanup(&temporary);
+        return Err(error);
+    }
     Ok(SpaceStaging {
-        destination: store.space_path(destination),
+        destination: destination_path,
         temporary,
         creation_lock_path,
+        identity,
         _creation_lock: creation_lock,
     })
 }
 
 pub(super) fn reject_space_destination(store: &Store, destination: &SpaceName) -> Result<()> {
+    let path = store.layout()?.space_path(destination);
+    reject_space_destination_at(store, destination, &path)
+}
+
+fn reject_space_destination_at(store: &Store, destination: &SpaceName, path: &Path) -> Result<()> {
+    store.ensure_no_rename_target(destination)?;
     store.ensure_no_rollback_target(destination)?;
-    let path = store.space_path(destination);
-    if entry_exists(&path)? {
+    if entry_exists(path)? {
         return Err(QuartersError::new(
             ErrorKind::AlreadyExists,
             format!("space '{destination}' already exists"),
@@ -700,11 +815,10 @@ fn fresh_template_space_manifest(
     name: SpaceName,
     default_shell: PathBuf,
 ) -> Result<SpaceManifest> {
-    let workspace = template.source_layout == SpaceLayout::Workspace;
     Ok(SpaceManifest {
-        schema_version: template.source_identity.schema_version,
-        layout: workspace.then_some(SpaceLayout::Workspace),
-        space_id: workspace.then(SpaceId::generate).transpose()?,
+        schema_version: STABLE_SCHEMA_VERSION,
+        layout: Some(template.source_layout),
+        space_id: Some(SpaceId::generate()?),
         name,
         created_unix_ms: epoch_millis()?,
         default_shell,
@@ -776,7 +890,7 @@ fn replace_artifact_manifest(root: &Path, manifest: &ArtifactManifest) -> Result
     sync_directory(root)
 }
 
-fn write_artifact_manifest(root: &Path, manifest: &ArtifactManifest) -> Result<()> {
+pub(super) fn write_artifact_manifest(root: &Path, manifest: &ArtifactManifest) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(manifest).map_err(|error| {
         QuartersError::new(ErrorKind::System, "could not serialize artifact manifest").with_source(error)
     })?;
@@ -784,10 +898,11 @@ fn write_artifact_manifest(root: &Path, manifest: &ArtifactManifest) -> Result<(
     write_private_file(&root.join(ARTIFACT_MANIFEST), &bytes)
 }
 
-fn report_from_clone(
+pub(super) fn report_from_clone(
     kind: ArtifactKind,
     name: &ArtifactName,
     clone: &CloneReport,
+    source_quiescence: SourceQuiescence,
     id: Option<&ArtifactId>,
     stored_counts: Option<super::ArtifactCounts>,
 ) -> ArtifactReport {
@@ -802,12 +917,13 @@ fn report_from_clone(
         examined_counts: clone.counts,
         exclusions: clone.exclusions,
         stored_counts,
+        source_quiescence,
         limits: clone.limits,
         detached_processes: "unknown".to_owned(),
     }
 }
 
-fn artifact_walk_control() -> WalkControl {
+pub(super) fn artifact_walk_control() -> WalkControl {
     WalkControl::for_artifact()
 }
 

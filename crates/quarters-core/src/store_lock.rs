@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use fs4::FileExt;
 
-use crate::store::{OBSERVATION_LOCK_FILE, open_or_create_private_lock, open_private_lock};
+use crate::store::{OBSERVATION_LOCK_FILE, RootFormat, StoreLayout, open_or_create_private_lock, open_private_lock};
 use crate::{ErrorKind, LeaseState, QuartersError, Result, Space, Store};
 
 const ACTIVE_LOCK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -17,8 +17,27 @@ const OBSERVATION_LOCK_TIMEOUT: Duration = Duration::from_millis(500);
 static RETRY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Non-cloneable ownership token for a store-wide mutation lease.
-pub(crate) struct ManagementGuard {
+pub(crate) struct RawManagementGuard {
     _file: File,
+}
+
+/// Non-cloneable proof that the current store layout is writable.
+pub(crate) struct MutationGuard {
+    _management: RawManagementGuard,
+    layout: StoreLayout,
+}
+
+impl MutationGuard {
+    pub(crate) const fn new(management: RawManagementGuard, layout: StoreLayout) -> Self {
+        Self {
+            _management: management,
+            layout,
+        }
+    }
+
+    pub(crate) const fn layout(&self) -> &StoreLayout {
+        &self.layout
+    }
 }
 
 /// Non-cloneable ownership token for a store-wide observation lease.
@@ -33,13 +52,21 @@ pub(crate) struct LifecycleLease {
 
 impl Store {
     pub(crate) fn observation_guard(&self) -> Result<ObservationGuard> {
-        self.root_guard(OBSERVATION_LOCK_TIMEOUT)
-            .map(|file| ObservationGuard { _file: file })
-    }
-
-    pub(crate) fn management_guard(&self) -> Result<ManagementGuard> {
-        self.root_guard(MANAGEMENT_LOCK_TIMEOUT)
-            .map(|file| ManagementGuard { _file: file })
+        let path = self.root.join(OBSERVATION_LOCK_FILE);
+        let layout = self.layout()?;
+        let file = if layout.root_format() == RootFormat::Dotted {
+            open_existing_observation_lock(&path)?
+        } else {
+            open_or_create_private_lock(&path)?
+        };
+        lock_bounded(
+            &file,
+            &path,
+            LockMode::Exclusive,
+            OBSERVATION_LOCK_TIMEOUT,
+            "store observation",
+        )?;
+        Ok(ObservationGuard { _file: file })
     }
 
     fn root_guard(&self, timeout: Duration) -> Result<File> {
@@ -88,6 +115,24 @@ impl Store {
     }
 }
 
+fn open_existing_observation_lock(path: &Path) -> Result<File> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => open_private_lock(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(QuartersError::new(
+            ErrorKind::ResourceLimit,
+            "the inspection-only dotted store has no existing observation lock",
+        )
+        .with_hint("activity is unknown; this Quarters build will not create control state in a dotted store")),
+        Err(error) => Err(QuartersError::io("inspect dotted-store observation lock", path, error)),
+    }
+}
+
+pub(crate) fn raw_management_guard(store: &Store) -> Result<RawManagementGuard> {
+    store
+        .root_guard(MANAGEMENT_LOCK_TIMEOUT)
+        .map(|file| RawManagementGuard { _file: file })
+}
+
 fn lease_state_without_observation(space: &Space) -> Result<LeaseState> {
     let lock_path = space.lock_path();
     let file = open_private_lock(&lock_path)?;
@@ -107,6 +152,26 @@ pub(crate) fn acquire_lifecycle_lease(space: &Space, name: &str) -> Result<Lifec
     let file = open_private_lock(&path)?;
     lock_exclusive_bounded_for_lifecycle(&file, &path, name)?;
     Ok(LifecycleLease { _file: file })
+}
+
+pub(crate) fn require_held_lifecycle_lease(space: &Space, name: &str) -> Result<()> {
+    let path = space.lock_path();
+    let file = open_private_lock(&path)?;
+    match <File as FileExt>::try_lock(&file) {
+        Ok(()) => Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            format!("active capture requires an existing cooperative lease for space '{name}'"),
+        )
+        .with_hint(format!(
+            "enter '{name}' through Quarters, freeze it from that running context, then capture with --from-active"
+        ))),
+        Err(fs4::TryLockError::WouldBlock) => Ok(()),
+        Err(fs4::TryLockError::Error(error)) => Err(QuartersError::io(
+            "inspect space activity for active capture",
+            &path,
+            error,
+        )),
+    }
 }
 
 fn lock_exclusive_bounded_for_lifecycle(file: &File, path: &Path, name: &str) -> Result<()> {

@@ -58,8 +58,11 @@ never silently claimed as preserved.
   provenance and a credential inclusion declaration.
 - `snapshot` creates an immutable-by-interface recovery point. Filesystem
   immutability flags are optional hardening, not the correctness anchor.
-- `export` writes a versioned, authenticated manifest plus bounded content. It
-  defaults to excluding credentials and must never include runtime sockets.
+- `export` writes a versioned, authenticated manifest plus bounded content from
+  an already verified artifact. Artifact bundles preserve that exact tree and
+  require explicit sensitive-state confirmation; they do not claim that
+  arbitrary credentials can be recognized and filtered safely. Runtime sockets
+  can never enter a verified artifact.
 - `rollback` first creates and verifies an automatic recovery snapshot, then
   replaces the target through the same publish transaction. In-place recursive
   overwrite is forbidden.
@@ -90,6 +93,9 @@ such entry. Both modes compare metadata before open, after open and after read.
 Named lifecycle artifacts and deterministic rollback recovery are accepted in
 ADR 0008.
 
-Remaining gates are clonefile/reflink semantic equivalence, schema-1 stable-ID
-migration, managed-agent or detached-process quiescence, filesystem
-immutability flags, authenticated export and enforceable freeze.
+Remaining gates are clonefile/reflink semantic equivalence, detached-process
+quiescence, filesystem immutability flags and enforceable filesystem freeze.
+Authenticated export is implemented by ADR 0009; cooperative freeze and active
+stationery capture are implemented by ADR 0010 without claiming stronger
+write enforcement. Schema-1 stable-ID upgrade and managed OpenSSH agents are
+implemented under ADRs 0006 and 0005.

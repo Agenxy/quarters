@@ -1,8 +1,9 @@
 {
   "name": "quarters-cli",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "Persistent alternate user-state profiles for native processes",
   "license": "Apache-2.0",
+  "packageManager": "bun@1.3.14",
   "type": "module",
   "bin": {
     "quarters": "dist/src/quarters.js"
@@ -33,9 +34,9 @@
     "userspace"
   ],
   "optionalDependencies": {
-    "quarters-cli-darwin-arm64": "0.1.0-alpha.3",
-    "quarters-cli-darwin-x64": "0.1.0-alpha.3",
-    "quarters-cli-linux-x64": "0.1.0-alpha.3"
+    "quarters-cli-darwin-arm64": "0.1.0-alpha.4",
+    "quarters-cli-darwin-x64": "0.1.0-alpha.4",
+    "quarters-cli-linux-x64": "0.1.0-alpha.4"
   },
   "devDependencies": {
     "@types/node": "26.2.0",
@@ -43,8 +44,9 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "check": "tsc --project tsconfig.json --noEmit && npm test",
-    "prepack": "npm run build",
-    "test": "npm run build && node --test dist/test/*.test.js"
+    "check": "bun run typecheck && bun run test",
+    "prepack": "bun run build",
+    "test": "bun run build && node --test dist/test/*.test.js",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
   }
 }

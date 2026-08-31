@@ -1,6 +1,5 @@
 //! Descriptor-relative lifecycle copy implementation.
 
-use super::cleanup::remove_tree_restoring_owner_access;
 #[cfg(test)]
 use super::policy::CloneLimits;
 use super::policy::{CloneMode, CloneReport};
@@ -11,7 +10,7 @@ use crate::store::create::{acquire_creation_lock, write_manifest};
 use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease};
 use crate::store_policy::{validate_shell, validate_stored_manifest};
 use crate::text::escape_untrusted_text_bounded_bytes;
-use crate::{ErrorKind, QuartersError, Result, Space, SpaceId, SpaceManifest, SpaceName, Store};
+use crate::{ErrorKind, QuartersError, Result, STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceManifest, SpaceName, Store};
 use serde::Serialize;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -73,7 +72,7 @@ impl Store {
         let result = self.execute_clone(&mut setup, destination, include_cache, control);
         if let Err(original) = &result
             && let Some(staging) = &setup.staging
-            && let Err(cleanup) = remove_tree_restoring_owner_access(&staging.temporary)
+            && let Err(cleanup) = staging.identity.cleanup(&staging.temporary)
         {
             return Err(compound_cleanup_error(original, cleanup));
         }
@@ -272,6 +271,7 @@ struct Staging {
     temporary: PathBuf,
     destination: PathBuf,
     creation_lock_path: PathBuf,
+    identity: super::StagingIdentity,
     _creation_lock: File,
 }
 
@@ -288,15 +288,17 @@ impl CloneSetup {
         } else if store.existing_spaces_root()?.is_none() {
             return Err(space_not_found(source.as_str()));
         }
-        let management = store.management_guard()?;
+        store.ensure_no_rename_target(source)?;
+        store.ensure_no_rename_target(destination)?;
+        let management = store.begin_mutation()?;
         let source_space = store.open(source)?;
         validate_shell(&source_space.manifest().default_shell)?;
         let activity_lock = acquire_lifecycle_lease(&source_space, source.as_str())?;
-        let destination_path = store.space_path(destination);
+        let destination_path = management.layout().space_path(destination);
         store.ensure_no_rollback_target(destination)?;
         reject_destination(&destination_path, destination.as_str())?;
         let staging = if mode == CloneMode::Execute {
-            Some(prepare_staging(store, destination, destination_path)?)
+            Some(prepare_staging(management.layout(), destination, destination_path)?)
         } else {
             None
         };
@@ -322,8 +324,12 @@ impl CloneSetup {
     }
 }
 
-fn prepare_staging(store: &Store, destination: &SpaceName, destination_path: PathBuf) -> Result<Staging> {
-    let temporary = store.temporary_path(destination)?;
+fn prepare_staging(
+    layout: &crate::store::StoreLayout,
+    destination: &SpaceName,
+    destination_path: PathBuf,
+) -> Result<Staging> {
+    let temporary = layout.temporary_path(destination)?;
     if entry_exists(&temporary)? {
         return Err(
             QuartersError::new(ErrorKind::CorruptState, "reserved clone staging path already exists")
@@ -333,25 +339,26 @@ fn prepare_staging(store: &Store, destination: &SpaceName, destination_path: Pat
     create_private_dir(&temporary)?;
     let creation_lock_path = temporary.join(crate::store_recovery::CREATION_LOCK_FILE);
     let creation_lock = acquire_creation_lock(&temporary, &creation_lock_path)?;
+    let identity = super::StagingIdentity::capture(&temporary, &creation_lock)?;
     if let Err(error) = create_private_dir(&temporary.join("home")) {
         drop(creation_lock);
-        let _cleanup = remove_tree_restoring_owner_access(&temporary);
+        let _cleanup = identity.cleanup(&temporary);
         return Err(error);
     }
     Ok(Staging {
         temporary,
         destination: destination_path,
         creation_lock_path,
+        identity,
         _creation_lock: creation_lock,
     })
 }
 
 fn destination_manifest(source: &Space, destination: SpaceName) -> Result<SpaceManifest> {
-    let space_id = source.id().map(|_| SpaceId::generate()).transpose()?;
     Ok(SpaceManifest {
-        schema_version: source.manifest().schema_version,
-        layout: source.manifest().layout,
-        space_id,
+        schema_version: STABLE_SCHEMA_VERSION,
+        layout: Some(source.layout()),
+        space_id: Some(SpaceId::generate()?),
         name: destination,
         created_unix_ms: epoch_millis()?,
         default_shell: source.manifest().default_shell.clone(),
@@ -401,7 +408,7 @@ fn publish(store: &Store, setup: &CloneSetup, manifest: &SpaceManifest, control:
         .ok_or_else(|| QuartersError::new(ErrorKind::System, "clone publication has no private staging directory"))?;
     validate_space_anchors(&staging.temporary)?;
     validate_stored_manifest(manifest)?;
-    let _management = store.management_guard()?;
+    let _management = store.begin_mutation()?;
     let reopened = store.open(&setup.source_manifest.name)?;
     if reopened.manifest() != &setup.source_manifest {
         return Err(
@@ -410,7 +417,11 @@ fn publish(store: &Store, setup: &CloneSetup, manifest: &SpaceManifest, control:
         );
     }
     store.ensure_no_rollback_target(&manifest.name)?;
+    store.ensure_no_rename_target(&manifest.name)?;
     reject_destination(&staging.destination, manifest.name.as_str())?;
+    staging
+        .identity
+        .verify(&staging.temporary, &staging.creation_lock_path)?;
     #[cfg(test)]
     control.abort_before_publish()?;
     fs::remove_file(&staging.creation_lock_path)

@@ -38,15 +38,17 @@ const MAX_BLOCKING_STORE_CALLS: usize = 2;
 pub(crate) struct QuartersMcp {
     store: Store,
     host: HostEnvironment,
+    command_launcher: Option<PathBuf>,
     tool_router: ToolRouter<Self>,
     blocking_slots: Arc<Semaphore>,
 }
 
 impl QuartersMcp {
-    pub(crate) fn new(store: Store, host: HostEnvironment) -> Self {
+    pub(crate) fn new(store: Store, host: HostEnvironment, command_launcher: Option<PathBuf>) -> Self {
         Self {
             store,
             host,
+            command_launcher,
             tool_router: Self::tool_router(),
             blocking_slots: Arc::new(Semaphore::new(MAX_BLOCKING_STORE_CALLS)),
         }
@@ -96,7 +98,7 @@ impl QuartersMcp {
                             "activity observation returned too few states",
                         )
                     })?;
-                    view_space(&space, state, current_space.as_deref())?
+                    self.view_space(&space, state, current_space.as_deref(), !unfiltered)?
                 }
                 unhealthy @ SpaceInspection::Unhealthy { .. } => {
                     Self::view_inspection(unhealthy, current_space.as_deref())?
@@ -170,6 +172,8 @@ impl QuartersMcp {
                 layout: None,
                 space_id: None,
                 lease_state: None,
+                freeze_state: None,
+                ssh_agent_state: None,
                 issue: Some(Diagnostic::for_unhealthy_entry(&error)),
             }),
         }
@@ -192,6 +196,8 @@ impl QuartersMcp {
             layout: None,
             space_id: None,
             lease_state: None,
+            freeze_state: None,
+            ssh_agent_state: None,
             current: false,
             issue: Some(Diagnostic::from(&error)),
         }
@@ -211,11 +217,14 @@ impl QuartersMcp {
             layout: None,
             space_id: None,
             lease_state: None,
+            freeze_state: None,
+            ssh_agent_state: None,
             current: false,
             issue: Some(Diagnostic {
                 code: issue.code.clone(),
                 message: quarters_core::escape_untrusted_text_bounded(&issue.message, 512),
                 retryable: false,
+                hint: None,
             }),
         })
     }
@@ -229,6 +238,7 @@ impl QuartersMcp {
         Ok(DoctorData {
             platform: platform.platform,
             authority_boundary: platform.authority_boundary,
+            store_layout: self.store.layout_diagnosis().into(),
             capabilities,
             tools: quarters_core::tool_probes().into_iter().map(ProbeView::from).collect(),
             validated_space,
@@ -254,13 +264,57 @@ impl QuartersMcp {
             .map_or_else(|| PathBuf::from("/bin/sh"), PathBuf::from);
         let layout = layout.map_or(quarters_core::SpaceLayout::Profile, Into::into);
         let space = self.store.create_with_layout(name, shell, layout)?;
+        self.install_created_command_links(&space)?;
         Ok(CreateData {
-            space: view_space(
+            space: self.view_space(
                 &space,
                 LeaseState::Free,
                 validated_current_space(&self.store, &self.host).as_deref(),
+                true,
             )?,
         })
+    }
+
+    fn install_created_command_links(&self, space: &Space) -> quarters_core::Result<()> {
+        let Some(executable) = &self.command_launcher else {
+            return Ok(());
+        };
+        self.store
+            .install_space_command_links(&space.manifest().name, executable)
+            .map(|_report| ())
+            .map_err(|error| {
+                error.with_hint(format!(
+                    "space '{}' was published, but managed commands are incomplete; inspect it with the Quarters CLI",
+                    space.manifest().name
+                ))
+            })
+    }
+
+    fn view_space(
+        &self,
+        space: &Space,
+        lease_state: LeaseState,
+        current_space: Option<&str>,
+        inspect_agent: bool,
+    ) -> quarters_core::Result<SpaceView> {
+        let mut view = view_space(space, lease_state, current_space)?;
+        match self.store.freeze_state(space) {
+            Ok(state) => view.freeze_state = Some(state.as_str().to_owned()),
+            Err(error) => {
+                "unhealthy".clone_into(&mut view.health);
+                view.state = Some("freeze_metadata_issue".to_owned());
+                view.issue = Some(Diagnostic::from(&error));
+            }
+        }
+        view.ssh_agent_state = Some(if inspect_agent {
+            self.store.ssh_agent_status(space, &self.host).map_or_else(
+                |_error| "unavailable".to_owned(),
+                |status| status.state.as_str().to_owned(),
+            )
+        } else {
+            "not-inspected".to_owned()
+        });
+        Ok(view)
     }
 }
 
@@ -472,6 +526,8 @@ fn view_space(space: &Space, lease_state: LeaseState, current_space: Option<&str
         layout: Some(space.layout().as_str().to_owned()),
         space_id: space.id().map(|space_id| space_id.as_str().to_owned()),
         lease_state: Some(lease_state.as_str().to_owned()),
+        freeze_state: None,
+        ssh_agent_state: None,
         current: current_space == Some(space.manifest().name.as_str()),
         issue: None,
     })

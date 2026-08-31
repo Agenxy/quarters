@@ -1,7 +1,7 @@
 //! Descriptor-relative canonical artifact verification.
 
 use super::model::{ArtifactCounts, ContentIntegrity, INTEGRITY_ALGORITHM};
-use crate::store::lifecycle::CloneLimits;
+use crate::store::lifecycle::{CloneLimits, resolve_relative_link_target};
 use crate::text::escape_untrusted_text_bounded_bytes;
 use crate::{ErrorKind, QuartersError, Result};
 use nix::dir::Dir;
@@ -172,6 +172,10 @@ impl Verifier {
 
     fn visit_symlink(&mut self, parent: &Dir, name: &OsStr, path: &[OsString], expected: &FileStat) -> Result<()> {
         let target = readlinkat(parent, name).map_err(|error| artifact_error("read artifact symlink", path, error))?;
+        let parent_path = &path[..path.len().saturating_sub(1)];
+        if resolve_relative_link_target(parent_path, &target).is_none() {
+            return Err(entry_error("artifact symbolic link escapes its root", path));
+        }
         let length = u64::try_from(target.as_bytes().len()).map_err(conversion_error)?;
         if length > self.limits.symlink_target_bytes {
             return Err(limit_error(

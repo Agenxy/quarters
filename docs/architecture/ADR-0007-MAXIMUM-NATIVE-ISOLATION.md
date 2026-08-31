@@ -17,12 +17,12 @@ Report isolation as independently earned capabilities, never one marketing
 mode:
 
 1. `state-profile`: HOME/XDG and tool adapters; current portable baseline.
-2. `workspace-profile`: expanded user-directory conventions; current schema-2
+2. `workspace-profile`: expanded user-directory conventions; current schema-3
    layout, still not containment.
 3. `passwd-home-view`: Linux user/mount namespace compatibility where policy
    and group mapping permit it; currently experimental.
-4. `filesystem-policy`: explicit allow/deny confinement only after a reviewed
-   Landlock or macOS policy backend passes compatibility and escape tests.
+4. `filesystem-policy`: an experimental Linux Landlock ABI-3 backend is earned
+   by ADR 0011; macOS still has no reviewed policy backend.
 5. `encrypted-at-rest`: a dismounted space is encrypted under a user-controlled
    key; mounted same-UID access remains in scope and must be stated plainly.
 
@@ -78,6 +78,7 @@ never the correctness or security foundation.
 ## Consequences
 
 Quarters can pursue a very deep native experience while keeping capability
-claims composable and falsifiable. Encryption and confinement remain research
-work; the current alpha protects against accidental state mixing, not malicious
-same-account access.
+claims composable and falsifiable. Linux confinement is now an explicit
+experimental capability; encryption and a supported macOS backend remain
+research work. The portable baseline still protects against accidental state
+mixing, not malicious same-account access.

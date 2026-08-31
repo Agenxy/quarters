@@ -1,6 +1,6 @@
 # ADR 0006: Expand-contract storage migration and runtime identity
 
-Status: proposed; required before hidden internal directories or rename
+Status: partially accepted; expand reader, stable identity and rename implemented; physical migration proposed
 
 ## Context
 
@@ -16,8 +16,10 @@ Use an expand, migrate, contract sequence across separate compatibility
 releases:
 
 1. **Expand:** readers understand both legacy `spaces`/`trash` and future
-   `.spaces`/`.trash`; writers continue using legacy paths. A root-format marker
-   records which layout is authoritative. Ambiguous dual state fails closed.
+   `.spaces`/`.trash`; writers continue using legacy paths. A strict
+   `.quarters-store.json` marker records which layout is authoritative.
+   Unmarked visible stores remain compatible; unmarked dotted or ambiguous
+   dual state fails closed. This phase is implemented.
 2. **Migrate:** a confirmed command acquires the management lock, requires all
    known activity leases to be free, writes a durable migration marker, renames
    one directory at a time on the same filesystem, syncs parents, verifies the
@@ -27,16 +29,28 @@ releases:
    default to hidden internals. Legacy reading remains for a declared support
    window and never silently creates a second store.
 
-Schema-2 spaces use their random stable ID for runtime identity. Schema-1
-spaces derive a deterministic transition identity from the validated name and
-`created_unix_ms`, domain-separated by the schema version. It is an identity
-key, not a secret. The first release that changes runtime keys sweeps only
-private, verified Quarters runtime directories; stale entries are reported and
-reclaimed through a confirmed recovery action.
+Schema-3 spaces use their random stable ID for runtime identity. Legacy
+schema-1 spaces derive a deterministic transition identity from the validated
+name and `created_unix_ms`, domain-separated by the schema version. It is an
+identity key, not a secret. An explicit, inactive-space `upgrade` atomically
+assigns schema 3 and a random ID. An existing legacy runtime tree is then
+re-keyed by same-parent rename to that ID and its parent is synced. Runtime
+lookup recognizes the exact legacy transition identity until re-keying
+completes, and also recognizes `NAME-{fnv(root):016x}`, the spelling used by
+the released alpha.1 and alpha.2 builds. Exactly one validated predecessor is
+renamed;
+multiple candidates fail closed without merge or deletion. An interrupted
+upgrade can therefore resume without guessing. Rename
+completes that re-key before changing the display name. Existing legacy
+artifacts remain bound to the upgraded generation through their original name
+and creation-time identity.
 
-Rename is unavailable until every space has a stable identity. A rename will
-change only the display name and directory entry under an exclusive lifecycle
-transaction; it will not change the stable ID or silently edit user content.
+Rename is available only after a space has stable identity. It changes the
+display name and directory entry under exclusive lifecycle and management
+locks, retains the stable ID, updates only the manifest control file and does
+not edit arbitrary user content. A private durable marker lets recovery abort
+a pre-move transaction or finish a post-move manifest replacement. Ambiguous
+or malformed markers are retained and do not block unrelated spaces.
 
 ## Required invariants
 
@@ -46,7 +60,16 @@ transaction; it will not change the stable ID or silently edit user content.
 - detached-process uncertainty is presented before confirmation
 - directory renames remain on one filesystem and sync their parents
 - rollback never recursively merges two layouts
+- ordinary reads never create or repair the root-format marker
+- every mutation owns the bounded management lease and a resolved writable-layout token
+- current-schema markers are strict, protected files: steady state has one
+  link, while the exact two-link no-clobber publication state remains readable
+  and is repaired only under the management lease; a lenient schema header
+  makes newer schemas a distinct upgrade requirement
+- dotted stores are inspection-only until the migration release exists
 - runtime cleanup validates owner, type, mode and stable identity
+- normal space removal refuses non-unset private-agent state and reclaims the
+  exact validated runtime tree only after persistent space deletion
 
 ## Acceptance gates
 
@@ -54,13 +77,16 @@ transaction; it will not change the stable ID or silently edit user content.
 - old-reader/new-reader matrix for expand, migrate and contract releases
 - dual-layout and malicious-marker fixtures
 - active lease and concurrent management refusal
-- runtime re-key tests for schema 1 and schema 2
+- runtime re-key tests for schema 1; schema-2 upgrade remains unsupported
+- released pre-alpha.4 runtime spelling migrates without abandoning state
 - macOS and Linux filesystem acceptance
 
 ## Consequences
 
-The visible internal directories remain in this alpha. That is intentional:
-changing them safely is a release sequence, not a cosmetic rename.
+The visible internal `spaces` and `trash` directories remain in this alpha.
+That is intentional: changing them safely is still the expand-contract release
+sequence above, not a cosmetic rename. Space display-name rename does not begin
+that store-layout migration.
 
 The additive `.templates` and `.snapshots` roots introduced by ADR 0008 are
 older-reader-opaque artifact catalogs. They are not evidence that the future

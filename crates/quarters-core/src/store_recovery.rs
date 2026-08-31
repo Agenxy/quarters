@@ -11,6 +11,7 @@ use fs4::FileExt;
 
 use crate::store::artifact::rollback_retired_entry_is_actionable;
 use crate::store::lifecycle::remove_tree_restoring_owner_access;
+use crate::store::scan::ScanBudget;
 use crate::store::{StoreLayout, entry_exists, open_private_lock, sync_directory, unique_suffix};
 use crate::store_policy::{validate_private_dir, validate_private_file, validate_store_root};
 use crate::{
@@ -35,6 +36,10 @@ pub struct RecoverySummary {
     pub retired_entries: usize,
     /// Interrupted rollback transactions with deterministic recovery actions.
     pub rollback_transactions: usize,
+    /// Interrupted rename transactions awaiting deterministic recovery.
+    pub rename_transactions: usize,
+    /// Malformed rename markers retained for manual reconciliation.
+    pub rename_issues: usize,
     /// Exact target, marker state and action shown before confirmed recovery.
     pub rollbacks: Vec<RollbackObservation>,
     /// Retained marker failures that require manual reconciliation.
@@ -47,6 +52,8 @@ pub struct RecoverySummary {
     pub reclaiming_artifacts: usize,
     /// Interrupted manifest replacements safe to discard.
     pub artifact_manifest_temps: usize,
+    /// Interrupted cooperative-freeze marker publications safe to discard.
+    pub freeze_marker_temps: usize,
     /// Published artifacts whose exact source generation no longer exists.
     pub orphaned_artifacts: usize,
     /// Aggregate canonical bytes stored by templates.
@@ -111,7 +118,7 @@ impl Store {
             Err(error) => return Err(QuartersError::io("inspect Quarters root", &self.root, error)),
         };
         validate_store_root(&self.root, &root_metadata)?;
-        let layout = self.layout();
+        let layout = self.layout()?;
         let spaces_present = entry_exists(layout.spaces_root())?;
         let trash_present = entry_exists(layout.trash_root())?;
         if !spaces_present && !trash_present {
@@ -120,12 +127,16 @@ impl Store {
         validate_layout(&self.root, &layout)?;
         let _observation = self.observation_guard()?;
         let rollback_inventory = Self::rollback_inventory_unlocked(layout.spaces_root())?;
+        let rename_transactions = self.rename_recovery_count()?;
+        let rename_issues = self.rename_recovery_issue_count()?;
         let artifacts = inspect_artifact_state(self)?;
         inspect(
             &self.root,
             &layout,
             rollback_inventory.observations,
             rollback_inventory.issues,
+            rename_transactions,
+            rename_issues,
             &artifacts,
         )
     }
@@ -141,17 +152,23 @@ impl Store {
     /// validated private directory or the management lock is unavailable.
     pub fn recover(&self) -> Result<RecoverySummary> {
         self.ensure_layout()?;
+        let rename_recovery = self.recover_renames()?;
+        let rename_transactions = rename_recovery.recovered;
+        let rename_issues = self
+            .rename_recovery_issue_count()?
+            .saturating_add(rename_recovery.issues);
         let rollbacks = self.recover_rollbacks()?;
         let rollback_issues = self.rollback_issues()?;
-        let layout = self.layout();
         let artifacts = inspect_artifact_state(self)?;
-        let (summary, reclaiming) = {
-            let _observation = self.management_guard()?;
-            let (mut summary, mut reclaiming) = prepare_recovery(&self.root, &layout)?;
-            let artifact_reclaiming = prepare_artifact_recovery(self)?;
+        let (summary, reclaiming, trash_root) = {
+            let mutation = self.begin_mutation()?;
+            let layout = mutation.layout();
+            let (mut summary, mut reclaiming) = prepare_recovery(&self.root, layout)?;
+            summary.freeze_marker_temps = remove_freeze_marker_temporaries(layout.spaces_root())?;
+            let artifact_reclaiming = prepare_artifact_recovery(self, layout.trash_root())?;
             reclaiming.extend(artifact_reclaiming);
             summary.apply_artifacts(&artifacts);
-            (summary, reclaiming)
+            (summary, reclaiming, layout.trash_root().to_path_buf())
         };
         let mut first_failure = None;
         for path in &reclaiming {
@@ -161,16 +178,21 @@ impl Store {
                 first_failure = Some(error);
             }
         }
-        let sync_result = sync_directory(layout.trash_root());
+        let sync_result = sync_directory(&trash_root);
         if let Some(error) = first_failure {
             return Err(error.with_hint(
                 "recovery attempted every retired entry; inspect the remaining reclaiming state and retry",
             ));
         }
         sync_result?;
-        let unknown_entries_at_least = summary.unknown_entries_at_least.saturating_add(rollback_issues.len());
+        let unknown_entries_at_least = summary
+            .unknown_entries_at_least
+            .saturating_add(rollback_issues.len())
+            .saturating_add(rename_issues);
         Ok(RecoverySummary {
             rollback_transactions: rollbacks.len(),
+            rename_transactions,
+            rename_issues,
             rollbacks,
             rollback_issues,
             unknown_entries_at_least,
@@ -184,21 +206,27 @@ fn inspect(
     layout: &StoreLayout,
     rollbacks: Vec<RollbackObservation>,
     rollback_issues: Vec<RollbackIssue>,
+    rename_transactions: usize,
+    rename_issues: usize,
     artifacts: &ArtifactRecoveryState,
 ) -> Result<RecoverySummary> {
     validate_layout(root, layout)?;
     let (unfinished, active) = classify_creations(layout.spaces_root())?;
     let retired = matching_entries(layout.trash_root(), &[RETIRED_PREFIX])?;
     let reclaiming = matching_entries(layout.trash_root(), &[RECLAIMING_PREFIX])?;
-    let unknown_entries_at_least =
-        count_unknown_space_entries(layout.spaces_root())?.saturating_add(rollback_issues.len());
+    let unknown_entries_at_least = count_unknown_space_entries(layout.spaces_root())?
+        .saturating_add(rollback_issues.len())
+        .saturating_add(rename_issues);
     let mut summary = RecoverySummary {
         active_creations: active,
         unfinished_creations: unfinished.len(),
         retired_entries: retired.len().saturating_add(reclaiming.len()),
         rollback_transactions: rollbacks.len(),
+        rename_transactions,
+        rename_issues,
         rollbacks,
         rollback_issues,
+        freeze_marker_temps: freeze_marker_temporaries(layout.spaces_root())?.len(),
         unknown_entries_at_least,
         ..RecoverySummary::default()
     };
@@ -240,6 +268,7 @@ fn prepare_recovery(root: &Path, layout: &StoreLayout) -> Result<(RecoverySummar
         unfinished_creations: creations.len(),
         retired_entries: retired.len().saturating_add(existing_reclaiming.len()),
         rollback_transactions: 0,
+        rename_transactions: 0,
         rollbacks: Vec::new(),
         rollback_issues: Vec::new(),
         unknown_entries_at_least: count_unknown_space_entries(layout.spaces_root())?,
@@ -280,8 +309,7 @@ fn inspect_artifact_state(store: &Store) -> Result<ArtifactRecoveryState> {
     Ok(state)
 }
 
-fn prepare_artifact_recovery(store: &Store) -> Result<Vec<std::path::PathBuf>> {
-    let trash = store.layout().trash_root().to_path_buf();
+fn prepare_artifact_recovery(store: &Store, trash: &Path) -> Result<Vec<std::path::PathBuf>> {
     let mut retired = Vec::new();
     for kind in [ArtifactKind::Template, ArtifactKind::Snapshot] {
         let root = store.root.join(artifact_root_name(kind));
@@ -292,16 +320,16 @@ fn prepare_artifact_recovery(store: &Store) -> Result<Vec<std::path::PathBuf>> {
             })?;
         }
         for candidate in candidates.stale {
-            retire_artifact_recovery_path(&candidate.path, &trash, &mut retired)?;
+            retire_artifact_recovery_path(&candidate.path, trash, &mut retired)?;
         }
         for path in candidates.reclaiming {
-            retire_artifact_recovery_path(&path, &trash, &mut retired)?;
+            retire_artifact_recovery_path(&path, trash, &mut retired)?;
         }
         if root.exists() {
             sync_directory(&root)?;
         }
     }
-    sync_directory(&trash)?;
+    sync_directory(trash)?;
     Ok(retired)
 }
 
@@ -335,8 +363,10 @@ fn artifact_candidates(root: &Path) -> Result<ArtifactCandidates> {
         unknown: 0,
     };
     let entries = fs::read_dir(root).map_err(|error| QuartersError::io("read artifact recovery root", root, error))?;
+    let mut scan = ScanBudget::new("the artifact recovery root");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read artifact recovery entry", root, error))?;
+        scan.observe()?;
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             candidates.unknown = candidates.unknown.saturating_add(1);
             continue;
@@ -493,8 +523,10 @@ fn validate_layout(root: &Path, layout: &StoreLayout) -> Result<()> {
 fn matching_entries(parent: &Path, prefixes: &[&[u8]]) -> Result<Vec<std::path::PathBuf>> {
     let mut matches = Vec::new();
     let entries = fs::read_dir(parent).map_err(|error| QuartersError::io("read recovery parent", parent, error))?;
+    let mut scan = ScanBudget::new("the store recovery parent");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read recovery entry", parent, error))?;
+        scan.observe()?;
         if !prefixes.iter().any(|prefix| has_prefix(&entry.file_name(), prefix)) {
             continue;
         }
@@ -518,14 +550,61 @@ fn count_unknown_space_entries(spaces: &Path) -> Result<usize> {
     let entries =
         fs::read_dir(spaces).map_err(|error| QuartersError::io("read spaces recovery namespace", spaces, error))?;
     let mut unknown = 0_usize;
+    let mut scan = ScanBudget::new("the spaces recovery namespace");
     for entry in entries {
         let entry = entry.map_err(|error| QuartersError::io("read spaces recovery entry", spaces, error))?;
+        scan.observe()?;
         let name = entry.file_name();
         if name.as_bytes().starts_with(b".") && !is_known_space_hidden_entry(spaces, &name) {
             unknown = unknown.saturating_add(1);
         }
     }
     Ok(unknown)
+}
+
+fn freeze_marker_temporaries(spaces: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let entries =
+        fs::read_dir(spaces).map_err(|error| QuartersError::io("read freeze recovery namespace", spaces, error))?;
+    let mut temporaries = Vec::new();
+    let mut scan = ScanBudget::new("the freeze recovery namespace");
+    for entry in entries {
+        let entry = entry.map_err(|error| QuartersError::io("read freeze recovery entry", spaces, error))?;
+        scan.observe()?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if parse_wrapped_space_id(&name, ".freeze-", ".tmp") {
+            let metadata = fs::symlink_metadata(entry.path())
+                .map_err(|error| QuartersError::io("inspect freeze marker temporary file", &entry.path(), error))?;
+            validate_private_file(&entry.path(), &metadata).map_err(|error| {
+                error.with_hint(format!(
+                    "inspect and remove only the exact unsafe freeze temporary {}; then retry recovery",
+                    entry.path().display()
+                ))
+            })?;
+            if temporaries.len() >= MAX_RECOVERY_ENTRIES {
+                return Err(QuartersError::new(
+                    ErrorKind::ResourceLimit,
+                    "the store contains more than 1024 freeze marker temporary files",
+                )
+                .with_hint("inspect the protected spaces root before attempting recovery"));
+            }
+            temporaries.push(entry.path());
+        }
+    }
+    Ok(temporaries)
+}
+
+fn remove_freeze_marker_temporaries(spaces: &Path) -> Result<usize> {
+    let temporaries = freeze_marker_temporaries(spaces)?;
+    for temporary in &temporaries {
+        fs::remove_file(temporary)
+            .map_err(|error| QuartersError::io("remove freeze marker temporary file", temporary, error))?;
+    }
+    if !temporaries.is_empty() {
+        sync_directory(spaces)?;
+    }
+    Ok(temporaries.len())
 }
 
 fn is_known_space_hidden_entry(spaces: &Path, name: &OsStr) -> bool {
@@ -537,8 +616,18 @@ fn is_known_space_hidden_entry(spaces: &Path, name: &OsStr) -> bool {
     };
     parse_wrapped_artifact_id(name, ".rollback-", ".json")
         || parse_wrapped_artifact_id(name, ".rollback-", ".tmp")
+        || parse_wrapped_space_id(name, ".rename-", ".json")
+        || parse_wrapped_space_id(name, ".freeze-", ".json")
+        || parse_wrapped_space_id(name, ".freeze-", ".tmp")
         || parse_prefixed_artifact_id(name, ".rollback-staging-")
         || retired_entry_has_marker(spaces, name)
+}
+
+fn parse_wrapped_space_id(name: &str, prefix: &str, suffix: &str) -> bool {
+    name.strip_prefix(prefix)
+        .and_then(|value| value.strip_suffix(suffix))
+        .and_then(|value| crate::SpaceId::parse(value.to_owned()).ok())
+        .is_some()
 }
 
 fn retired_entry_has_marker(spaces: &Path, name: &str) -> bool {
