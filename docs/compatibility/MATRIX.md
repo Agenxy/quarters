@@ -19,6 +19,8 @@ current host. It does not read credentials.
 | Host shell fork | B/C | previewed descriptor-anchored selection, digest confirmation and atomic publication | entering may execute copied startup code; credentials, history and directories remain excluded |
 | Lifecycle clone | B/C | bounded native copy with explicit policy and atomic publication | detached writers unknown; selected metadata and embedded absolute paths are not transformed |
 | Named templates | B/C | canonical BLAKE3-verified portable copy plus fresh destination controls | arbitrary state may contain credentials; embedded paths are not rewritten |
+| Cooperative freeze | C | identity-bound marker blocks new managed process/agent launches and mutations of that space | existing, detached and direct same-UID writers continue; not filesystem immutability or confinement |
+| Active stationery capture | C | strict current-context evidence, existing held cooperative lease, cooperative freeze and shared-lease copy; schema-3 provenance | already-running same-UID writers may change the source during capture; earlier builds reject schema-3 local artifacts |
 | Named snapshots | B/C | immutable-by-interface recovery point with whole-tree verification | cooperative lease cannot prove detached writers are absent |
 | Rollback | C | verified recovery capture plus durable three-state whole-home replacement | old, new or marked-in-progress visibility; no recursive merge or detached-writer proof |
 | Authenticated bundle | C | keyed-BLAKE3 plaintext export of a verified artifact; retained-descriptor two-pass import as an external template | key travels separately; no confidentiality or content-safety claim; case-colliding or normalizing filesystems may refuse import |

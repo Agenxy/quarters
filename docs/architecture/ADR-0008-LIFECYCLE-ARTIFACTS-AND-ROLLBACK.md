@@ -70,6 +70,9 @@ other recovery families continue.
   overwriting it.
 - MCP gains observation of rollback-in-progress state but no lifecycle mutation
   authority.
+- ADR 0010 adds schema-3 local source evidence and an immediate active capture
+  path. It preserves this ADR's canonical staging-tree verification while
+  replacing exclusive source evidence with an explicit `frozen-active` class.
 
 ## Acceptance
 

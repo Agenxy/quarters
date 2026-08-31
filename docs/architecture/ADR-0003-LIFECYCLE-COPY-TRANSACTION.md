@@ -94,6 +94,8 @@ Named lifecycle artifacts and deterministic rollback recovery are accepted in
 ADR 0008.
 
 Remaining gates are clonefile/reflink semantic equivalence, detached-process
-quiescence, filesystem immutability flags, authenticated export and enforceable
-freeze. Schema-1 stable-ID upgrade and managed OpenSSH agents are implemented
-under ADRs 0006 and 0005.
+quiescence, filesystem immutability flags and enforceable filesystem freeze.
+Authenticated export is implemented by ADR 0009; cooperative freeze and active
+stationery capture are implemented by ADR 0010 without claiming stronger
+write enforcement. Schema-1 stable-ID upgrade and managed OpenSSH agents are
+implemented under ADRs 0006 and 0005.

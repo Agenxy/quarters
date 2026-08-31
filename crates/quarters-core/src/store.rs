@@ -2,6 +2,7 @@
 
 pub(crate) mod artifact;
 mod create;
+mod freeze;
 mod host_fork;
 mod layout;
 pub(crate) mod lifecycle;
@@ -10,6 +11,7 @@ mod rename;
 pub(crate) mod scan;
 mod upgrade;
 
+pub use freeze::{FreezeReport, FreezeState};
 pub use host_fork::{HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport};
 pub use layout::StoreLayoutDiagnosis;
 pub(crate) use layout::{RootFormat, StoreLayout};
@@ -266,6 +268,16 @@ impl Store {
     /// Returns an error when the lock file cannot be opened or locked.
     pub fn lease(&self, space: &Space) -> Result<SpaceLease> {
         let _observation = self.begin_mutation()?;
+        self.ensure_not_frozen(space)?;
+        Self::shared_lease(space)
+    }
+
+    pub(crate) fn maintenance_lease(&self, space: &Space) -> Result<SpaceLease> {
+        let _observation = self.begin_mutation()?;
+        Self::shared_lease(space)
+    }
+
+    pub(crate) fn shared_lease(space: &Space) -> Result<SpaceLease> {
         let file = open_private_lock(&space.lock_path())?;
         lock_shared_bounded(&file, &space.lock_path())?;
         Ok(SpaceLease { _file: file })

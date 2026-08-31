@@ -39,6 +39,7 @@ impl Store {
         self.ensure_no_rename_target(name)?;
         self.ensure_no_rollback_target(name)?;
         let space = self.open(name)?;
+        self.ensure_not_frozen(&space)?;
         let _lease = acquire_lifecycle_lease(&space, name.as_str())?;
         Ok(report(&space))
     }
@@ -54,6 +55,7 @@ impl Store {
         self.ensure_no_rollback_target(name)?;
         let _management = self.begin_mutation()?;
         let space = self.open(name)?;
+        self.ensure_not_frozen(&space)?;
         let _lease = acquire_lifecycle_lease(&space, name.as_str())?;
         if space.id().is_some() {
             crate::platform::migrate_existing_legacy_runtime(&space, &crate::HostEnvironment::capture())?;

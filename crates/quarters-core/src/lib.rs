@@ -32,12 +32,14 @@ pub use store::artifact::{
     Artifact, ArtifactCounts, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest, ArtifactMutationReport,
     ArtifactName, ArtifactOrigin, ArtifactReport, BundleExportReport, BundleHeader, BundleImportReport,
     ContentIntegrity, ExportKeyReport, ImportedBundleProvenance, RollbackInventory, RollbackIssue, RollbackMode,
-    RollbackObservation, RollbackRecoveryAction, RollbackReport, SourceIdentity, SourceStatus, TemplateUseReport,
+    RollbackObservation, RollbackRecoveryAction, RollbackReport, SourceIdentity, SourceQuiescence, SourceStatus,
+    TemplateUseReport,
 };
 pub use store::lifecycle::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};
 pub use store::{
-    HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport, LeaseState,
-    SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store, StoreLayoutDiagnosis,
+    FreezeReport, FreezeState, HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy,
+    HostForkReport, LeaseState, SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store,
+    StoreLayoutDiagnosis,
 };
 pub use store_recovery::RecoverySummary;
 pub use text::{encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded};

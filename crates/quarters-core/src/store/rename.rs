@@ -67,6 +67,7 @@ impl Store {
         self.ensure_no_rollback_target(previous)?;
         self.ensure_no_rollback_target(name)?;
         let source = self.open(previous)?;
+        self.ensure_not_frozen(&source)?;
         reject_legacy(&source)?;
         reject_legacy_artifact_bindings(self, &source)?;
         reject_destination(self.layout()?.spaces_root(), name)?;
@@ -88,6 +89,7 @@ impl Store {
         self.ensure_no_rollback_target(previous)?;
         self.ensure_no_rollback_target(name)?;
         let source = self.open(previous)?;
+        self.ensure_not_frozen(&source)?;
         reject_legacy(&source)?;
         reject_destination(management.layout().spaces_root(), name)?;
         let _lease = acquire_lifecycle_lease(&source, previous.as_str())?;

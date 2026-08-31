@@ -8,8 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
-pub(super) const LOCAL_ARTIFACT_SCHEMA_VERSION: u32 = 1;
+pub(super) const LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 pub(super) const IMPORTED_ARTIFACT_SCHEMA_VERSION: u32 = 2;
+pub(super) const LOCAL_ARTIFACT_SCHEMA_VERSION: u32 = 3;
 pub(super) const INTEGRITY_ALGORITHM: &str = "blake3-256:quarters-canonical-v1";
 
 /// Opaque 128-bit artifact identity.
@@ -255,6 +256,27 @@ pub struct ContentIntegrity {
     pub counts: ArtifactCounts,
 }
 
+/// Cooperative source-state evidence recorded at capture time.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceQuiescence {
+    /// Quarters held the source's exclusive lifecycle lease.
+    Inactive,
+    /// New managed activity was frozen while already-running writers remained possible.
+    FrozenActive,
+}
+
+impl SourceQuiescence {
+    /// Stable representation used by command output and provenance.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inactive => "inactive",
+            Self::FrozenActive => "frozen-active",
+        }
+    }
+}
+
 /// Strict artifact manifest schema.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -287,6 +309,9 @@ pub struct ArtifactManifest {
     /// External authenticated provenance for schema-2 imported templates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_bundle: Option<ImportedBundleProvenance>,
+    /// Cooperative source-state evidence for schema-3 local artifacts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_quiescence: Option<SourceQuiescence>,
     /// Canonical content integrity evidence.
     pub content_integrity: ContentIntegrity,
 }
@@ -295,7 +320,7 @@ impl ArtifactManifest {
     pub(super) fn validate(&self, expected_kind: ArtifactKind) -> Result<()> {
         if !matches!(
             self.schema_version,
-            LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION
+            LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION | LOCAL_ARTIFACT_SCHEMA_VERSION
         ) {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
@@ -340,6 +365,7 @@ impl ArtifactManifest {
             ));
         }
         validate_imported_provenance(self)?;
+        validate_source_quiescence(self)?;
         validate_content_integrity(&self.content_integrity)
     }
 }
@@ -385,9 +411,11 @@ pub(super) fn valid_source_identity(source: &SourceIdentity, layout: SpaceLayout
 
 fn validate_imported_provenance(manifest: &ArtifactManifest) -> Result<()> {
     match (manifest.schema_version, &manifest.imported_bundle, manifest.origin) {
-        (LOCAL_ARTIFACT_SCHEMA_VERSION, None, ArtifactOrigin::User | ArtifactOrigin::AutomaticRollbackRecovery) => {
-            Ok(())
-        }
+        (
+            LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | LOCAL_ARTIFACT_SCHEMA_VERSION,
+            None,
+            ArtifactOrigin::User | ArtifactOrigin::AutomaticRollbackRecovery,
+        ) => Ok(()),
         (IMPORTED_ARTIFACT_SCHEMA_VERSION, Some(provenance), ArtifactOrigin::ImportedBundle)
             if manifest.kind == ArtifactKind::Template
                 && provenance.format_version == 1
@@ -406,6 +434,21 @@ fn validate_imported_provenance(manifest: &ArtifactManifest) -> Result<()> {
             "local artifact provenance is inconsistent",
         )),
     }
+}
+
+fn validate_source_quiescence(manifest: &ArtifactManifest) -> Result<()> {
+    let valid = match manifest.schema_version {
+        LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION => manifest.source_quiescence.is_none(),
+        LOCAL_ARTIFACT_SCHEMA_VERSION => manifest.source_quiescence.is_some(),
+        _ => false,
+    };
+    if valid {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "artifact source-quiescence evidence is inconsistent with its schema",
+    ))
 }
 
 fn validate_counts(counts: ArtifactCounts) -> Result<()> {
@@ -523,6 +566,8 @@ pub struct ArtifactReport {
     pub exclusions: CloneExclusions,
     /// Canonical stored counts after execution.
     pub stored_counts: Option<ArtifactCounts>,
+    /// Cooperative source-state evidence used for this capture.
+    pub source_quiescence: SourceQuiescence,
     /// Fixed walk limits.
     pub limits: CloneLimits,
     /// Cooperative activity does not discover detached writers.
@@ -671,7 +716,7 @@ pub(super) fn valid_digest(value: &str) -> bool {
 mod tests {
     use super::{
         ArtifactCounts, ArtifactId, ArtifactKind, ArtifactManifest, ArtifactName, ArtifactOrigin, ContentIntegrity,
-        ImportedBundleProvenance, SourceIdentity,
+        ImportedBundleProvenance, SourceIdentity, SourceQuiescence,
     };
     use crate::{STABLE_SCHEMA_VERSION, Space, SpaceId, SpaceLayout, SpaceManifest, SpaceName};
     use std::path::PathBuf;
@@ -720,6 +765,7 @@ mod tests {
         let historical = imported.source_identity.take().ok_or("missing fixture identity")?;
         imported.schema_version = super::IMPORTED_ARTIFACT_SCHEMA_VERSION;
         imported.origin = ArtifactOrigin::ImportedBundle;
+        imported.source_quiescence = None;
         imported.imported_bundle = Some(ImportedBundleProvenance {
             format_version: 1,
             export_id: ArtifactId::parse("11111111111111111111111111111111")?,
@@ -758,6 +804,7 @@ mod tests {
             includes_sensitive_state: true,
             origin: ArtifactOrigin::User,
             imported_bundle: None,
+            source_quiescence: Some(SourceQuiescence::Inactive),
             content_integrity: ContentIntegrity {
                 algorithm: super::INTEGRITY_ALGORITHM.to_owned(),
                 digest: "a".repeat(64),

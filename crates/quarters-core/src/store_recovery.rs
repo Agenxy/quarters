@@ -52,6 +52,8 @@ pub struct RecoverySummary {
     pub reclaiming_artifacts: usize,
     /// Interrupted manifest replacements safe to discard.
     pub artifact_manifest_temps: usize,
+    /// Interrupted cooperative-freeze marker publications safe to discard.
+    pub freeze_marker_temps: usize,
     /// Published artifacts whose exact source generation no longer exists.
     pub orphaned_artifacts: usize,
     /// Aggregate canonical bytes stored by templates.
@@ -162,6 +164,7 @@ impl Store {
             let mutation = self.begin_mutation()?;
             let layout = mutation.layout();
             let (mut summary, mut reclaiming) = prepare_recovery(&self.root, layout)?;
+            summary.freeze_marker_temps = remove_freeze_marker_temporaries(layout.spaces_root())?;
             let artifact_reclaiming = prepare_artifact_recovery(self, layout.trash_root())?;
             reclaiming.extend(artifact_reclaiming);
             summary.apply_artifacts(&artifacts);
@@ -223,6 +226,7 @@ fn inspect(
         rename_issues,
         rollbacks,
         rollback_issues,
+        freeze_marker_temps: freeze_marker_temporaries(layout.spaces_root())?.len(),
         unknown_entries_at_least,
         ..RecoverySummary::default()
     };
@@ -558,6 +562,51 @@ fn count_unknown_space_entries(spaces: &Path) -> Result<usize> {
     Ok(unknown)
 }
 
+fn freeze_marker_temporaries(spaces: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let entries =
+        fs::read_dir(spaces).map_err(|error| QuartersError::io("read freeze recovery namespace", spaces, error))?;
+    let mut temporaries = Vec::new();
+    let mut scan = ScanBudget::new("the freeze recovery namespace");
+    for entry in entries {
+        let entry = entry.map_err(|error| QuartersError::io("read freeze recovery entry", spaces, error))?;
+        scan.observe()?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if parse_wrapped_space_id(&name, ".freeze-", ".tmp") {
+            let metadata = fs::symlink_metadata(entry.path())
+                .map_err(|error| QuartersError::io("inspect freeze marker temporary file", &entry.path(), error))?;
+            validate_private_file(&entry.path(), &metadata).map_err(|error| {
+                error.with_hint(format!(
+                    "inspect and remove only the exact unsafe freeze temporary {}; then retry recovery",
+                    entry.path().display()
+                ))
+            })?;
+            if temporaries.len() >= MAX_RECOVERY_ENTRIES {
+                return Err(QuartersError::new(
+                    ErrorKind::ResourceLimit,
+                    "the store contains more than 1024 freeze marker temporary files",
+                )
+                .with_hint("inspect the protected spaces root before attempting recovery"));
+            }
+            temporaries.push(entry.path());
+        }
+    }
+    Ok(temporaries)
+}
+
+fn remove_freeze_marker_temporaries(spaces: &Path) -> Result<usize> {
+    let temporaries = freeze_marker_temporaries(spaces)?;
+    for temporary in &temporaries {
+        fs::remove_file(temporary)
+            .map_err(|error| QuartersError::io("remove freeze marker temporary file", temporary, error))?;
+    }
+    if !temporaries.is_empty() {
+        sync_directory(spaces)?;
+    }
+    Ok(temporaries.len())
+}
+
 fn is_known_space_hidden_entry(spaces: &Path, name: &OsStr) -> bool {
     if has_prefix(name, CREATING_PREFIX) {
         return true;
@@ -568,6 +617,8 @@ fn is_known_space_hidden_entry(spaces: &Path, name: &OsStr) -> bool {
     parse_wrapped_artifact_id(name, ".rollback-", ".json")
         || parse_wrapped_artifact_id(name, ".rollback-", ".tmp")
         || parse_wrapped_space_id(name, ".rename-", ".json")
+        || parse_wrapped_space_id(name, ".freeze-", ".json")
+        || parse_wrapped_space_id(name, ".freeze-", ".tmp")
         || parse_prefixed_artifact_id(name, ".rollback-staging-")
         || retired_entry_has_marker(spaces, name)
 }

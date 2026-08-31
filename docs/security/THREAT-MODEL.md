@@ -11,6 +11,7 @@
 - terminal control and process exit status
 - agent context integrity and bounded MCP availability
 - bundle authentication keys and exported plaintext state
+- cooperative freeze policy and recorded artifact source evidence
 
 ## Trust boundaries
 
@@ -44,6 +45,11 @@ policy.
 | Generated startup state is overwritten silently | Conflicts fail until `--replace-generated` is included in a new preview and therefore in a new digest |
 | Artifact content changes after capture | Canonical whole-tree BLAKE3 verification binds stored paths, types, ordinary modes, content, link targets and counts before every use |
 | Artifact digest is mistaken for authentication | Output and documentation state that another same-UID process can alter both content and manifest |
+| Cooperative freeze is mistaken for write protection | Human, JSON, status and provenance call it cooperative; the boundary states that existing, detached and direct same-UID writers continue |
+| Malformed freeze marker fails open or strands the space | Atomic temporary-and-rename publication, stable-ID path, 4-KiB bounded no-follow read, current-UID/type/mode/single-link validation, strict parsing and fail-closed launch errors; exact confirmed unfreeze removes an invalid marker only after its private file anchor revalidates |
+| Launch or mutation races freeze | Freeze and lifecycle entry serialize under the management guard; launch checks the marker before taking its shared lease, and existing operations are explicitly allowed to finish |
+| Forged current context retargets active capture | CLI-only inference reopens a healthy space and requires name, root and home evidence to agree; core active capture also observes a pre-existing held cooperative lease and valid freeze marker |
+| Active capture claims source quiescence | Schema-3 records `frozen-active`, publication rechecks the freeze under the management guard, output admits already-running writers, and integrity binds the completed staging tree rather than claiming a crash-consistent source snapshot |
 | Bundle mutation or wrong key | Complete keyed-BLAKE3 tag over strict bounded framing; import authenticates twice on one retained descriptor and compares tags in constant time |
 | Bundle traversal or extraction collision | Compile-time limits, canonical parent-first paths, descriptor-relative exclusive creation, one bounded raw-name/inode sweep and private atomic staging |
 | Bundle overwrites a user file | Retained protected parent, exclusive hidden staging and no-clobber link publication outside the Quarters store |
@@ -96,7 +102,7 @@ policy.
 | MCP request replay | Duplicate live IDs close the connection; legacy IDs are never reusable in-session |
 | Agent prompt injection from disk | Invalid entry names are bounded hex and detailed stored-entry errors are replaced on MCP surfaces |
 | Terminal or JSON presentation injection | Human and JSON stored text is escaped and bounded before emission |
-| Agent overreach | MCP has no clone, host-fork, exec, enter, host, inherit, home-view, root-selection or removal tool |
+| Agent overreach | MCP has no clone, host-fork, freeze, active-capture, exec, enter, host, inherit, home-view, root-selection or removal tool |
 | Remote attack surface | MCP transport is stdio-only; dependency gate rejects common HTTP/TLS server stacks |
 
 ## Explicit non-goals
@@ -112,6 +118,10 @@ policy.
 - confidentiality, non-repudiation or content-safety review for authenticated bundles
 - authenticating artifact state against another process with the same UID
 - treating a free cooperative lease as proof that detached clone writers are absent
+- treating cooperative freeze as filesystem immutability, confinement,
+  encryption or protection from a process with the same UID
+- treating `frozen-active` provenance as proof that already-running writers
+  were quiescent
 - treating workspace directories or a stable space ID as containment or authorization
 - treating a private SSH agent as protection from another process with the same UID
 - treating host-fork preview or provenance as authentication against the same UID
@@ -175,6 +185,14 @@ but the portable copy is not a database-consistent snapshot. Skipped sockets,
 FIFOs, devices, foreign-owned entries and cache roots are reported by count.
 Timestamps, ACLs, xattrs, filesystem flags, special mode bits, sparse extents
 and hard-link topology are not preserved.
+
+Active stationery capture narrows only Quarters-managed concurrency. It
+requires a valid freeze marker, an existing held cooperative lease and an additional
+shared lease during the copy, so new managed launches and exclusive lifecycle
+operations cannot begin. The already-running process tree can still write, and
+another same-UID process can alter either the source or marker directly.
+`frozen-active` provenance records that weaker evidence class; it is not a
+global process freeze or database checkpoint.
 
 An authenticated bundle is intentionally plaintext and uses one symmetric key:
 it provides neither confidentiality nor proof of which key holder created it.

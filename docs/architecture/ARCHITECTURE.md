@@ -37,6 +37,7 @@ The default root is `~/.quarters`:
   .observe
   .quarters-store.json  # optional expand-phase authoritative format marker
   spaces/
+    .freeze-<space-id>.json  # cooperative policy marker, not filesystem immutability
     work/
       .quarters.json
       .quarters-provenance.json  # clone destinations only
@@ -341,8 +342,11 @@ Clone, template capture, snapshot capture, template use and rollback share a
 bounded portable copy engine. Preview and execution
 share a descriptor-relative walker rooted in already-open source and staging
 directories. It uses no-follow `openat`/`fstatat` operations, fixed entry/byte/
-depth/path limits, an exclusive cooperative source lease, private same-filesystem
-staging, fresh control files and one publication rename.
+depth/path limits, a cooperative source lease, private same-filesystem staging,
+fresh control files and one publication rename. Ordinary capture takes the
+lease exclusively. Active stationery capture requires a stable-identity freeze
+marker and an already-held cooperative lease, then takes an additional shared
+lease so it can run inside that process tree.
 
 The default policy recreates derived cache roots empty. Sockets, FIFOs, devices
 and foreign-owned entries are omitted and counted. Regular hard links are copied
@@ -362,11 +366,27 @@ hard-link topology. Embedded absolute paths are copied without rewriting. A free
 cooperative lease cannot discover detached writers, so these copies are not
 live database snapshots or quiescence proof.
 
+Cooperative freeze state is a strict, identity-bound
+`.freeze-<space-id>.json` marker serialized by the store management guard.
+It is published by private temporary plus atomic rename; a confirmed unfreeze
+can remove malformed identity-bound state only while its file anchor remains
+private and single-linked.
+`Store::lease` refuses new managed launches before environment preparation,
+and space lifecycle entry points require unfreeze. Existing activity,
+direct filesystem access and detached same-UID writers continue. The marker is
+therefore a product policy against accidental actions, not write protection.
+Active capture also requires the CLI's current name, root and home evidence to
+match a healthy space and observes a pre-existing held lease before copying.
+Publication rechecks the freeze under the management guard.
+
 Published templates and snapshots use opaque 128-bit physical IDs and strict
 manifests. A canonical BLAKE3 stream binds stored paths, types, ordinary modes,
 file bytes, symlink targets and terminal counts. Every consuming operation
 verifies the complete artifact. Integrity detects change but does not
 authenticate against another process with the same UID.
+Schema-3 local artifacts record `inactive` or `frozen-active` source evidence;
+historical schema-1 and imported schema-2 artifacts remain readable without
+invented local quiescence claims.
 
 Rollback verifies exact source identity, captures an automatic recovery
 snapshot, and replaces the complete target home while preserving its controls.
@@ -385,9 +405,10 @@ fail closed. Foreign source identity remains historical provenance and never
 authorizes local rollback. Post-commit directory-sync or hidden-link cleanup
 failures return the committed object with an explicit warning.
 
-Platform clonefile/reflink acceleration, encryption and live freeze remain
-deferred. Stable identity upgrade, inactive display-name rename and the
+Platform clonefile/reflink acceleration, encryption and enforceable filesystem
+freeze remain deferred. Cooperative freeze and active stationery capture are
+implemented. Stable identity upgrade, inactive display-name rename and the
 expand-phase dual-layout reader are implemented; physical hidden store-root
 migration remains deferred. ADR 0003 records the copy boundary, ADR 0008
-defines lifecycle artifacts and rollback, and ADR 0009 defines authenticated
-portable bundles.
+defines lifecycle artifacts and rollback, ADR 0009 defines authenticated
+portable bundles, and ADR 0010 defines cooperative freeze and active capture.

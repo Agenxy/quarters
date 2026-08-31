@@ -1,21 +1,25 @@
 //! Human and machine output contracts.
 
+mod agents;
 mod artifacts;
 mod bundles;
 mod doctor;
+mod freeze;
 
+pub(crate) use agents::{print_adapter, print_agent};
 pub(crate) use artifacts::{
     print_artifact, print_artifact_list, print_artifact_mutation, print_artifact_report, print_artifact_verified,
     print_rollback, print_template_use,
 };
 pub(crate) use bundles::{print_bundle_export, print_bundle_import, print_export_key};
+pub(crate) use freeze::print_freeze;
 
 use crate::adapter::AdapterReport;
 use crate::shortcut::{ShortcutAction, ShortcutReport};
 use clap::error::Error as ClapError;
 use quarters_core::{
-    AgentStatus, Capabilities, CloneMode, CloneReport, LeaseState, QuartersError, RecoverySummary, RollbackIssue,
-    RollbackObservation, Space, SpaceInspection, SpaceRenameReport, SpaceUpgradeReport, ToolProbe,
+    AgentStatus, Capabilities, CloneMode, CloneReport, FreezeState, LeaseState, QuartersError, RecoverySummary,
+    RollbackIssue, RollbackObservation, Space, SpaceInspection, SpaceRenameReport, SpaceUpgradeReport, ToolProbe,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -29,48 +33,12 @@ pub(crate) struct DoctorSpace<'a> {
     pub(crate) requested: Option<&'a str>,
     pub(crate) space: Option<&'a Space>,
     pub(crate) inspection_error: Option<&'a QuartersError>,
+    pub(crate) freeze_error: Option<&'a QuartersError>,
     pub(crate) environment_validated: Option<bool>,
+    pub(crate) freeze_state: Option<FreezeState>,
     pub(crate) lease_state: Option<LeaseState>,
     pub(crate) agent_status: Option<&'a AgentStatus>,
     pub(crate) adapters: Option<&'a AdapterReport>,
-}
-
-pub(crate) fn print_agent(action: &str, status: &AgentStatus, json_output: bool) -> quarters_core::Result<()> {
-    if json_output {
-        return print_success(&format!("agent.{action}"), status, true);
-    }
-    println!("Private SSH agent for {}: {}", status.space, status.state.as_str());
-    if let Some(pid) = status.pid {
-        println!("  PID     {pid}");
-    }
-    if let Some(socket) = &status.socket {
-        println!("  Socket  {}", escape_for_human(socket));
-    }
-    println!("  Check   {}", status.detail);
-    println!("  Scope   separate credential process; host account authority is unchanged");
-    Ok(())
-}
-
-pub(crate) fn print_adapter(action: &str, report: &AdapterReport, json_output: bool) -> quarters_core::Result<()> {
-    if json_output {
-        return print_success(&format!("adapter.{action}"), report, true);
-    }
-    println!("OpenSSH adapters for {}", report.space);
-    println!(
-        "  quarters {:<10} {}",
-        report.launcher.state.as_str(),
-        path_for_human(&report.launcher.path)
-    );
-    for entry in &report.tools {
-        println!(
-            "  {:<8} {:<10} {}",
-            entry.tool,
-            entry.state.as_str(),
-            path_for_human(&entry.path)
-        );
-    }
-    println!("  Boundary {}", report.boundary);
-    Ok(())
 }
 
 pub(crate) fn print_upgrade(
@@ -256,7 +224,7 @@ pub(crate) fn print_recovered(summary: &RecoverySummary, json_output: bool) -> q
         return print_success("recover", summary, true);
     }
     println!(
-        "Recovered {} unfinished space creation(s), {} retired space entry(s), {} rename transaction(s), {} rollback transaction(s), {} artifact creation(s), {} artifact deletion(s), and {} manifest temporary file(s); {} rename issue(s), {} rollback issue(s), {} space and {} artifact creation(s) remain",
+        "Recovered {} unfinished space creation(s), {} retired space entry(s), {} rename transaction(s), {} rollback transaction(s), {} artifact creation(s), {} artifact deletion(s), {} manifest temporary file(s), and {} freeze temporary file(s); {} rename issue(s), {} rollback issue(s), {} space and {} artifact creation(s) remain",
         summary.unfinished_creations,
         summary.retired_entries,
         summary.rename_transactions,
@@ -264,6 +232,7 @@ pub(crate) fn print_recovered(summary: &RecoverySummary, json_output: bool) -> q
         summary.unfinished_artifact_creations,
         summary.reclaiming_artifacts,
         summary.artifact_manifest_temps,
+        summary.freeze_marker_temps,
         summary.rename_issues,
         summary.rollback_issues.len(),
         summary.active_creations,
@@ -359,6 +328,7 @@ pub(crate) fn print_list(
 pub(crate) enum StatusEntry {
     Healthy {
         space: Space,
+        freeze_state: FreezeState,
         lease_state: LeaseState,
         agent_state: String,
     },
@@ -412,7 +382,7 @@ pub(crate) fn print_status(
         print_shortcut_summaries(shortcuts);
         return Ok(());
     }
-    println!("NAME                             HEALTH     LAYOUT     LEASE    AGENT      CURRENT  HOME");
+    println!("NAME                             HEALTH     LAYOUT     POLICY    LEASE    AGENT      CURRENT  HOME");
     for status in statuses {
         print_human_status(status, current);
     }
@@ -482,7 +452,9 @@ pub(crate) fn print_doctor(
         requested,
         space,
         inspection_error,
+        freeze_error,
         environment_validated,
+        freeze_state,
         lease_state,
         agent_status,
         adapters,
@@ -509,6 +481,7 @@ pub(crate) fn print_doctor(
                 "unfinished_artifact_creations": summary.unfinished_artifact_creations,
                 "reclaiming_artifacts": summary.reclaiming_artifacts,
                 "artifact_manifest_temps": summary.artifact_manifest_temps,
+                "freeze_marker_temps": summary.freeze_marker_temps,
                 "orphaned_artifacts": summary.orphaned_artifacts,
                 "template_logical_bytes": summary.template_logical_bytes,
                 "snapshot_logical_bytes": summary.snapshot_logical_bytes,
@@ -522,7 +495,9 @@ pub(crate) fn print_doctor(
         "space_requested": requested.map(|name| safe_json_text(name, 64)),
         "space": space.map(space_value),
         "space_inspection_error": inspection_error.map(inspection_error_value),
+        "space_freeze_error": freeze_error.map(inspection_error_value),
         "space_environment_validated": environment_validated,
+        "space_freeze_state": freeze_state.map(FreezeState::as_str),
         "space_lease_state": lease_state.map(LeaseState::as_str),
         "space_ssh_agent": agent_status,
         "space_command_links": adapters,
@@ -566,7 +541,7 @@ fn print_doctor_human(
     println!("  Authority      {}", capabilities.authority_boundary);
     match recovery {
         Ok(summary) => println!(
-            "  Recovery       {} space active, {} space unfinished, {} retired, {} rename, {} rename issue; {} artifact active, {} artifact unfinished, {} reclaiming, {} manifest temp",
+            "  Recovery       {} space active, {} space unfinished, {} retired, {} rename, {} rename issue; {} artifact active, {} artifact unfinished, {} reclaiming, {} manifest temp, {} freeze temp",
             summary.active_creations,
             summary.unfinished_creations,
             summary.retired_entries,
@@ -575,7 +550,8 @@ fn print_doctor_human(
             summary.active_artifact_creations,
             summary.unfinished_artifact_creations,
             summary.reclaiming_artifacts,
-            summary.artifact_manifest_temps
+            summary.artifact_manifest_temps,
+            summary.freeze_marker_temps
         ),
         Err(error) => println!("  Recovery       unavailable: {}", escape_for_human(error.message())),
     }
@@ -663,6 +639,13 @@ fn print_doctor_space(context: DoctorSpace<'_>) {
         println!("  Environment    validated");
     }
     println!("  Lease          {} (detached processes unknown)", lease_state.as_str());
+    if let Some(state) = context.freeze_state {
+        println!("  Freeze         {} (cooperative policy only)", state.as_str());
+    }
+    if let Some(error) = context.freeze_error {
+        println!("  Freeze         invalid (policy fails closed)");
+        print_inspection_issue(error);
+    }
     if let Some(agent) = context.agent_status {
         println!("  SSH agent      {} ({})", agent.state.as_str(), agent.detail);
     }
@@ -795,11 +778,13 @@ fn status_value(status: &StatusEntry, current: Option<&str>) -> Value {
     match status {
         StatusEntry::Healthy {
             space,
+            freeze_state,
             lease_state,
             agent_state,
         } => {
             let mut value = space_value(space);
             value["health"] = Value::String("healthy".to_owned());
+            value["freeze_state"] = Value::String(freeze_state.as_str().to_owned());
             value["lease_state"] = Value::String(lease_state.as_str().to_owned());
             value["ssh_agent_state"] = Value::String(agent_state.clone());
             value["current"] = Value::Bool(current == Some(space.manifest().name.as_str()));
@@ -834,15 +819,17 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
     match status {
         StatusEntry::Healthy {
             space,
+            freeze_state,
             lease_state,
             agent_state,
         } => {
             let is_current = current == Some(space.manifest().name.as_str());
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<10} {:<8} {}",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} {}",
                 space.manifest().name,
                 "healthy",
                 space.layout(),
+                freeze_state.as_str(),
                 lease_state.as_str(),
                 agent_state,
                 if is_current { "yes" } else { "no" },
@@ -852,9 +839,10 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
         StatusEntry::Unhealthy { name, error, .. } => {
             let is_current = current == Some(name.as_str());
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<10} {:<8} -",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} -",
                 entry_name_for_human(name),
                 "unhealthy",
+                "unknown",
                 "unknown",
                 "unknown",
                 "unknown",
@@ -865,9 +853,10 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
         StatusEntry::Rollback { observation } => {
             let is_current = current == Some(observation.target.as_str());
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<10} {:<8} -",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} -",
                 observation.target,
                 "rollback",
+                "unknown",
                 "unknown",
                 "held",
                 "unknown",
@@ -884,9 +873,10 @@ fn print_human_status(status: &StatusEntry, current: Option<&str>) {
                 .as_ref()
                 .map_or(issue.marker.as_str(), quarters_core::SpaceName::as_str);
             println!(
-                "{:<32} {:<10} {:<10} {:<8} {:<10} {:<8} -",
+                "{:<32} {:<10} {:<10} {:<9} {:<8} {:<10} {:<8} -",
                 entry_name_for_human(name),
                 "rollback",
+                "unknown",
                 "unknown",
                 "unknown",
                 "unknown",

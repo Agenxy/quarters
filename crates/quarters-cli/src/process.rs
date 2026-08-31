@@ -28,8 +28,8 @@ impl ProfileLaunch<'_> {
 
     pub(crate) fn run(&self, raw_command: &[OsString]) -> Result<i32> {
         let (program, arguments) = split_command(raw_command)?;
-        let environment = self.environment()?;
         let _lease = self.store.lease(self.space)?;
+        let environment = self.environment()?;
         let status = if self.home_view {
             self.run_home_view(program, arguments, &environment)?
         } else {

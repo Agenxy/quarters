@@ -21,13 +21,14 @@ Applied in this development line:
   automatic recovery point
 - schema-3 stable identity, legacy upgrade and recoverable display-name rename
 - explicit private OpenSSH-agent lifecycle and collision-safe OpenSSH adapters
+- cooperative freeze/unfreeze plus immediate stationery capture from the
+  currently active Quarter with schema-3 quiescence provenance
 
 Specified but deliberately not exposed until their transaction and adversarial
 gates pass:
 
 - hidden internal-store migration and runtime re-keying (ADR 0006)
-- freeze and authenticated export beyond the accepted lifecycle subset (ADR
-  0003)
+- enforceable filesystem freeze beyond ADR 0010's cooperative policy
 - previewed host-state forking and inheritance policies (ADR 0004)
 - opt-in host-agent authority adapters beyond the private agent (ADR 0005)
 - native confinement and encrypted-at-rest capability research (ADR 0007)

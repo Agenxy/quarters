@@ -90,6 +90,8 @@ pub(crate) struct SpaceView {
     pub(crate) space_id: Option<String>,
     /// Cooperative Quarters lease state, when healthy.
     pub(crate) lease_state: Option<String>,
+    /// Cooperative freeze policy state, when healthy.
+    pub(crate) freeze_state: Option<String>,
     /// Verified private SSH-agent state, when healthy.
     pub(crate) ssh_agent_state: Option<String>,
     /// Whether this server process identifies itself as inside the space.

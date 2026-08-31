@@ -411,8 +411,8 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
         .find(|line| line.starts_with("broken"))
         .ok_or("missing unhealthy current row")?;
     assert_eq!(
-        row.split_whitespace().take(6).collect::<Vec<_>>(),
-        ["broken", "unhealthy", "unknown", "unknown", "unknown", "no"]
+        row.split_whitespace().take(7).collect::<Vec<_>>(),
+        ["broken", "unhealthy", "unknown", "unknown", "unknown", "unknown", "no"]
     );
 
     repair_then_remove_broken_space(temporary.path(), &manifest)?;
@@ -545,11 +545,12 @@ fn status_reports_supervised_activity_and_current_space() -> Result<(), Box<dyn 
         .find(|line| line.starts_with("work"))
         .ok_or("missing status row")?;
     assert_eq!(
-        row.split_whitespace().take(6).collect::<Vec<_>>(),
-        ["work", "healthy", "profile", "free", "unset", "no"]
+        row.split_whitespace().take(7).collect::<Vec<_>>(),
+        ["work", "healthy", "profile", "unfrozen", "free", "unset", "no"]
     );
     assert_eq!(row.find("profile"), Some(44));
-    assert_eq!(row.find("free"), Some(55));
+    assert_eq!(row.find("unfrozen"), Some(55));
+    assert_eq!(row.find("free"), Some(65));
     let aggregate = run(quarters(temporary.path()).args(["--json", "status"]))?;
     let aggregate: Value = serde_json::from_slice(&aggregate.stdout)?;
     assert!(

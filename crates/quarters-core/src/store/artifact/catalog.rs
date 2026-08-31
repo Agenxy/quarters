@@ -3,8 +3,8 @@
 use super::integrity::{digest_home, verify_home};
 use super::model::{
     Artifact, ArtifactId, ArtifactInspection, ArtifactKind, ArtifactManifest, ArtifactMutationReport, ArtifactName,
-    ArtifactOrigin, ArtifactReport, IMPORTED_ARTIFACT_SCHEMA_VERSION, LOCAL_ARTIFACT_SCHEMA_VERSION, SourceIdentity,
-    SourceStatus, TemplateUseReport,
+    ArtifactOrigin, ArtifactReport, IMPORTED_ARTIFACT_SCHEMA_VERSION, LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION,
+    LOCAL_ARTIFACT_SCHEMA_VERSION, SourceIdentity, SourceQuiescence, SourceStatus, TemplateUseReport,
 };
 use crate::store::create::{acquire_creation_lock, ensure_directory_skeleton, write_manifest};
 use crate::store::lifecycle::{
@@ -13,7 +13,9 @@ use crate::store::lifecycle::{
 use crate::store::scan::ScanBudget;
 use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease};
 use crate::store_policy::{validate_private_dir, validate_shell};
-use crate::{ErrorKind, QuartersError, Result, STABLE_SCHEMA_VERSION, SpaceId, SpaceManifest, SpaceName, Store};
+use crate::{
+    ErrorKind, FreezeState, QuartersError, Result, STABLE_SCHEMA_VERSION, SpaceId, SpaceManifest, SpaceName, Store,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -48,7 +50,14 @@ impl Store {
         let setup = ArtifactSetup::prepare(self, kind, source, name, CloneMode::Preview)?;
         let mut clone = setup.clone_report(include_cache);
         walk_home(&setup.source.home(), None, &mut clone, &artifact_walk_control())?;
-        Ok(report_from_clone(kind, name, &clone, None, None))
+        Ok(report_from_clone(
+            kind,
+            name,
+            &clone,
+            SourceQuiescence::Inactive,
+            None,
+            None,
+        ))
     }
 
     /// Create and atomically publish a named lifecycle artifact.
@@ -354,7 +363,7 @@ impl Store {
         Ok(report)
     }
 
-    fn execute_artifact(
+    pub(super) fn execute_artifact(
         &self,
         setup: &mut ArtifactSetup,
         name: ArtifactName,
@@ -387,6 +396,7 @@ impl Store {
             includes_sensitive_state: true,
             origin,
             imported_bundle: None,
+            source_quiescence: Some(setup.source_quiescence),
             content_integrity: integrity.clone(),
         };
         write_artifact_manifest(&staging.temporary, &manifest)?;
@@ -399,6 +409,7 @@ impl Store {
             setup.kind,
             &manifest.name,
             &clone,
+            setup.source_quiescence,
             Some(&manifest.artifact_id),
             Some(integrity.counts),
         ))
@@ -481,6 +492,15 @@ impl Store {
                 "source manifest changed during artifact creation",
             ));
         }
+        if setup.source_quiescence == SourceQuiescence::FrozenActive
+            && self.freeze_state(&current)? != FreezeState::Frozen
+        {
+            return Err(QuartersError::new(
+                ErrorKind::SpaceActive,
+                "the cooperative freeze was removed during active artifact capture",
+            )
+            .with_hint("freeze the source again and repeat the capture; nothing was published"));
+        }
         self.require_artifact_name_available(setup.kind, &manifest.name)?;
         if entry_exists(&staging.destination)? {
             return Err(QuartersError::new(
@@ -533,11 +553,14 @@ impl Store {
         })?;
         if !matches!(
             header.schema_version,
-            LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION
+            LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION | IMPORTED_ARTIFACT_SCHEMA_VERSION | LOCAL_ARTIFACT_SCHEMA_VERSION
         ) {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
-                format!("unsupported artifact schema {}", header.schema_version),
+                format!(
+                    "artifact uses schema {}, but this build supports schemas {} through {}",
+                    header.schema_version, LEGACY_LOCAL_ARTIFACT_SCHEMA_VERSION, LOCAL_ARTIFACT_SCHEMA_VERSION
+                ),
             ));
         }
         let manifest: ArtifactManifest = serde_json::from_slice(&bytes).map_err(|error| {
@@ -602,14 +625,16 @@ fn source_status(
     }
 }
 
-struct ArtifactSetup {
-    kind: ArtifactKind,
-    source: crate::Space,
-    source_manifest: crate::SpaceManifest,
-    _activity_lock: Option<LifecycleLease>,
-    mode: CloneMode,
-    name: ArtifactName,
-    staging: Option<ArtifactStaging>,
+pub(super) struct ArtifactSetup {
+    pub(super) kind: ArtifactKind,
+    pub(super) source: crate::Space,
+    pub(super) source_manifest: crate::SpaceManifest,
+    pub(super) _activity_lock: Option<LifecycleLease>,
+    pub(super) _active_lock: Option<crate::SpaceLease>,
+    pub(super) source_quiescence: SourceQuiescence,
+    pub(super) mode: CloneMode,
+    pub(super) name: ArtifactName,
+    pub(super) staging: Option<ArtifactStaging>,
 }
 
 pub(super) struct SpaceStaging {
@@ -658,6 +683,8 @@ impl ArtifactSetup {
             source_manifest: source_space.manifest().clone(),
             source: source_space,
             _activity_lock: Some(activity_lock),
+            _active_lock: None,
+            source_quiescence: SourceQuiescence::Inactive,
             mode,
             name: name.clone(),
             staging,
@@ -687,13 +714,15 @@ impl ArtifactSetup {
             source: source.clone(),
             source_manifest: source.manifest().clone(),
             _activity_lock: None,
+            _active_lock: None,
+            source_quiescence: SourceQuiescence::Inactive,
             mode: CloneMode::Execute,
             name: name.clone(),
             staging,
         })
     }
 
-    fn clone_report(&self, include_cache: bool) -> CloneReport {
+    pub(super) fn clone_report(&self, include_cache: bool) -> CloneReport {
         CloneReport::new(
             self.source.manifest().name.as_str(),
             self.name.as_str(),
@@ -869,10 +898,11 @@ pub(super) fn write_artifact_manifest(root: &Path, manifest: &ArtifactManifest) 
     write_private_file(&root.join(ARTIFACT_MANIFEST), &bytes)
 }
 
-fn report_from_clone(
+pub(super) fn report_from_clone(
     kind: ArtifactKind,
     name: &ArtifactName,
     clone: &CloneReport,
+    source_quiescence: SourceQuiescence,
     id: Option<&ArtifactId>,
     stored_counts: Option<super::ArtifactCounts>,
 ) -> ArtifactReport {
@@ -887,12 +917,13 @@ fn report_from_clone(
         examined_counts: clone.counts,
         exclusions: clone.exclusions,
         stored_counts,
+        source_quiescence,
         limits: clone.limits,
         detached_processes: "unknown".to_owned(),
     }
 }
 
-fn artifact_walk_control() -> WalkControl {
+pub(super) fn artifact_walk_control() -> WalkControl {
     WalkControl::for_artifact()
 }
 

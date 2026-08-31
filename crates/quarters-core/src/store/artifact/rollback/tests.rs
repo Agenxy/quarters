@@ -43,6 +43,30 @@ fn rollback_restores_state_and_keeps_recovery() -> std::result::Result<(), Box<d
 }
 
 #[test]
+fn cooperative_freeze_blocks_rollback_preview_and_execution() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let temporary = TempDir::new()?;
+    let store = Store::new(temporary.path().join("root"))?;
+    let target = SpaceName::parse("work")?;
+    store.create(target.clone(), PathBuf::from("/bin/sh"))?;
+    let snapshot = ArtifactName::parse("before")?;
+    store.create_artifact(
+        ArtifactKind::Snapshot,
+        &target,
+        snapshot.clone(),
+        true,
+        ArtifactOrigin::User,
+    )?;
+    let recovery = ArtifactName::parse("automatic")?;
+    store.freeze(&target)?;
+
+    let preview = store.rollback_plan(&target, &snapshot, &recovery, true);
+    assert!(matches!(preview, Err(error) if error.kind() == ErrorKind::SpaceActive));
+    let execution = store.rollback_space(&target, &snapshot, &recovery, true);
+    assert!(matches!(execution, Err(error) if error.kind() == ErrorKind::SpaceActive));
+    Ok(())
+}
+
+#[test]
 fn prepared_marker_aborts_and_reclaims_unused_staging() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let (_temporary, store, target, space) = test_space("work")?;
     let id = ArtifactId::generate()?;

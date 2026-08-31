@@ -3,8 +3,9 @@
 use crate::cli::{
     AdapterCommand, AgentCommand, AgentRecoverArgs, AgentTargetArgs, ArtifactCreateArgs, ArtifactRemoveArgs,
     ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ExportArgs,
-    ExportKeyCommand, ImportArgs, ProfileArgs, RecoverArgs, RemoveArgs, RenameArgs, RollbackArgs, SnapshotCommand,
-    SnapshotCreateArgs, SnapshotListArgs, StatusArgs, TemplateCommand, TemplateUseArgs, UpgradeArgs,
+    ExportKeyCommand, FreezeArgs, ImportArgs, ProfileArgs, RecoverArgs, RemoveArgs, RenameArgs, RollbackArgs,
+    SnapshotCommand, SnapshotCreateArgs, SnapshotListArgs, StatusArgs, TemplateCommand, TemplateUseArgs, UnfreezeArgs,
+    UpgradeArgs,
 };
 use crate::{output, process};
 use quarters_core::{
@@ -36,6 +37,8 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         Command::Clone(arguments) => clone_space(&store, &arguments, cli.json),
         Command::Upgrade(arguments) => upgrade(&store, &arguments, cli.json),
         Command::Rename(arguments) => rename(&store, &arguments, cli.json),
+        Command::Freeze(arguments) => freeze(&store, &arguments, cli.json),
+        Command::Unfreeze(arguments) => unfreeze(&store, &arguments, cli.json),
         Command::Template(arguments) => template(&store, arguments.command, cli.json),
         Command::Snapshot(arguments) => snapshot(&store, arguments.command, cli.json),
         Command::Rollback(arguments) => rollback(&store, &arguments, cli.json),
@@ -121,6 +124,25 @@ fn rename(store: &Store, arguments: &RenameArgs, json: bool) -> Result<i32> {
     Ok(0)
 }
 
+fn freeze(store: &Store, arguments: &FreezeArgs, json: bool) -> Result<i32> {
+    let name = resolved_space_name(store, arguments.name.as_deref())?;
+    output::print_freeze(&store.freeze(&name)?, json)?;
+    Ok(0)
+}
+
+fn unfreeze(store: &Store, arguments: &UnfreezeArgs, json: bool) -> Result<i32> {
+    let name = resolved_space_name(store, arguments.name.as_deref())?;
+    if arguments.confirm != name.as_str() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--confirm must exactly repeat the resolved space name",
+        )
+        .with_hint(format!("run 'quarters unfreeze {name} --confirm {name}'")));
+    }
+    output::print_freeze(&store.unfreeze(&name)?, json)?;
+    Ok(0)
+}
+
 fn agent(store: &Store, host: &HostEnvironment, command: AgentCommand, json: bool) -> Result<i32> {
     let command = match command {
         AgentCommand::Recover(arguments) => return recover_agent(store, host, &arguments, json),
@@ -133,7 +155,7 @@ fn agent(store: &Store, host: &HostEnvironment, command: AgentCommand, json: boo
         AgentCommand::Restart(target) => ("restart", target),
         AgentCommand::Recover(_) => return Err(QuartersError::new(ErrorKind::System, "invalid agent dispatch")),
     };
-    let name = agent_target(&target)?;
+    let name = agent_target(store, &target)?;
     let space = store.open(&name)?;
     let status = match action {
         "status" => store.ssh_agent_status(&space, host)?,
@@ -172,7 +194,7 @@ fn adapter(store: &Store, command: AdapterCommand, json: bool) -> Result<i32> {
         AdapterCommand::Install(target) => ("install", target),
         AdapterCommand::Remove(target) => ("remove", target),
     };
-    let name = agent_target(&target)?;
+    let name = agent_target(store, &target)?;
     let space = store.open(&name)?;
     let report = match action {
         "status" => crate::adapter::inspect(&space)?,
@@ -184,15 +206,11 @@ fn adapter(store: &Store, command: AdapterCommand, json: bool) -> Result<i32> {
     Ok(0)
 }
 
-fn agent_target(arguments: &AgentTargetArgs) -> Result<SpaceName> {
+fn agent_target(store: &Store, arguments: &AgentTargetArgs) -> Result<SpaceName> {
     if let Some(name) = &arguments.name {
         return SpaceName::parse(name.clone());
     }
-    let current = std::env::var("QUARTERS_SPACE").map_err(|_| {
-        QuartersError::new(ErrorKind::InvalidInput, "a space name is required outside a Quarter")
-            .with_hint("run 'quarters agent status NAME'")
-    })?;
-    SpaceName::parse(current)
+    Ok(strict_current_space(store)?.manifest().name.clone())
 }
 
 fn rollback(store: &Store, arguments: &RollbackArgs, json: bool) -> Result<i32> {
@@ -298,13 +316,28 @@ fn snapshot(store: &Store, command: SnapshotCommand, json: bool) -> Result<i32> 
 }
 
 fn create_artifact(store: &Store, kind: ArtifactKind, arguments: &ArtifactCreateArgs, json: bool) -> Result<i32> {
-    let source = SpaceName::parse(arguments.source.clone())?;
+    let source = if arguments.from_active {
+        strict_current_space(store)?.manifest().name.clone()
+    } else {
+        SpaceName::parse(arguments.source.clone().ok_or_else(|| {
+            QuartersError::new(
+                ErrorKind::InvalidInput,
+                "artifact creation requires --from SPACE or --from-active",
+            )
+        })?)?
+    };
     let name = ArtifactName::parse(arguments.name.clone())?;
-    let report = if arguments.preview {
+    let report = if arguments.preview && arguments.from_active {
+        store.active_artifact_plan(kind, &source, &name, arguments.include_cache)?
+    } else if arguments.preview {
         store.artifact_plan(kind, &source, &name, arguments.include_cache)?
     } else {
         require_sensitive_confirmation(arguments.confirm_sensitive_state.as_deref(), &source)?;
-        store.create_artifact(kind, &source, name, arguments.include_cache, ArtifactOrigin::User)?
+        if arguments.from_active {
+            store.create_artifact_from_active(kind, &source, name, arguments.include_cache, ArtifactOrigin::User)?
+        } else {
+            store.create_artifact(kind, &source, name, arguments.include_cache, ArtifactOrigin::User)?
+        }
     };
     output::print_artifact_report(&report, json)?;
     Ok(0)
@@ -538,10 +571,18 @@ fn status(store: &Store, host: &HostEnvironment, arguments: &StatusArgs, json: b
                             |status| status.state.as_str().to_owned(),
                         )
                     };
-                    output::StatusEntry::Healthy {
-                        space,
-                        lease_state,
-                        agent_state,
+                    match store.freeze_state(&space) {
+                        Ok(freeze_state) => output::StatusEntry::Healthy {
+                            freeze_state,
+                            space,
+                            lease_state,
+                            agent_state,
+                        },
+                        Err(error) => output::StatusEntry::Unhealthy {
+                            name: space.manifest().name.as_str().to_owned(),
+                            name_was_lossy: false,
+                            error,
+                        },
                     }
                 }),
             SpaceInspection::Unhealthy {
@@ -637,6 +678,9 @@ fn doctor(store: &Store, host: &HostEnvironment, arguments: &DoctorArgs, json: b
         Err(error) if layout.error_kind.is_some() => (None, Some(error)),
         Err(error) => return Err(error),
     };
+    let freeze_result = space.as_ref().map(|space| store.freeze_state(space));
+    let freeze_state = freeze_result.as_ref().and_then(|result| result.as_ref().ok()).copied();
+    let freeze_error = freeze_result.as_ref().and_then(|result| result.as_ref().err());
     let lease_state = space.as_ref().map(|space| store.lease_state(space)).transpose()?;
     let agent_status = space
         .as_ref()
@@ -672,7 +716,9 @@ fn doctor(store: &Store, host: &HostEnvironment, arguments: &DoctorArgs, json: b
             requested: arguments.name.as_deref(),
             space: space.as_ref(),
             inspection_error: inspection_error.as_ref(),
+            freeze_error,
             environment_validated,
+            freeze_state,
             lease_state,
             agent_status: agent_status.as_ref(),
             adapters: adapters.as_ref(),
@@ -755,6 +801,42 @@ fn validated_current_space(store: &Store) -> Option<String> {
         }
         Ok(SpaceInspection::Unhealthy { .. }) | Err(_) => None,
     }
+}
+
+fn resolved_space_name(store: &Store, name: Option<&str>) -> Result<SpaceName> {
+    match name {
+        Some(name) => SpaceName::parse(name.to_owned()),
+        None => Ok(strict_current_space(store)?.manifest().name.clone()),
+    }
+}
+
+fn strict_current_space(store: &Store) -> Result<Space> {
+    let name = std::env::var("QUARTERS_SPACE").map_err(|_error| {
+        QuartersError::new(ErrorKind::InvalidInput, "a space name is required outside a Quarter")
+            .with_hint("name the space explicitly, or run this command inside a supervised Quarter")
+    })?;
+    let name = SpaceName::parse(name)?;
+    let space = open_space(store, name.as_str())?;
+    let claimed_root = std::env::var_os("QUARTERS_SPACE_ROOT").ok_or_else(|| {
+        QuartersError::new(
+            ErrorKind::InvalidInput,
+            "the current Quarter claim has no QUARTERS_SPACE_ROOT evidence",
+        )
+    })?;
+    let claimed_home = std::env::var_os("QUARTERS_SPACE_HOME").ok_or_else(|| {
+        QuartersError::new(
+            ErrorKind::InvalidInput,
+            "the current Quarter claim has no QUARTERS_SPACE_HOME evidence",
+        )
+    })?;
+    if claimed_root != space.root().as_os_str() || claimed_home != space.home().as_os_str() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "the current Quarter name and path evidence do not identify the same healthy space",
+        )
+        .with_hint("exit the stale or forged context and enter the space again through Quarters"));
+    }
+    Ok(space)
 }
 
 fn profile_launch<'a>(

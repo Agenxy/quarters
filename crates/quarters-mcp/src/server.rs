@@ -172,6 +172,7 @@ impl QuartersMcp {
                 layout: None,
                 space_id: None,
                 lease_state: None,
+                freeze_state: None,
                 ssh_agent_state: None,
                 issue: Some(Diagnostic::for_unhealthy_entry(&error)),
             }),
@@ -195,6 +196,7 @@ impl QuartersMcp {
             layout: None,
             space_id: None,
             lease_state: None,
+            freeze_state: None,
             ssh_agent_state: None,
             current: false,
             issue: Some(Diagnostic::from(&error)),
@@ -215,6 +217,7 @@ impl QuartersMcp {
             layout: None,
             space_id: None,
             lease_state: None,
+            freeze_state: None,
             ssh_agent_state: None,
             current: false,
             issue: Some(Diagnostic {
@@ -295,6 +298,14 @@ impl QuartersMcp {
         inspect_agent: bool,
     ) -> quarters_core::Result<SpaceView> {
         let mut view = view_space(space, lease_state, current_space)?;
+        match self.store.freeze_state(space) {
+            Ok(state) => view.freeze_state = Some(state.as_str().to_owned()),
+            Err(error) => {
+                "unhealthy".clone_into(&mut view.health);
+                view.state = Some("freeze_metadata_issue".to_owned());
+                view.issue = Some(Diagnostic::from(&error));
+            }
+        }
         view.ssh_agent_state = Some(if inspect_agent {
             self.store.ssh_agent_status(space, &self.host).map_or_else(
                 |_error| "unavailable".to_owned(),
@@ -515,6 +526,7 @@ fn view_space(space: &Space, lease_state: LeaseState, current_space: Option<&str
         layout: Some(space.layout().as_str().to_owned()),
         space_id: space.id().map(|space_id| space_id.as_str().to_owned()),
         lease_state: Some(lease_state.as_str().to_owned()),
+        freeze_state: None,
         ssh_agent_state: None,
         current: current_space == Some(space.manifest().name.as_str()),
         issue: None,

@@ -38,6 +38,7 @@ impl Store {
                     .with_source(error)
                 })?
                 .ok_or_else(|| space_not_found(name))?;
+            self.ensure_not_frozen(&identity)?;
             self.ensure_no_agent_for_removal(&identity, &host)?;
             Some(identity)
         } else {

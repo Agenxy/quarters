@@ -277,6 +277,7 @@ fn imported_manifest(
             authenticated_tag: tag.to_hex().to_string(),
             import_platform: crate::platform::capabilities().platform,
         }),
+        source_quiescence: None,
         content_integrity: header.content_integrity.clone(),
     })
 }

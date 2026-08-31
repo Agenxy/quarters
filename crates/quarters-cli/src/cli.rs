@@ -30,6 +30,10 @@ pub(crate) enum Command {
     Upgrade(UpgradeArgs),
     /// Change an inactive stable-identity space display name.
     Rename(RenameArgs),
+    /// Block new Quarters-managed launches and mutations.
+    Freeze(FreezeArgs),
+    /// Remove a cooperative freeze marker after exact confirmation.
+    Unfreeze(UnfreezeArgs),
     /// Create and manage reusable named creation sources.
     Template(TemplateArgs),
     /// Create and manage named recovery points.
@@ -176,6 +180,21 @@ pub(crate) struct RenameArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct FreezeArgs {
+    /// Space name. Defaults to the current Quarter when inside one.
+    pub(crate) name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UnfreezeArgs {
+    /// Space name. Defaults to the current Quarter when inside one.
+    pub(crate) name: Option<String>,
+    /// Must exactly repeat the resolved space name.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) confirm: String,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct TemplateArgs {
     #[command(subcommand)]
     pub(crate) command: TemplateCommand,
@@ -224,8 +243,16 @@ pub(crate) struct ArtifactCreateArgs {
     /// New artifact display name.
     pub(crate) name: String,
     /// Existing source Quarter.
-    #[arg(long = "from", value_name = "SPACE")]
-    pub(crate) source: String,
+    #[arg(
+        long = "from",
+        value_name = "SPACE",
+        required_unless_present = "from_active",
+        conflicts_with = "from_active"
+    )]
+    pub(crate) source: Option<String>,
+    /// Capture immediately from the current cooperatively frozen Quarter.
+    #[arg(long, conflicts_with = "source")]
+    pub(crate) from_active: bool,
     /// Validate and summarize without creating an artifact.
     #[arg(long, conflicts_with = "confirm_sensitive_state")]
     pub(crate) preview: bool,

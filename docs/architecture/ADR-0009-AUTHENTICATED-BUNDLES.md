@@ -32,7 +32,9 @@ name through `--confirm-sensitive-state`. Users who need a reduced bundle must
 first create and inspect a deliberately reduced template.
 
 MCP receives no key, export or import authority. Compression, encryption,
-confinement, live freeze and remote transfer remain separate gates.
+confinement, enforceable filesystem freeze and remote transfer remain separate
+gates. ADR 0010's cooperative freeze does not change the bundle authority or
+confidentiality model.
 
 ### Key contract
 
@@ -130,8 +132,11 @@ warning; retrying cannot reinterpret the visible template as a failed
 publication.
 
 Schema 2 carries no local source binding. `source_identity` is absent and can
-never match a local space, bind a legacy artifact, satisfy rollback filtering or
-authorize source-sensitive work. Authenticated historical source data lives in
+never match a local space, bind a legacy artifact, satisfy rollback filtering,
+authorize source-sensitive work or retain local `inactive`/`frozen-active`
+evidence; an imported template reports
+historical source quiescence as unrecorded rather than inventing provenance.
+Authenticated historical source data lives in
 an `ImportedBundleProvenance` record, and inspection reports `external`.
 Imported artifacts are valid only as templates with origin `imported-bundle`.
 

@@ -71,7 +71,7 @@ impl Store {
     pub fn stop_ssh_agent(&self, space: &Space, host: &HostEnvironment) -> Result<AgentStatus> {
         self.ensure_no_rename_target(&space.manifest().name)?;
         self.ensure_no_rollback_target(&space.manifest().name)?;
-        let _lease = self.lease(space)?;
+        let _lease = self.maintenance_lease(space)?;
         let Some(runtime) = crate::platform::existing_runtime_directory(space, host)? else {
             return Ok(AgentStatus::unset(space));
         };
@@ -98,7 +98,7 @@ impl Store {
     pub fn recover_ssh_agent(&self, space: &Space, host: &HostEnvironment) -> Result<AgentStatus> {
         self.ensure_no_rename_target(&space.manifest().name)?;
         self.ensure_no_rollback_target(&space.manifest().name)?;
-        let _lease = self.lease(space)?;
+        let _lease = self.maintenance_lease(space)?;
         let Some(runtime) = crate::platform::existing_runtime_directory(space, host)? else {
             return Ok(AgentStatus::unset(space));
         };

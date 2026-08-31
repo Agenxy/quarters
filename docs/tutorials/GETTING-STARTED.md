@@ -125,6 +125,28 @@ Templates omit derived caches unless `--include-cache` is explicit and create a
 fresh space identity. They can contain credentials; Quarters does not guess at
 a safe scrub policy.
 
+To capture stationery from the Quarter you are currently using, freeze new
+Quarters-managed activity, preview and capture immediately, then unfreeze:
+
+```sh
+quarters enter studio
+quarters freeze
+quarters template create studio-live --from-active --preview
+quarters template create studio-live --from-active --confirm-sensitive-state studio
+quarters unfreeze --confirm studio
+```
+
+Run the last four commands inside `studio`. Freeze does not stop that running
+shell or its children; it blocks new managed launches and Quarters mutations
+of that space. The capture holds a shared lease and records `frozen-active`
+source evidence. Already-running, detached and direct same-UID writers can
+still change files during the walk, so this is self-verifying stationery, not
+a crash-consistent snapshot or filesystem freeze. If the shell exits while the
+marker remains, run `quarters unfreeze studio --confirm studio` from the host.
+Inside Linux `--home-view`, the authoritative store root is intentionally
+overmounted and management commands such as `freeze` fail closed; run them from
+a portable Quarter entry or the host shell.
+
 Create and independently verify a recovery point:
 
 ```sh

@@ -692,3 +692,55 @@ evidence is separate:
 
 Hosted macOS, Ubuntu, static-musl and dependency-policy jobs remain a separate
 acceptance gate after publication of this commit.
+
+## Cooperative freeze and active stationery, 2026-08-30
+
+Claude Code used Claude Opus 5 at maximum effort in read-only mode before
+implementation. It rejected a deferred supervisor-request design because exit
+did not prove quiescence and delayed capture broke preview and confirmation
+semantics. The accepted replacement is an immediate CLI-only capture from the
+current Quarter, requiring strict name/root/home evidence, an existing held
+cooperative lease and an identity-bound cooperative freeze.
+
+The first complete implementation review returned `VERDICT: REVISE`. It found
+that direct marker creation could leave a partial final file after interruption,
+stranding the space with no product escape; observation could race publication
+or unfreeze; publication did not recheck freeze state; and schema compatibility,
+scope wording and maintenance-path coverage were incomplete. Freeze publication
+now uses private temporary state plus atomic rename and directory sync. Exact
+confirmed unfreeze safely removes malformed identity-bound markers only after
+private-file revalidation. Losing reads become unfrozen observations, active
+capture rechecks the marker under the management guard, and stale freeze
+temporaries are counted and removed by confirmed recovery.
+
+The second complete review independently reproduced the original stranded-marker
+case, reran the Rust suites and returned `VERDICT: ACCEPT`. Every remaining low
+observation was then closed: all marker errors identify the path and remedy,
+unsafe temporary state blocks before unfreeze changes the final marker,
+schema-forward clearing is explicit, omitted-name agent/adapter commands and
+import provenance are documented, and Linux home-view management limits remain
+plainly stated. A narrow final delta review found no regression and again
+returned:
+
+> VERDICT: ACCEPT
+
+Final local evidence on the reviewed checkpoint:
+
+- `make check`: all Rust unit and acceptance suites, 158 core tests and 4
+  Bun-managed typed npm launcher tests pass
+- warnings-as-errors Clippy and rustdoc, formatting and structural ceilings:
+  pass
+- `cargo deny check` and `cargo audit --deny warnings`: pass; only the approved
+  transitive `syn` 2/3 duplication warning remains
+- malformed, oversized, linked, broad-mode, newer-schema and interrupted
+  freeze-marker cases fail closed or recover through the exact documented path
+- frozen launch, enter, agent start, adapter mutation, rename, upgrade, rollback
+  and removal refusal; agent maintenance; clone/snapshot/template reads; and
+  active-capture provenance round trips pass end to end
+- `git diff --check`: pass
+
+The separate managed Codex deep-scan worker could not start because the parent
+session did not expose a managed filesystem permission profile. No scan result
+is claimed; the read-only Opus review and local security gates above are the
+available evidence. Hosted macOS, Ubuntu, static-musl and dependency-policy
+jobs remain a separate acceptance gate after publication of this commit.

@@ -37,6 +37,13 @@ credential-bearing mutation has a preview and exact confirmation. Rollback
 first captures an automatic recovery snapshot and uses a durable three-state
 transaction that `doctor` can explain and `recover` can finish safely.
 
+A cooperative freeze blocks new managed process/agent launches and mutations
+of the space itself while allowing the already-running Quarter to continue. From
+that running context, `template create --from-active` can capture immediate
+stationery under a shared lease and records `frozen-active` provenance. Direct,
+detached or malicious same-UID writers remain possible: freeze is protection
+from accidental Quarters actions, not filesystem immutability or containment.
+
 A previewed host fork can seed a new Quarter with a closed set of shell startup
 files plus explicitly named regular files. Its confirmation digest binds the
 source generations and policy; credentials, history, cache, runtime and agent
@@ -96,6 +103,10 @@ Inside the shell:
 echo "$QUARTERS_SPACE"
 git config --global user.name "Work identity"
 quarters current
+quarters freeze
+quarters template create current-room --from-active --preview
+quarters template create current-room --from-active --confirm-sensitive-state work
+quarters unfreeze --confirm work
 ```
 
 Install the current checkout with `make install`. Building from source requires
@@ -129,6 +140,9 @@ install path.
 | `clone SOURCE DESTINATION --confirm-sensitive-state SOURCE` | Copy included persistent state into a new independent space |
 | `upgrade NAME --preview\|--confirm NAME` | Assign stable identity to an inactive legacy profile |
 | `rename PREVIOUS NAME --preview\|--confirm PREVIOUS` | Recoverably change an inactive space's display name |
+| `freeze [NAME]` | Block new managed process/agent launches and space mutation; existing activity continues |
+| `unfreeze [NAME] --confirm NAME` | Remove a cooperative freeze marker after exact confirmation |
+| `template create NAME --from-active` | Capture stationery from the current frozen Quarter with a held cooperative lease |
 | `template create\|list\|show\|use\|rename\|rm` | Manage reusable, integrity-checked creation sources |
 | `snapshot create\|list\|show\|verify\|rename\|rm` | Manage named, integrity-checked recovery points |
 | `rollback SPACE SNAPSHOT --recovery-name NAME --preview` | Verify replacement and automatic recovery capture without mutation |
@@ -139,7 +153,7 @@ install path.
 | `import BUNDLE NAME --key PATH --preview` | Authenticate a bundle and return its exact import-plan digest |
 | `import BUNDLE NAME --key PATH --confirm-plan DIGEST` | Re-authenticate and atomically import a fresh external template |
 | `list` | List healthy and unhealthy space entries without hiding siblings |
-| `status [NAME]` | Observe whether Quarters' cooperative lease is free or held |
+| `status [NAME]` | Observe cooperative freeze, lease and private-agent state |
 | `current` | Print the current space or `host` |
 | `env NAME` | Prepare and show the exact computed environment; explicit inherited values are redacted |
 | `enter NAME` | Open the space's interactive shell |
@@ -364,8 +378,11 @@ reports timestamps, ACLs, extended attributes, filesystem flags, set-ID/sticky
 bits, sparse layout and hard-link relationships as not preserved. Embedded
 absolute paths are not rewritten and may still select source state.
 
-Clone and artifact capture hold Quarters' cooperative source lease exclusively,
-stage on the same filesystem and publish with one rename. A free lease cannot
+Clone and ordinary artifact capture hold Quarters' cooperative source lease
+exclusively, stage on the same filesystem and publish with one rename. Active
+stationery capture instead requires a valid cooperative freeze, observes an
+existing held cooperative lease and holds a shared lease. Schema-3 artifacts record
+`inactive` or `frozen-active` source evidence. A free lease cannot
 discover detached writers, so neither clone nor a named snapshot is
 crash-consistent. Templates omit derived caches by default; snapshots include
 them by default. Artifact content is bound to a canonical BLAKE3 digest and
@@ -408,7 +425,8 @@ through durable `prepared`, `retired` and `published` states. The visible state
 is old, new, or explicitly `rollback_in_progress`; `doctor` reports the exact
 recovery action. This still adds no containment boundary. Display-name rename
 is a separate recoverable transaction that retains stable identity and snapshot
-binding. Enforceable freeze, encryption and confinement remain unavailable.
+binding. Cooperative freeze is implemented; enforceable filesystem freeze,
+encryption and confinement remain unavailable.
 
 ## Documentation
 
@@ -423,6 +441,7 @@ binding. Enforceable freeze, encryption and confinement remain unavailable.
 - [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
 - [Lifecycle artifacts and rollback](docs/architecture/ADR-0008-LIFECYCLE-ARTIFACTS-AND-ROLLBACK.md)
 - [Authenticated portable bundles](docs/architecture/ADR-0009-AUTHENTICATED-BUNDLES.md)
+- [Cooperative freeze and active capture](docs/architecture/ADR-0010-COOPERATIVE-FREEZE-AND-ACTIVE-CAPTURE.md)
 - [MCP guide](docs/mcp/README.md)
 - [Threat model](docs/security/THREAT-MODEL.md)
 - [Alpha 3 security review](docs/security/ALPHA3-SECURITY-REVIEW.md)

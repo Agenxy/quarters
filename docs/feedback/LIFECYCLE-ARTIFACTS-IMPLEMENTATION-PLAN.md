@@ -3,6 +3,11 @@
 Date: 2026-08-25
 Status: approved for implementation by independent Claude Opus 5 review
 
+Historical scope note: ADR 0010 later implements cooperative freeze and
+immediate `--from-active` template capture without the deferred supervisor
+handoff considered below. The newer design records `frozen-active` evidence
+and does not claim that already-running or same-UID writers are quiescent.
+
 ## Outcome
 
 Deliver the next coherent lifecycle slice after portable clone:

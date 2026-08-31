@@ -6,6 +6,15 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Add identity-bound cooperative freeze/unfreeze, immediate stationery capture
+  from a current Quarter holding a cooperative lease, and explicit
+  `frozen-active` source evidence without claiming filesystem immutability.
+- Advance local artifact manifests to schema 3 for source-state provenance;
+  earlier Quarters builds reject these new local artifacts, while schema-1
+  local artifacts and schema-2 imported templates remain readable.
+- Require omitted-name private-agent and adapter commands to match the current
+  Quarter's validated name, root and home evidence rather than trusting a name
+  marker alone.
 - Add versioned keyed-BLAKE3 plaintext bundles for verified templates and
   snapshots, private no-clobber key creation, two-pass authenticated import as
   schema-2 external templates, plan-digest confirmation and atomic publication.

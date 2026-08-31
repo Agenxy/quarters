@@ -154,6 +154,26 @@ pub(crate) fn acquire_lifecycle_lease(space: &Space, name: &str) -> Result<Lifec
     Ok(LifecycleLease { _file: file })
 }
 
+pub(crate) fn require_held_lifecycle_lease(space: &Space, name: &str) -> Result<()> {
+    let path = space.lock_path();
+    let file = open_private_lock(&path)?;
+    match <File as FileExt>::try_lock(&file) {
+        Ok(()) => Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            format!("active capture requires an existing cooperative lease for space '{name}'"),
+        )
+        .with_hint(format!(
+            "enter '{name}' through Quarters, freeze it from that running context, then capture with --from-active"
+        ))),
+        Err(fs4::TryLockError::WouldBlock) => Ok(()),
+        Err(fs4::TryLockError::Error(error)) => Err(QuartersError::io(
+            "inspect space activity for active capture",
+            &path,
+            error,
+        )),
+    }
+}
+
 fn lock_exclusive_bounded_for_lifecycle(file: &File, path: &Path, name: &str) -> Result<()> {
     let deadline = Instant::now() + ACTIVE_LOCK_TIMEOUT;
     let mut attempt = 0_u32;

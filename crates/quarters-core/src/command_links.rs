@@ -146,6 +146,7 @@ impl Store {
         self.ensure_no_rollback_target(name)?;
         let _management = self.begin_mutation()?;
         let space = self.open(name)?;
+        self.ensure_not_frozen(&space)?;
         let _lease = acquire_lifecycle_lease(&space, name.as_str())?;
         install_command_links(&space, executable)
     }
@@ -160,6 +161,7 @@ impl Store {
         self.ensure_no_rollback_target(name)?;
         let _management = self.begin_mutation()?;
         let space = self.open(name)?;
+        self.ensure_not_frozen(&space)?;
         let _lease = acquire_lifecycle_lease(&space, name.as_str())?;
         remove_command_links(&space)
     }

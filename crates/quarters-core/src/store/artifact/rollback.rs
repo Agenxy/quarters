@@ -81,6 +81,7 @@ impl Store {
         require_recovery_name_available(self, recovery_name)?;
         let management = self.begin_mutation()?;
         let target_space = self.open(target)?;
+        self.ensure_not_frozen(&target_space)?;
         let activity = acquire_lifecycle_lease(&target_space, target.as_str())?;
         drop(management);
         let mut recovery_walk = CloneReport::new(
@@ -238,6 +239,7 @@ impl Store {
         self.ensure_no_rename_target(target)?;
         let management = self.begin_mutation()?;
         let target_space = self.open(target)?;
+        self.ensure_not_frozen(&target_space)?;
         validate_snapshot_target(snapshot, &target_space)?;
         require_recovery_name_available(self, recovery_name)?;
         let activity = acquire_lifecycle_lease(&target_space, target.as_str())?;
