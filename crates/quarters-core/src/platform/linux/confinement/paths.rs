@@ -81,12 +81,17 @@ pub(super) fn build_plan(request: &ConfinementRequest<'_>) -> Result<Confinement
             "filesystem confinement found no executable system root",
         ));
     }
+    let quarter_command_root = request
+        .effective_home
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve confined Quarter command root", request.effective_home, error))?;
     let executable_path = reconstructed_path(request.effective_home, request.runtime, &grants, request.host_path);
     let omitted_host_path_entries = omitted_path_count(request.host_path, &executable_path);
     Ok(ConfinementPlan {
         mode: "filesystem".to_owned(),
         minimum_abi: 3,
-        working_directory: resolve_working_directory(request, &grants)?,
+        working_directory: resolve_working_directory(request, &grants, &quarter_command_root)?,
+        quarter_command_root,
         grants,
         omitted_paths: omitted,
         executable_path,
@@ -112,7 +117,7 @@ pub(super) fn resolve_executable(program: &OsStr, search_path: &OsStr, plan: &Co
     let canonical = candidate
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve confined executable", &candidate, error))?;
-    let allowed = canonical.starts_with(&plan.working_directory)
+    let allowed = canonical.starts_with(&plan.quarter_command_root)
         || plan.grants.iter().any(|grant| {
             matches!(grant.access.as_str(), "read-execute" | "read-write") && canonical.starts_with(&grant.path)
         });
@@ -237,6 +242,7 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
         ));
     }
     let reserved = reserved_paths(request)?;
+    let mut user_paths = BTreeSet::new();
     for requested in request.user_grants {
         if !requested.path.is_absolute() {
             return Err(QuartersError::new(
@@ -248,7 +254,15 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
             .path
             .canonicalize()
             .map_err(|error| QuartersError::io("resolve user-granted path", &requested.path, error))?;
+        if !user_paths.insert(canonical.clone()) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "multiple --grant-path options resolve to the same path",
+            )
+            .with_hint("select one access level for each canonical data path"));
+        }
         reject_reserved_grant(&canonical, &reserved)?;
+        reject_executable_root_grant(&canonical, grants)?;
         let metadata = fs::metadata(&canonical)
             .map_err(|error| QuartersError::io("inspect user-granted path", &canonical, error))?;
         let access = user_access_class(requested.access, &metadata, &canonical)?;
@@ -262,6 +276,20 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
         });
     }
     Ok(())
+}
+
+fn reject_executable_root_grant(path: &Path, grants: &[ConfinementGrant]) -> Result<()> {
+    if grants
+        .iter()
+        .filter(|grant| grant.access == "read-execute")
+        .all(|grant| !paths_overlap(path, &grant.path))
+    {
+        return Ok(());
+    }
+    Err(
+        QuartersError::new(ErrorKind::Unsupported, "user grant overlaps a confined executable root")
+            .with_hint("select a data path outside the executable roots reported by the confinement plan"),
+    )
 }
 
 fn user_access_class(access: UserGrantAccess, metadata: &fs::Metadata, path: &Path) -> Result<&'static str> {
@@ -290,6 +318,12 @@ fn reserved_paths(request: &ConfinementRequest<'_>) -> Result<Vec<PathBuf>> {
         reserved.push(
             path.canonicalize()
                 .map_err(|error| QuartersError::io(operation, path, error))?,
+        );
+    }
+    if let Some(path) = request.request_executable {
+        reserved.push(
+            path.canonicalize()
+                .map_err(|error| QuartersError::io("resolve the request executable", path, error))?,
         );
     }
     let user = nix::unistd::User::from_uid(Uid::current())
@@ -327,16 +361,13 @@ fn paths_overlap(left: &Path, right: &Path) -> bool {
     left.starts_with(right) || right.starts_with(left)
 }
 
-fn resolve_working_directory(request: &ConfinementRequest<'_>, grants: &[ConfinementGrant]) -> Result<PathBuf> {
-    let effective = request.effective_home.canonicalize().map_err(|error| {
-        QuartersError::io(
-            "resolve confinement default working directory",
-            request.effective_home,
-            error,
-        )
-    })?;
+fn resolve_working_directory(
+    request: &ConfinementRequest<'_>,
+    grants: &[ConfinementGrant],
+    effective: &Path,
+) -> Result<PathBuf> {
     let Some(requested) = request.working_directory else {
-        return Ok(effective);
+        return Ok(effective.to_path_buf());
     };
     if !requested.is_absolute() {
         return Err(QuartersError::new(
@@ -495,32 +526,35 @@ fn limitations(has_user_grants: bool) -> Vec<String> {
         items.push(
             "user-granted host paths are exposed to the confined process tree; Quarters does not inspect their content",
         );
+        items.push(
+            "Landlock combines overlapping rules by union; Quarters rejects duplicate paths and executable-root overlap but nested data grants still combine their data access",
+        );
     }
     items.into_iter().map(str::to_owned).collect()
 }
 
-fn legacy_tiocsti_status() -> crate::platform::CapabilityStatus {
+fn legacy_tiocsti_status() -> crate::platform::LegacyTiocstiStatus {
     let path = Path::new("/proc/sys/dev/tty/legacy_tiocsti");
     let value = fs::read_to_string(path);
     match value.as_deref().map(str::trim) {
-        Ok("0") => crate::platform::CapabilityStatus {
-            available: true,
-            status: "disabled".to_owned(),
+        Ok("0") => crate::platform::LegacyTiocstiStatus {
+            probed: true,
+            state: "disabled".to_owned(),
             detail: "dev.tty.legacy_tiocsti is 0; legacy TIOCSTI injection is disabled".to_owned(),
         },
-        Ok("1") => crate::platform::CapabilityStatus {
-            available: true,
-            status: "enabled".to_owned(),
+        Ok("1") => crate::platform::LegacyTiocstiStatus {
+            probed: true,
+            state: "enabled".to_owned(),
             detail: "dev.tty.legacy_tiocsti is 1; Landlock ABI 3 does not mediate this terminal ioctl".to_owned(),
         },
-        Ok(_) => crate::platform::CapabilityStatus {
-            available: false,
-            status: "unknown".to_owned(),
+        Ok(_) => crate::platform::LegacyTiocstiStatus {
+            probed: false,
+            state: "unknown".to_owned(),
             detail: "dev.tty.legacy_tiocsti returned an unrecognized value".to_owned(),
         },
-        Err(error) => crate::platform::CapabilityStatus {
-            available: false,
-            status: "unavailable".to_owned(),
+        Err(error) => crate::platform::LegacyTiocstiStatus {
+            probed: false,
+            state: "unavailable".to_owned(),
             detail: format!("dev.tty.legacy_tiocsti could not be read: {error}"),
         },
     }

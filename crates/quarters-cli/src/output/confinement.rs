@@ -45,7 +45,7 @@ fn print_human_plan(plan: &quarters_core::ConfinementPlan) {
     println!("ConfinementOmittedHostPathEntries={}", plan.omitted_host_path_entries);
     println!(
         "ConfinementLegacyTIOCSTI={}",
-        escape_for_human(&plan.legacy_tiocsti.status)
+        escape_for_human(&plan.legacy_tiocsti.state)
     );
 }
 
@@ -72,13 +72,14 @@ pub(super) fn value(plan: &quarters_core::ConfinementPlan) -> Value {
         "mode": safe_json_text(&plan.mode, 32),
         "minimum_abi": plan.minimum_abi,
         "working_directory": safe_json_path(&plan.working_directory),
+        "quarter_command_root": safe_json_path(&plan.quarter_command_root),
         "grants": grants,
         "omitted_paths": plan.omitted_paths.iter().map(|path| safe_json_path(path)).collect::<Vec<_>>(),
         "executable_path": plan.executable_path.iter().map(|path| safe_json_path(path)).collect::<Vec<_>>(),
         "omitted_host_path_entries": plan.omitted_host_path_entries,
         "legacy_tiocsti": {
-            "available": plan.legacy_tiocsti.available,
-            "status": safe_json_text(&plan.legacy_tiocsti.status, 32),
+            "probed": plan.legacy_tiocsti.probed,
+            "state": safe_json_text(&plan.legacy_tiocsti.state, 32),
             "detail": safe_json_text(&plan.legacy_tiocsti.detail, 512),
         },
         "limitations": plan.limitations.iter().map(|item| safe_json_text(item, 512)).collect::<Vec<_>>(),

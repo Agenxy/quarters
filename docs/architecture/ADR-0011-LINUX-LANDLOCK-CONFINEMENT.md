@@ -42,13 +42,13 @@ Unexpected probe failures remain fatal. Landlock opens every admitted rule
 anchor separately and fails closed if any required or optional anchor cannot be
 prepared exactly as reported.
 
-An invocation may add up to 32 explicit data roots with
+An invocation may add up to 32 distinct explicit data roots with
 `--grant-path ABSOLUTE_PATH:ro|rw`. These grants are never persisted or read
 from the environment. Their rules omit executable access, so an executable in
 a granted workspace cannot become a command root. Quarters canonicalizes each
 path, reports the requested access and rejects overlap with its store, runtime,
 running executable, passwd-home SSH/GnuPG roots or a passwd home hidden by
-`--home-view`. Each anchor's validated device and inode must match the opened
+`--home-view` or a broader executable root. Each anchor's validated device and inode must match the opened
 Landlock descriptor, so replacement between review and enforcement fails
 closed. `--workdir` is portable process behavior; in confined mode an external
 directory must be covered by one of these data grants.
@@ -56,7 +56,8 @@ directory must be covered by one of these data grants.
 The policy report also records the observed
 `/proc/sys/dev/tty/legacy_tiocsti` state. Landlock ABI 3 does not mediate that
 terminal ioctl, so an enabled legacy setting remains a host-policy limitation,
-not an unreported part of the filesystem claim.
+not an unreported part of the filesystem claim. JSON reports this as
+`probed` plus the stable `state`, never as generic capability availability.
 
 Inside the domain, `current`, prompt generation, shortcut inspection and
 managed OpenSSH adapters use a no-store route; shortcut mutation still refuses

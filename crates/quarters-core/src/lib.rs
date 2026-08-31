@@ -27,8 +27,8 @@ pub use model::{
     SpaceLayout, SpaceManifest, SpaceName, WORKSPACE_SCHEMA_VERSION,
 };
 pub use platform::{
-    Capabilities, CapabilityStatus, ConfinementGrant, ConfinementPlan, ConfinementRequest, UserConfinementGrant,
-    UserGrantAccess,
+    Capabilities, CapabilityStatus, ConfinementGrant, ConfinementPlan, ConfinementRequest, LegacyTiocstiStatus,
+    UserConfinementGrant, UserGrantAccess,
 };
 pub use probe::{CompatibilityTier, ToolProbe, executable_matches, tool_probes};
 pub use store::artifact::{

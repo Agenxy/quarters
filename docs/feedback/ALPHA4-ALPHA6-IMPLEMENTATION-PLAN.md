@@ -76,8 +76,9 @@ home and existing reviewed system executable grants. Under Linux filesystem
 confinement, a working directory must be the Quarter home or lie within an
 explicit data grant.
 
-Every grant is canonicalized and held by file descriptor before Landlock is
-enforced. Quarters rejects grants that overlap:
+Every grant is canonicalized, recorded by device and inode, reopened and
+identity-matched, then held by that descriptor until Landlock is enforced.
+Quarters rejects grants that overlap:
 
 - the Quarters store;
 - the passwd user's SSH or GnuPG credential roots, independent of inherited

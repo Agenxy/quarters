@@ -70,6 +70,7 @@ impl ProfileLaunch<'_> {
             runtime: &runtime,
             store_root: self.store.root(),
             current_executable: &current_executable,
+            request_executable: None,
             host_path: self.host.get("PATH"),
             user_grants: &user_grants,
             working_directory: self.working_directory,
@@ -155,9 +156,10 @@ impl ProfileLaunch<'_> {
             }
         }
         for grant in self.user_grants {
-            command
-                .arg("--grant-path")
-                .arg(format!("{}:{}", grant.path.display(), grant.access.as_str()));
+            let mut encoded = grant.path.as_os_str().to_owned();
+            encoded.push(":");
+            encoded.push(grant.access.as_str());
+            command.arg("--grant-path").arg(encoded);
         }
         if let Some(workdir) = self.working_directory {
             command.arg("--workdir").arg(workdir);
@@ -296,13 +298,15 @@ pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
             access: grant.access,
         })
         .collect::<Vec<_>>();
+    let launcher_executable = current_executable()?;
     let confinement_plan = if request.confinement {
         Some(platform::confinement_plan(&ConfinementRequest {
             space_home: request.space_home,
             effective_home,
             runtime: request.runtime,
             store_root: request.store_root,
-            current_executable: request.request_executable,
+            current_executable: &launcher_executable,
+            request_executable: Some(request.request_executable),
             host_path: None,
             user_grants: &user_grants,
             working_directory: request.working_directory,
@@ -315,6 +319,14 @@ pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
         .as_ref()
         .map(platform::prepare_filesystem_confinement)
         .transpose()?;
+    let baseline_workdir = if confinement_plan.is_none() {
+        request
+            .working_directory
+            .map(|path| map_home_view_workdir(path, request.space_home, effective_home))
+            .transpose()?
+    } else {
+        None
+    };
     if let Some(host_home) = request.host_home {
         platform::enter_home_view(request.space_home, host_home)?;
     }
@@ -322,8 +334,7 @@ pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
         std::env::set_current_dir(&plan.working_directory).map_err(|error| {
             QuartersError::io("enter the confined working directory", &plan.working_directory, error)
         })?;
-    } else if let Some(workdir) = request.working_directory {
-        let workdir = map_home_view_workdir(workdir, request.space_home, effective_home)?;
+    } else if let Some(workdir) = baseline_workdir {
         std::env::set_current_dir(&workdir)
             .map_err(|error| QuartersError::io("enter requested working directory", &workdir, error))?;
     }

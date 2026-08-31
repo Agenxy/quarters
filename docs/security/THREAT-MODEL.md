@@ -95,8 +95,8 @@ policy.
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Requested Linux confinement silently degrades | ABI-3 hard requirement, `no_new_privs`, `FullyEnforced` check and required hosted-kernel gate |
 | Confined child reads or mutates host/store content | Fixed descriptor-anchored allowlist; exact Quarter home/runtime are writable while ungranted content reads, directory enumeration and mutation are denied |
-| User grant expands confinement unexpectedly | Invocation-local absolute path plus explicit `ro`/`rw`; canonical data-only rule, bounded count, JSON disclosure, validated device/inode match on the opened rule anchor and overlap rejection for store/runtime/executable/passwd credential/home-view roots |
-| Granted workspace supplies an executable | User grants omit Landlock execute rights and executable resolution accepts only Quarter-local or reviewed system executable roots |
+| User grant expands confinement unexpectedly | Invocation-local absolute path plus explicit `ro`/`rw`; canonical data-only rule, distinct bounded roots, JSON disclosure, validated device/inode match on the opened rule anchor and overlap rejection for store/runtime/current and request executables/executable-root/passwd credential/home-view roots |
+| Granted workspace supplies an executable | User grants omit Landlock execute rights, cannot overlap broader executable grants, and executable resolution uses the separate Quarter command root plus reviewed system roots rather than the selected workdir |
 | External confined working directory is ambient | `--workdir` is canonicalized and must lie below the Quarter home or an explicit directory data grant |
 | Confinement is mistaken for invisibility | Policy JSON and docs state that known-path metadata, `stat`, `readlink`, existence checks, `O_PATH` and path traversal alone remain observable |
 | Confinement launcher leaks store or host handles | Parent retains the cooperative lease; policy anchors are close-on-exec; launcher is single-threaded and immediately execs after restriction; inherited caller descriptors remain an explicit limitation |

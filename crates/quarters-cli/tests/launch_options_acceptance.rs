@@ -100,3 +100,21 @@ fn macos_refuses_user_grants_with_or_without_confinement() -> Result<(), Box<dyn
     }
     Ok(())
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_refuses_filesystem_confinement_for_every_launch_command() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "mac-confinement")?;
+    for command_name in ["env", "enter", "exec"] {
+        let mut command = quarters(temporary.path());
+        command.args([command_name, "mac-confinement", "--confinement", "filesystem"]);
+        if command_name == "exec" {
+            command.args(["--", "/usr/bin/true"]);
+        }
+        let output = command.output()?;
+        assert_eq!(output.status.code(), Some(6));
+        assert!(String::from_utf8(output.stderr)?.contains("--confinement filesystem is not-implemented"));
+    }
+    Ok(())
+}

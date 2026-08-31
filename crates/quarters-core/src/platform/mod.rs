@@ -46,6 +46,17 @@ pub struct CapabilityStatus {
     pub detail: String,
 }
 
+/// Evidence for the Linux legacy TIOCSTI terminal-injection host policy.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct LegacyTiocstiStatus {
+    /// Whether the sysctl was read and interpreted.
+    pub probed: bool,
+    /// Stable state: `disabled`, `enabled`, `unknown` or `unavailable`.
+    pub state: String,
+    /// Human-readable evidence or limitation.
+    pub detail: String,
+}
+
 /// One filesystem hierarchy admitted by an opt-in confinement policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ConfinementGrant {
@@ -107,6 +118,8 @@ pub struct ConfinementRequest<'a> {
     pub store_root: &'a Path,
     /// Executable which accepted the user request.
     pub current_executable: &'a Path,
+    /// Optional original executable retained when an internal launcher copy runs.
+    pub request_executable: Option<&'a Path>,
     /// Captured host PATH used only to retain reviewed executable roots.
     pub host_path: Option<&'a OsString>,
     /// Explicit invocation-local data grants.
@@ -126,6 +139,8 @@ pub struct ConfinementPlan {
     pub minimum_abi: u32,
     /// Directory selected as the launched process working directory.
     pub working_directory: PathBuf,
+    /// Quarter-visible home that remains eligible to supply executables.
+    pub quarter_command_root: PathBuf,
     /// Exact rules that would be applied.
     pub grants: Vec<ConfinementGrant>,
     /// Optional fixed paths absent or unavailable on this host.
@@ -135,7 +150,7 @@ pub struct ConfinementPlan {
     /// Number of resolvable host PATH entries intentionally excluded.
     pub omitted_host_path_entries: usize,
     /// Linux legacy terminal-injection sysctl evidence for this launch plan.
-    pub legacy_tiocsti: CapabilityStatus,
+    pub legacy_tiocsti: LegacyTiocstiStatus,
     /// Stable, explicit limitations on the protection claim.
     pub limitations: Vec<String>,
 }

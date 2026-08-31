@@ -270,6 +270,8 @@ if cat "$3/secret" >/dev/null 2>&1; then exit 34; fi
         .arg("granted")
         .args(["--confinement", "filesystem", "--grant-path"])
         .arg(&read_write_arg)
+        .arg("--workdir")
+        .arg(&read_write)
         .args(["--"])
         .arg(&executable)
         .output()?;
@@ -329,7 +331,8 @@ fn user_grants_reject_inert_and_reserved_authority() -> Result<(), Box<dyn Error
         return Ok(());
     }
     let executable_grant = format!("{}:ro", env!("CARGO_BIN_EXE_quarters"));
-    for grant in [root_grant, executable_grant] {
+    let executable_root_grant = "/usr:rw".to_owned();
+    for grant in [root_grant, executable_grant, executable_root_grant] {
         let output = quarters(&root)
             .env("HOME", &host_home)
             .env_remove("XDG_RUNTIME_DIR")
@@ -352,6 +355,23 @@ fn user_grants_reject_inert_and_reserved_authority() -> Result<(), Box<dyn Error
                 .is_some_and(|message| message.contains("overlaps"))
         );
     }
+    let duplicate = format!("{}:ro", host_home.display());
+    let duplicate_output = quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .args([
+            "--json",
+            "env",
+            "reserved",
+            "--confinement",
+            "filesystem",
+            "--grant-path",
+            &duplicate,
+            "--grant-path",
+            &duplicate,
+        ])
+        .output()?;
+    assert_eq!(duplicate_output.status.code(), Some(2));
     remove(&root, &host_home, "reserved")?;
     Ok(())
 }
@@ -370,14 +390,14 @@ fn verify_policy(policy: &Value, home: &Path) -> Result<ToolCoverage, Box<dyn Er
     assert!(policy["result"]["environment"].get("QUARTERS_HOST_PATH").is_none());
     let tiocsti = &policy["result"]["confinement"]["legacy_tiocsti"];
     assert!(matches!(
-        tiocsti["status"].as_str(),
+        tiocsti["state"].as_str(),
         Some("enabled" | "disabled" | "unavailable" | "unknown")
     ));
     if let Ok(value) = fs::read_to_string("/proc/sys/dev/tty/legacy_tiocsti") {
         match value.trim() {
-            "1" => assert_eq!(tiocsti["status"], "enabled"),
-            "0" => assert_eq!(tiocsti["status"], "disabled"),
-            _ => assert_eq!(tiocsti["status"], "unknown"),
+            "1" => assert_eq!(tiocsti["state"], "enabled"),
+            "0" => assert_eq!(tiocsti["state"], "disabled"),
+            _ => assert_eq!(tiocsti["state"], "unknown"),
         }
     }
     let available = ["ssh", "git", "python3", "node"]
@@ -455,6 +475,17 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
     if !available {
         return Ok(());
     }
+    let quarter_workdir = root.join("spaces/combined/home/project");
+    fs::create_dir(&quarter_workdir)?;
+    run(quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .arg("exec")
+        .arg("combined")
+        .arg("--home-view")
+        .arg("--workdir")
+        .arg(&quarter_workdir)
+        .args(["--", "/bin/sh", "-c", "test \"$PWD\" = \"$HOME/project\""]))?;
     let hidden_grant = format!("{}:ro", passwd_home.display());
     let refused = quarters(&root)
         .env("HOME", &host_home)
