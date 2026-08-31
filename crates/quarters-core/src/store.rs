@@ -289,14 +289,19 @@ impl Store {
         Ok(Space::new(path, manifest))
     }
 
-    pub(crate) fn open_identity_for_removal(&self, name: &SpaceName) -> Result<Space> {
+    pub(crate) fn identity_for_removal(&self, name: &SpaceName) -> Result<Option<Space>> {
         let Some(spaces_root) = self.existing_spaces_root()? else {
-            return Err(space_not_found(name.as_str()));
+            return Ok(None);
         };
         let path = spaces_root.join(name.as_str());
+        match fs::symlink_metadata(&path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(QuartersError::io("inspect removal identity", &path, error)),
+        }
         validate_removal_anchors(&path)?;
         let manifest = read_validated_manifest(&path, name.as_str())?;
-        Ok(Space::new(path, manifest))
+        Ok(Some(Space::new(path, manifest)))
     }
 
     fn inspect_path(path: PathBuf, name: String, name_was_lossy: bool) -> SpaceInspection {

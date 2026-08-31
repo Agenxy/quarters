@@ -20,17 +20,21 @@ impl Store {
     pub fn remove(&self, name: &str) -> Result<()> {
         validate_removal_entry_name(name)?;
         let host = crate::HostEnvironment::capture();
+        let management = self.management_guard()?;
         let removable_space = if let Ok(validated_name) = SpaceName::parse(name.to_owned()) {
             self.ensure_no_rename_target(&validated_name)?;
             self.ensure_no_rollback_target(&validated_name)?;
-            let identity = self.open_identity_for_removal(&validated_name).map_err(|error| {
-                QuartersError::new(
-                    ErrorKind::CorruptState,
-                    format!("cannot prove private SSH-agent state is absent for space '{name}'"),
-                )
-                .with_hint("repair the protected control files before removal")
-                .with_source(error)
-            })?;
+            let identity = self
+                .identity_for_removal(&validated_name)
+                .map_err(|error| {
+                    QuartersError::new(
+                        ErrorKind::CorruptState,
+                        format!("cannot prove private SSH-agent state is absent for space '{name}'"),
+                    )
+                    .with_hint("repair the protected control files before removal")
+                    .with_source(error)
+                })?
+                .ok_or_else(|| space_not_found(name))?;
             self.ensure_no_agent_for_removal(&identity, &host)?;
             Some(identity)
         } else {
@@ -39,10 +43,8 @@ impl Store {
         let Some(spaces_root) = self.existing_spaces_root()? else {
             return Err(space_not_found(name));
         };
-        let retired = {
-            let _observation = self.management_guard()?;
-            retire_space(self, &spaces_root, name)?
-        };
+        let retired = retire_space(self, &spaces_root, name)?;
+        drop(management);
         delete_retired_space(&retired, name)?;
         if let Some(space) = removable_space {
             crate::platform::remove_runtime_directory(&space, &host).map_err(|error| {

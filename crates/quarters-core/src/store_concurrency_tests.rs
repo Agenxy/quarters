@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used)]
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
@@ -60,7 +60,11 @@ fn losing_same_name_creations_leave_no_temporary_skeletons() {
         .into_iter()
         .map(|handle| handle.join().expect("creation thread"))
         .collect::<Vec<_>>();
-    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results.iter().filter(|result| result.is_ok()).count(),
+        1,
+        "concurrent creation results: {results:?}"
+    );
     assert!(
         results
             .iter()
@@ -107,8 +111,55 @@ fn concurrent_removals_report_one_success_and_one_absence() {
             .filter_map(|result| result.as_ref().err())
             .filter(|error| error.kind() == ErrorKind::NotFound)
             .count(),
-        1
+        1,
+        "concurrent removal results: {results:?}"
     );
+}
+
+#[test]
+fn removal_reports_corrupt_state_when_the_space_exists_without_a_manifest() {
+    let (_temporary, store) = test_store();
+    let space = store
+        .create(
+            SpaceName::parse("missing-manifest").expect("valid name"),
+            PathBuf::from("/bin/sh"),
+        )
+        .expect("create space");
+    fs::remove_file(space.root().join(".quarters.json")).expect("remove manifest");
+
+    let error = store
+        .remove("missing-manifest")
+        .expect_err("missing manifest must fail closed");
+    assert_eq!(error.kind(), ErrorKind::CorruptState);
+    assert_eq!(error.hint(), Some("repair the protected control files before removal"));
+}
+
+#[test]
+fn removal_never_follows_present_or_dangling_space_links() {
+    let (temporary, store) = test_store();
+    store.recover().expect("initialize store");
+    let outside = temporary.path().join("outside");
+    fs::create_dir(&outside).expect("create outside directory");
+    let sentinel = outside.join("sentinel");
+    fs::write(&sentinel, b"outside").expect("write outside sentinel");
+    let spaces = store.root.join("spaces");
+
+    let present = spaces.join("present-link");
+    symlink(&outside, &present).expect("create present space link");
+    let present_error = store
+        .remove("present-link")
+        .expect_err("present space link must fail closed");
+    assert_eq!(present_error.kind(), ErrorKind::CorruptState);
+    assert!(sentinel.is_file());
+    assert!(fs::symlink_metadata(&present).is_ok_and(|metadata| metadata.file_type().is_symlink()));
+
+    let dangling = spaces.join("dangling-link");
+    symlink(temporary.path().join("absent"), &dangling).expect("create dangling space link");
+    let dangling_error = store
+        .remove("dangling-link")
+        .expect_err("dangling space link must fail closed");
+    assert_eq!(dangling_error.kind(), ErrorKind::CorruptState);
+    assert!(fs::symlink_metadata(&dangling).is_ok_and(|metadata| metadata.file_type().is_symlink()));
 }
 
 #[test]

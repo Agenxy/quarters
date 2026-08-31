@@ -412,9 +412,18 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    fn protected_temporary_directory() -> tempfile::TempDir {
+        let executable = std::env::current_exe().expect("resolve test executable");
+        let parent = executable.parent().expect("test executable parent");
+        tempfile::Builder::new()
+            .prefix("quarters-command-links-")
+            .tempdir_in(parent)
+            .expect("protected temporary directory")
+    }
+
     #[test]
     fn an_absent_launcher_can_be_repaired_without_replacing_exact_tool_links() {
-        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let temporary = protected_temporary_directory();
         let store = Store::new(temporary.path().join("root")).expect("valid store");
         let name = SpaceName::parse("adapter-repair").expect("space name");
         let space = store

@@ -600,3 +600,34 @@ were corrected. Its complete re-review returned `VERDICT: SHIP P0 REPAIR`; the
 three remaining nonblocking observations were then closed. The final delta-only
 pass again returned `VERDICT: SHIP P0 REPAIR` with no blockers. Claude remained
 read-only and did not execute compiler gates.
+
+### Second hosted run and repair
+
+GitHub Actions run `33344130609` then exposed two independent test-contract
+defects. Ubuntu and static-musl correctly rejected a test launcher placed below
+world-writable `/tmp`; macOS reproduced a concurrent-removal loser reporting
+corrupt state after the winner had already retired the exact space. Dependency
+licence/source and RustSec jobs passed.
+
+The launcher fixture now lives below the protected test-executable ancestor, so
+the test exercises the production ancestry policy instead of bypassing it.
+Removal now holds the existing management lease across exact identity lookup,
+private-agent absence proof and atomic retirement. Exact absence is represented
+as `Ok(None)`, not inferred from a broad error category or a post-error path
+sample. Deterministic tests preserve corrupt-state reporting for a present space
+with no manifest and prove that present and dangling space links are never
+followed. The same-name removal race passed one hundred consecutive local runs.
+
+Opus initially returned `VERDICT: REVISE P0 REPAIR` because the first attempted
+repair matched a coarse `NotFound` category and only narrowed the timing window.
+After the lease-scoped design replaced that approach, its complete re-review
+confirmed the earlier blockers closed and returned:
+
+> VERDICT: SHIP P0 REPAIR
+
+The review's remaining coverage suggestion for present and dangling space links
+was also implemented before publication. The final local gate passed 246 Rust
+tests and 4 Bun-managed launcher tests, warnings-as-errors Clippy and rustdoc,
+formatting and structural ceilings. Release and `x86_64-unknown-linux-musl`
+all-target builds, dependency policy and RustSec auditing also passed. Claude
+remained read-only and did not execute compiler gates.
