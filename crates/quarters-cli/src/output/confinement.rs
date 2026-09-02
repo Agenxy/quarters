@@ -44,8 +44,9 @@ fn print_human_plan(plan: &quarters_core::ConfinementPlan) {
     println!("ConfinementGrants={}", plan.grants.len());
     println!("ConfinementOmittedHostPathEntries={}", plan.omitted_host_path_entries);
     println!(
-        "ConfinementLegacyTIOCSTI={}",
-        escape_for_human(&plan.legacy_tiocsti.state)
+        "ConfinementLegacyTIOCSTI={} ({})",
+        escape_for_human(&plan.legacy_tiocsti.state),
+        escape_for_human(&plan.legacy_tiocsti.detail)
     );
 }
 

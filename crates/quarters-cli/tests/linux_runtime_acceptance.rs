@@ -244,6 +244,7 @@ cat "$2/input" >/dev/null || exit 31
 if printf 'no\n' > "$2/blocked" 2>/dev/null; then exit 32; fi
 printf 'yes\n' > "$1/output" || exit 33
 if cat "$3/secret" >/dev/null 2>&1; then exit 34; fi
+if "$1/workspace-command" 2>/dev/null; then exit 35; fi
 "#;
     run(quarters(&root)
         .env("HOME", &host_home)
@@ -262,6 +263,18 @@ if cat "$3/secret" >/dev/null 2>&1; then exit 34; fi
         .arg(&sibling))?;
     assert_eq!(fs::read(read_write.join("output"))?, b"yes\n");
     assert!(!read_only.join("blocked").exists());
+    assert!(!read_write.join("executed").exists());
+
+    let ungranted_workdir = quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .args(["--json", "env", "granted", "--confinement", "filesystem"])
+        .arg("--workdir")
+        .arg(&sibling)
+        .output()?;
+    assert_eq!(ungranted_workdir.status.code(), Some(6));
+    let error: Value = serde_json::from_slice(&ungranted_workdir.stderr)?;
+    assert_eq!(error["error"]["kind"], "unsupported");
 
     let refused = quarters(&root)
         .env("HOME", &host_home)
@@ -372,6 +385,33 @@ fn user_grants_reject_inert_and_reserved_authority() -> Result<(), Box<dyn Error
         ])
         .output()?;
     assert_eq!(duplicate_output.status.code(), Some(2));
+    let nested = host_home.join("nested");
+    fs::create_dir(&nested)?;
+    let parent_grant = format!("{}:ro", host_home.display());
+    let child_grant = format!("{}:rw", nested.display());
+    let nested_output = quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .args([
+            "--json",
+            "env",
+            "reserved",
+            "--confinement",
+            "filesystem",
+            "--grant-path",
+            &parent_grant,
+            "--grant-path",
+            &child_grant,
+        ])
+        .output()?;
+    assert_eq!(nested_output.status.code(), Some(2));
+    let error: Value = serde_json::from_slice(&nested_output.stderr)?;
+    assert_eq!(error["error"]["kind"], "invalid-input");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("overlapping"))
+    );
     remove(&root, &host_home, "reserved")?;
     Ok(())
 }
@@ -483,6 +523,7 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
         .arg("exec")
         .arg("combined")
         .arg("--home-view")
+        .args(["--confinement", "filesystem"])
         .arg("--workdir")
         .arg(&quarter_workdir)
         .args(["--", "/bin/sh", "-c", "test \"$PWD\" = \"$HOME/project\""]))?;

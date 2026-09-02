@@ -242,7 +242,7 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
         ));
     }
     let reserved = reserved_paths(request)?;
-    let mut user_paths = BTreeSet::new();
+    let mut user_paths = BTreeSet::<PathBuf>::new();
     for requested in request.user_grants {
         if !requested.path.is_absolute() {
             return Err(QuartersError::new(
@@ -254,13 +254,21 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
             .path
             .canonicalize()
             .map_err(|error| QuartersError::io("resolve user-granted path", &requested.path, error))?;
-        if !user_paths.insert(canonical.clone()) {
+        if user_paths.contains(&canonical) {
             return Err(QuartersError::new(
                 ErrorKind::InvalidInput,
                 "multiple --grant-path options resolve to the same path",
             )
             .with_hint("select one access level for each canonical data path"));
         }
+        if user_paths.iter().any(|path| paths_overlap(path, &canonical)) {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "overlapping --grant-path options are ambiguous",
+            )
+            .with_hint("select distinct, non-nested canonical data roots"));
+        }
+        user_paths.insert(canonical.clone());
         reject_reserved_grant(&canonical, &reserved)?;
         reject_executable_root_grant(&canonical, grants)?;
         let metadata = fs::metadata(&canonical)
@@ -424,9 +432,9 @@ fn ensure_store_disjoint(store_root: &Path, space_home: &Path, grants: &[Confine
     }
     Err(QuartersError::new(
         ErrorKind::Unsupported,
-        "the Quarters store overlaps a system executable hierarchy admitted by confinement",
+        "the Quarters store overlaps a protected host hierarchy admitted by confinement",
     )
-    .with_hint("move --root outside /usr, /opt, /nix/store and other reported executable roots"))
+    .with_hint("move --root outside the system, configuration, and compatibility roots in the confinement plan"))
 }
 
 fn overlaps_executable_root(store: &Path, home: &Path, grants: &[ConfinementGrant]) -> bool {

@@ -78,7 +78,9 @@ explicit data grant.
 
 Every grant is canonicalized, recorded by device and inode, reopened and
 identity-matched, then held by that descriptor until Landlock is enforced.
-Quarters rejects grants that overlap:
+Quarters rejects overlapping or nested user grants, because Landlock combines
+rules by union rather than using a narrower rule to subtract authority. It also
+rejects grants that overlap:
 
 - the Quarters store;
 - the passwd user's SSH or GnuPG credential roots, independent of inherited

@@ -67,9 +67,12 @@ jobs:
       - name: Prove home view fails closed under distribution policy
         env:
           QUARTERS_REQUIRE_HOME_VIEW_UNAVAILABLE: "1"
-        run: >-
-          cargo test --locked --package quarters --test linux_runtime_acceptance
-          home_view_mounts_space_state_and_disables_host_escape -- --exact
+        run: |
+          test_name="home_view_mounts_space_state_and_disables_host_escape"
+          cargo test --locked --package quarters --test linux_runtime_acceptance -- --list \
+            | grep -Fqx "${test_name}: test"
+          cargo test --locked --package quarters --test linux_runtime_acceptance \
+            "${test_name}" -- --exact
 
   linux-musl:
     name: Linux x86_64 musl

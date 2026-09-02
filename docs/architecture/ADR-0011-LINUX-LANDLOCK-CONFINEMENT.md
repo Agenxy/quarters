@@ -44,7 +44,9 @@ prepared exactly as reported.
 
 An invocation may add up to 32 distinct explicit data roots with
 `--grant-path ABSOLUTE_PATH:ro|rw`. These grants are never persisted or read
-from the environment. Their rules omit executable access, so an executable in
+from the environment. Canonical grant roots must be non-overlapping and
+non-nested, preventing broader Landlock rules from silently overriding a
+narrower access request. Their rules omit executable access, so an executable in
 a granted workspace cannot become a command root. Quarters canonicalizes each
 path, reports the requested access and rejects overlap with its store, runtime,
 running executable, passwd-home SSH/GnuPG roots or a passwd home hidden by
