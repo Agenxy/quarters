@@ -23,6 +23,10 @@ fn landlock_required() -> bool {
     std::env::var_os("QUARTERS_REQUIRE_LANDLOCK").is_some_and(|value| !value.is_empty())
 }
 
+fn home_view_required() -> bool {
+    std::env::var_os("QUARTERS_REQUIRE_HOME_VIEW").is_some_and(|value| !value.is_empty())
+}
+
 fn run(command: &mut Command) -> Result<Output, Box<dyn Error>> {
     let output = command.output()?;
     if output.status.success() {
@@ -635,6 +639,9 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
     let available = report["result"]["platform"]["confinement"]["available"] == true
         && report["result"]["platform"]["home_view"]["available"] == true;
     if !available {
+        if home_view_required() {
+            return Err("QUARTERS_REQUIRE_HOME_VIEW requires available home view and confinement".into());
+        }
         return Ok(());
     }
     let quarter_workdir = root.join("spaces/combined/home/project");

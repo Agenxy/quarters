@@ -408,25 +408,11 @@ fn resolve_working_directory(
     let Some(requested) = request.working_directory else {
         return Ok(effective.to_path_buf());
     };
-    if !requested.is_absolute() {
-        return Err(QuartersError::new(
-            ErrorKind::InvalidInput,
-            "--workdir requires an existing absolute directory",
-        ));
-    }
     let canonical = if request.home_view {
         crate::platform::resolve_home_view_working_directory(requested, request.space_home, request.effective_home)?
     } else {
-        requested
-            .canonicalize()
-            .map_err(|error| QuartersError::io("resolve requested working directory", requested, error))?
+        crate::platform::resolve_existing_working_directory(requested)?
     };
-    if !canonical.is_dir() {
-        return Err(QuartersError::new(
-            ErrorKind::InvalidInput,
-            "--workdir must identify an existing directory",
-        ));
-    }
     let space = request
         .space_home
         .canonicalize()

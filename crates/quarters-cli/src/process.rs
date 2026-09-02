@@ -208,7 +208,9 @@ impl ProfileLaunch<'_> {
     }
 
     fn resolved_baseline_workdir(&self) -> Result<Option<PathBuf>> {
-        self.working_directory.map(resolve_working_directory).transpose()
+        self.working_directory
+            .map(platform::resolve_existing_working_directory)
+            .transpose()
     }
 
     fn user_confinement_grants(&self) -> Vec<UserConfinementGrant> {
@@ -476,25 +478,6 @@ fn current_executable() -> Result<PathBuf> {
     std::env::current_exe().map_err(|error| {
         QuartersError::new(ErrorKind::System, "could not locate the Quarters executable").with_source(error)
     })
-}
-
-fn resolve_working_directory(path: &Path) -> Result<PathBuf> {
-    if !path.is_absolute() {
-        return Err(QuartersError::new(
-            ErrorKind::InvalidInput,
-            "--workdir requires an existing absolute directory",
-        ));
-    }
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| QuartersError::io("resolve requested working directory", path, error))?;
-    if canonical.is_dir() {
-        return Ok(canonical);
-    }
-    Err(QuartersError::new(
-        ErrorKind::InvalidInput,
-        "--workdir must identify an existing directory",
-    ))
 }
 
 fn required_environment_path(environment: &EnvironmentPlan, name: &str) -> Result<PathBuf> {

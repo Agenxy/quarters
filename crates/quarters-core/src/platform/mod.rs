@@ -398,6 +398,31 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
     platform_enter_home_view(space_home, host_home)
 }
 
+/// Resolve and validate an existing absolute working directory.
+///
+/// # Errors
+///
+/// Returns an error when the path is not absolute, cannot be resolved, or is
+/// not a directory.
+pub fn resolve_existing_working_directory(path: &Path) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--workdir requires an existing absolute directory",
+        ));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve requested working directory", path, error))?;
+    if canonical.is_dir() {
+        return Ok(canonical);
+    }
+    Err(QuartersError::new(
+        ErrorKind::InvalidInput,
+        "--workdir must identify an existing directory",
+    ))
+}
+
 /// Resolve a requested working directory against the Linux home-view mapping.
 ///
 /// Paths inside the stored Quarter home map to the passwd-home mount target.
@@ -409,21 +434,7 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
 /// Returns an error for a non-absolute or missing directory, an invalid home
 /// root, or a passwd-home path without a Quarter counterpart.
 pub fn resolve_home_view_working_directory(path: &Path, space_home: &Path, effective_home: &Path) -> Result<PathBuf> {
-    if !path.is_absolute() {
-        return Err(QuartersError::new(
-            ErrorKind::InvalidInput,
-            "--workdir requires an existing absolute directory",
-        ));
-    }
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| QuartersError::io("resolve requested working directory", path, error))?;
-    if !canonical.is_dir() {
-        return Err(QuartersError::new(
-            ErrorKind::InvalidInput,
-            "--workdir must identify an existing directory",
-        ));
-    }
+    let canonical = resolve_existing_working_directory(path)?;
     let space = space_home
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve Quarter home for working directory", space_home, error))?;
@@ -545,12 +556,13 @@ mod tests {
         let space = directory.path().join("space");
         let host = directory.path().join("host");
         std::fs::create_dir_all(space.join("project"))?;
-        std::fs::create_dir_all(host.join("project"))?;
+        std::fs::create_dir(&host)?;
         let expected = host.canonicalize()?.join("project");
         assert_eq!(
             resolve_home_view_working_directory(&space.join("project"), &space, &host)?,
             expected
         );
+        std::fs::create_dir(host.join("project"))?;
         assert_eq!(
             resolve_home_view_working_directory(&host.join("project"), &space, &host)?,
             expected
