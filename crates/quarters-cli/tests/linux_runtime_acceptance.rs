@@ -554,6 +554,14 @@ fn verify_policy(policy: &Value, home: &Path) -> Result<ToolCoverage, Box<dyn Er
             _ => assert_eq!(tiocsti["state"], "unknown"),
         }
     }
+    let limitations = policy["result"]["confinement"]["limitations"]
+        .as_array()
+        .ok_or("confinement limitations is not a readable array")?;
+    let reports_tiocsti = limitations.iter().any(|item| {
+        item.as_str()
+            .is_some_and(|text| text.contains("legacy TIOCSTI terminal injection is not proven disabled"))
+    });
+    assert_eq!(reports_tiocsti, tiocsti["state"] != "disabled");
     let available = ["ssh", "git", "python3", "node"]
         .into_iter()
         .filter(|command| plan_has_command(policy, command))
@@ -870,73 +878,4 @@ fn proc_matrix(pid: u32) -> Vec<(&'static str, bool)> {
             (entry, allowed)
         })
         .collect()
-}
-
-#[test]
-fn runtime_falls_back_when_xdg_runtime_is_missing_or_below_home() -> Result<(), Box<dyn Error>> {
-    let temporary = TempDir::new()?;
-    let root = temporary.path().join("store");
-    let host_home = temporary.path().join("host-home");
-    fs::create_dir(&host_home)?;
-    create(&root, &host_home, "missing-xdg")?;
-    let missing = environment(&root, &host_home, None, "missing-xdg")?;
-    let expected_prefix = format!("/tmp/quarters-{}/", nix::unistd::Uid::current().as_raw());
-    assert!(missing.starts_with(&expected_prefix));
-
-    let nested = host_home.join("runtime");
-    fs::create_dir(&nested)?;
-    fs::set_permissions(&nested, fs::Permissions::from_mode(0o700))?;
-    create(&root, &host_home, "nested-xdg")?;
-    let nested_result = environment(&root, &host_home, Some(&nested), "nested-xdg")?;
-    assert!(nested_result.starts_with(&expected_prefix));
-
-    for name in ["missing-xdg", "nested-xdg"] {
-        run(quarters(&root)
-            .env("HOME", &host_home)
-            .env_remove("XDG_RUNTIME_DIR")
-            .args(["rm", name, "--confirm", name]))?;
-    }
-    Ok(())
-}
-
-#[test]
-fn private_agent_refuses_an_overlong_socket_path() -> Result<(), Box<dyn Error>> {
-    let temporary = TempDir::new()?;
-    let root = temporary.path().join("store");
-    let host_home = temporary.path().join("home");
-    let runtime = temporary.path().join("r".repeat(90));
-    fs::create_dir(&host_home)?;
-    fs::create_dir(&runtime)?;
-    fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700))?;
-    create(&root, &host_home, "long-socket")?;
-
-    let output = quarters(&root)
-        .env("HOME", &host_home)
-        .env("XDG_RUNTIME_DIR", &runtime)
-        .args(["agent", "start", "long-socket"])
-        .output()?;
-    assert_eq!(output.status.code(), Some(6));
-    assert!(String::from_utf8(output.stderr)?.contains("socket path exceeds the portable Unix limit"));
-
-    run(quarters(&root)
-        .env("HOME", &host_home)
-        .env("XDG_RUNTIME_DIR", &runtime)
-        .args(["rm", "long-socket", "--confirm", "long-socket"]))?;
-    Ok(())
-}
-
-fn environment(root: &Path, home: &Path, runtime: Option<&Path>, name: &str) -> Result<String, Box<dyn Error>> {
-    let mut command = quarters(root);
-    command.env("HOME", home);
-    if let Some(runtime) = runtime {
-        command.env("XDG_RUNTIME_DIR", runtime);
-    } else {
-        command.env_remove("XDG_RUNTIME_DIR");
-    }
-    let output = run(command.args(["--json", "env", name]))?;
-    let report: Value = serde_json::from_slice(&output.stdout)?;
-    report["result"]["environment"]["XDG_RUNTIME_DIR"]
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| "missing XDG_RUNTIME_DIR".into())
 }

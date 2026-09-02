@@ -398,6 +398,54 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
     platform_enter_home_view(space_home, host_home)
 }
 
+/// Resolve a requested working directory against the Linux home-view mapping.
+///
+/// Paths inside the stored Quarter home map to the passwd-home mount target.
+/// Paths already below the passwd home require a matching directory in the
+/// Quarter home, while paths outside both trees remain unchanged.
+///
+/// # Errors
+///
+/// Returns an error for a non-absolute or missing directory, an invalid home
+/// root, or a passwd-home path without a Quarter counterpart.
+pub fn resolve_home_view_working_directory(path: &Path, space_home: &Path, effective_home: &Path) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--workdir requires an existing absolute directory",
+        ));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve requested working directory", path, error))?;
+    if !canonical.is_dir() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--workdir must identify an existing directory",
+        ));
+    }
+    let space = space_home
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve Quarter home for working directory", space_home, error))?;
+    let host = effective_home
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve passwd home for working directory", effective_home, error))?;
+    if let Ok(relative) = canonical.strip_prefix(&space) {
+        return Ok(host.join(relative));
+    }
+    let Ok(relative) = canonical.strip_prefix(&host) else {
+        return Ok(canonical);
+    };
+    if space.join(relative).is_dir() {
+        return Ok(host.join(relative));
+    }
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        "--workdir is hidden by --home-view and has no Quarter counterpart",
+    )
+    .with_hint("create the directory inside the Quarter home or choose a path outside the passwd home"))
+}
+
 /// Describe a requested Linux Landlock filesystem policy without applying it.
 ///
 /// # Errors
@@ -470,7 +518,7 @@ mod tests {
 
     use nix::unistd::Uid;
 
-    use super::ensure_owned_private_directory;
+    use super::{ensure_owned_private_directory, resolve_home_view_working_directory};
 
     #[test]
     fn existing_runtime_permissions_are_never_repaired() -> Result<(), Box<dyn std::error::Error>> {
@@ -488,6 +536,40 @@ mod tests {
         symlink(&target, &link)?;
         assert!(ensure_owned_private_directory(&link, Uid::current().as_raw()).is_err());
         assert_eq!(std::fs::symlink_metadata(&target)?.permissions().mode() & 0o777, 0o755);
+        Ok(())
+    }
+
+    #[test]
+    fn home_view_workdir_maps_both_home_spellings_to_one_target() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let space = directory.path().join("space");
+        let host = directory.path().join("host");
+        std::fs::create_dir_all(space.join("project"))?;
+        std::fs::create_dir_all(host.join("project"))?;
+        let expected = host.canonicalize()?.join("project");
+        assert_eq!(
+            resolve_home_view_working_directory(&space.join("project"), &space, &host)?,
+            expected
+        );
+        assert_eq!(
+            resolve_home_view_working_directory(&host.join("project"), &space, &host)?,
+            expected
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn home_view_workdir_refuses_a_host_only_directory() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let space = directory.path().join("space");
+        let host = directory.path().join("host");
+        std::fs::create_dir(&space)?;
+        std::fs::create_dir_all(host.join("host-only"))?;
+        let error = match resolve_home_view_working_directory(&host.join("host-only"), &space, &host) {
+            Ok(path) => return Err(format!("host-only workdir unexpectedly mapped to {}", path.display()).into()),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("has no Quarter counterpart"));
         Ok(())
     }
 }

@@ -326,7 +326,7 @@ pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
     let baseline_workdir = if confinement_plan.is_none() {
         request
             .working_directory
-            .map(|path| map_home_view_workdir(path, request.space_home, effective_home))
+            .map(|path| platform::resolve_home_view_working_directory(path, request.space_home, effective_home))
             .transpose()?
     } else {
         None
@@ -495,31 +495,6 @@ fn resolve_working_directory(path: &Path) -> Result<PathBuf> {
         ErrorKind::InvalidInput,
         "--workdir must identify an existing directory",
     ))
-}
-
-fn map_home_view_workdir(path: &Path, space_home: &Path, effective_home: &Path) -> Result<PathBuf> {
-    let canonical = resolve_working_directory(path)?;
-    let space = space_home
-        .canonicalize()
-        .map_err(|error| QuartersError::io("resolve Quarter home for working directory", space_home, error))?;
-    if let Ok(relative) = canonical.strip_prefix(&space) {
-        return Ok(effective_home.join(relative));
-    }
-    let host = effective_home
-        .canonicalize()
-        .map_err(|error| QuartersError::io("resolve passwd home for working directory", effective_home, error))?;
-    let Ok(relative) = canonical.strip_prefix(&host) else {
-        return Ok(canonical);
-    };
-    let mapped_source = space.join(relative);
-    if mapped_source.is_dir() {
-        return Ok(host.join(relative));
-    }
-    Err(QuartersError::new(
-        ErrorKind::Unsupported,
-        "--workdir is hidden by --home-view and has no Quarter counterpart",
-    )
-    .with_hint("create the directory inside the Quarter home or choose a path outside the passwd home"))
 }
 
 fn required_environment_path(environment: &EnvironmentPlan, name: &str) -> Result<PathBuf> {

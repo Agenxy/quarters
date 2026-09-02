@@ -414,9 +414,13 @@ fn resolve_working_directory(
             "--workdir requires an existing absolute directory",
         ));
     }
-    let canonical = requested
-        .canonicalize()
-        .map_err(|error| QuartersError::io("resolve requested working directory", requested, error))?;
+    let canonical = if request.home_view {
+        crate::platform::resolve_home_view_working_directory(requested, request.space_home, request.effective_home)?
+    } else {
+        requested
+            .canonicalize()
+            .map_err(|error| QuartersError::io("resolve requested working directory", requested, error))?
+    };
     if !canonical.is_dir() {
         return Err(QuartersError::new(
             ErrorKind::InvalidInput,
@@ -427,24 +431,11 @@ fn resolve_working_directory(
         .space_home
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve Quarter home for working directory", request.space_home, error))?;
-    if canonical.starts_with(&space) {
-        let relative = canonical.strip_prefix(&space).unwrap_or(Path::new(""));
-        return Ok(if request.home_view {
-            effective.join(relative)
-        } else {
-            canonical
-        });
-    }
     if request.home_view && canonical.starts_with(effective) {
-        let relative = canonical.strip_prefix(effective).unwrap_or(Path::new(""));
-        if space.join(relative).is_dir() {
-            return Ok(effective.join(relative));
-        }
-        return Err(QuartersError::new(
-            ErrorKind::Unsupported,
-            "--workdir is hidden by --home-view and has no Quarter counterpart",
-        )
-        .with_hint("create the directory inside the Quarter home or choose a path outside the passwd home"));
+        return Ok(canonical);
+    }
+    if !request.home_view && canonical.starts_with(&space) {
+        return Ok(canonical);
     }
     let data_granted = grants.iter().any(|grant| {
         grant.source == "user-granted"
