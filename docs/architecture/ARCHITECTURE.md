@@ -61,8 +61,8 @@ the strict root marker, and dual layouts fail closed. Current-schema markers
 are bounded, current-user regular files. Their steady state has one link; the
 exact two-link no-clobber publication state remains readable and is repaired
 only under the management lease. Newer schema headers are reported as an
-upgrade requirement before strict parsing. `doctor` diagnoses the raw marker,
-reserved-staging state without repairing it, caps itemized staging names
+upgrade requirement before strict parsing. `doctor` diagnoses the raw marker
+and reserved-staging state without repairing it, caps itemized staging names
 while retaining a lower-bound count, and never materializes an
 observation lock in a dotted store. Every mutation obtains a non-cloneable
 writable-layout token under the bounded management lease; dotted stores are
