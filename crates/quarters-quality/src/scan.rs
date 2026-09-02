@@ -127,6 +127,7 @@ fn check_distribution_versions(root: &Path, violations: &mut Vec<String>) {
         "packaging/npm/quarters-cli/package.json",
         "packaging/npm/platforms/darwin-arm64/package.json",
         "packaging/npm/platforms/darwin-x64/package.json",
+        "packaging/npm/platforms/linux-arm64/package.json",
         "packaging/npm/platforms/linux-x64/package.json",
     ] {
         check_package_version(root, relative, &workspace_version, violations);
@@ -187,6 +188,7 @@ fn check_launcher_dependencies(root: &Path, expected: &str, violations: &mut Vec
     for package in [
         "quarters-cli-darwin-arm64",
         "quarters-cli-darwin-x64",
+        "quarters-cli-linux-arm64",
         "quarters-cli-linux-x64",
     ] {
         let version = manifest["optionalDependencies"][package].as_str();
