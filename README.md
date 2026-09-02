@@ -78,7 +78,12 @@ OpenSSH links into the private runtime directory that remains reachable after
 the host home is covered. The mount is staged below that private runtime and
 verified against the reviewed source descriptor. Quarters revalidates the
 passwd-home target, attaches the staged mount inside the private namespace, and
-verifies the resulting home view before it executes the requested program.
+verifies the resulting home view before it executes the requested program. It
+then detaches the staging mount so the Quarter home has no second runtime path.
+The revalidate-then-mount target window remains inside Quarters' stated
+same-UID boundary: another process able to rename the passwd home's parent can
+race the compatibility view. Home view is reversible namespace path mapping,
+not an irreversible security policy; use filesystem confinement for the latter.
 
 Linux also offers experimental, opt-in `--confinement filesystem`. It requires
 Landlock ABI 3, defaults to the Quarter home, reconstructs PATH from Quarter

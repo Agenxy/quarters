@@ -103,7 +103,7 @@ policy.
 | Confinement launcher leaks store or host handles | Parent retains the cooperative lease; policy anchors are close-on-exec; launcher is single-threaded and immediately execs after restriction; inherited caller descriptors remain an explicit limitation; descriptor-bound interpreter scripts intentionally inherit one readless `O_PATH` handle and can observe `/dev/fd` as their source path |
 | Host PATH bypasses the policy | Confined PATH is reconstructed from Quarter-local bins and entries whose canonical directories fall beneath fixed executable grants; omitted host entries are counted |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
-| Home-view source or target changes during setup | Both owned directories remain open; a private runtime staging mount is verified against the source descriptor; the target pathname is revalidated immediately before its private-namespace attach; the resulting home view is verified before process replacement |
+| Home-view source or target changes during setup | Both owned directories remain open; a private runtime staging mount is verified against the source descriptor; the target pathname is revalidated immediately before its private-namespace attach; the resulting home view is verified and staging is detached before process replacement. A same-UID process able to rename the passwd home's parent can still race the target between revalidation and attach; this is outside the protection boundary and cannot propagate beyond the private namespace |
 | Terminal injection is mistaken for filesystem mediation | Policy output reports `dev.tty.legacy_tiocsti`; any state not proven disabled is repeated in the limitations array, and Landlock ABI 3 is not claimed to mediate terminal ioctls |
 | Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
 | Secret diagnostics | No state content reads; explicit inherited values render as redacted |
@@ -124,6 +124,7 @@ policy.
 - separating network, process, device or IPC namespaces
 - virtualizing macOS Keychain, TCC, app containers or Secure Enclave
 - preserving ordinary `sudo` inside Linux `--home-view`
+- treating Linux `--home-view` as an irreversible mount or security boundary
 - discovering detached descendants or same-user servers after their Quarters supervisor exits
 - secure deletion from snapshots, backups or recovery media
 - crash-consistent live snapshot or export

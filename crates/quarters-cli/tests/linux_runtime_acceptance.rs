@@ -639,8 +639,8 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
     let available = report["result"]["platform"]["confinement"]["available"] == true
         && report["result"]["platform"]["home_view"]["available"] == true;
     if !available {
-        if home_view_required() {
-            return Err("QUARTERS_REQUIRE_HOME_VIEW requires available home view and confinement".into());
+        if home_view_required() || landlock_required() {
+            return Err("required combined home view and confinement capabilities are unavailable".into());
         }
         return Ok(());
     }
@@ -659,7 +659,12 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
         .args(["--confinement", "filesystem"])
         .arg("--workdir")
         .arg(&quarter_workdir)
-        .args(["--", "/bin/sh", "-c", "test \"$PWD\" = \"$HOME/project\""]))?;
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "test \"$PWD\" = \"$HOME/project\" && test ! -e \"$XDG_RUNTIME_DIR/mount/project\"",
+        ]))?;
     let hidden_grant = format!("{}:ro", passwd_home.display());
     let refused = quarters(&root)
         .env("HOME", &host_home)

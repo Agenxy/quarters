@@ -309,6 +309,12 @@ or imply that programs using passwd records have been redirected. Linux
 the real UID and GID to the same numeric values, creates a private mount
 namespace, makes propagation private and bind-mounts the space home over the
 passwd home. The target still has the same numeric user and host DAC authority.
+The source is first mounted below the private runtime, checked against its
+pre-opened directory identity, attached after the passwd-home target is
+revalidated, and checked again through the final path. The staging mount is
+then detached. A same-UID process able to rename the passwd home's parent can
+still race the target pathname between revalidation and attach; this path view
+is a compatibility mechanism, not an irreversible confinement boundary.
 Before the mount, Quarters publishes a private runtime copy of itself plus
 relative `ssh`, `scp`, `sftp` and `ssh-add` links and prepends that runtime bin.
 This keeps managed OpenSSH policy reachable even when the installed launcher

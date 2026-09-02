@@ -4,7 +4,7 @@ mod confinement;
 
 use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
-use nix::mount::{MsFlags, mount};
+use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{Gid, Uid, getgroups};
 use std::collections::BTreeMap;
@@ -160,7 +160,10 @@ fn attach_home_view(
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
     )
-    .map_err(|error| namespace_error("attach the space home over the passwd home", error))
+    .map_err(|error| namespace_error("attach the space home over the passwd home", error))?;
+    drop(mounted);
+    umount2(mount_staging, MntFlags::MNT_DETACH)
+        .map_err(|error| namespace_error("detach the home-view staging mount", error))
 }
 
 fn verify_path_matches_descriptor(descriptor: &File, path: &Path, label: &str, message: &str) -> Result<()> {
