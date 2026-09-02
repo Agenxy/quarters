@@ -13,6 +13,7 @@
 - bundle authentication keys and exported plaintext state
 - cooperative freeze policy and recorded artifact source evidence
 - integrity of host and sibling-space file content during an opt-in Landlock launch
+- privacy and truthfulness of state-discovery reports
 
 ## Trust boundaries
 
@@ -105,6 +106,13 @@ policy.
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
 | Home-view source or target changes during setup | Both owned directories remain open; a private runtime staging mount is verified against the source descriptor; the target pathname is revalidated immediately before its private-namespace attach; the resulting home view is verified and staging is detached before process replacement. A same-UID process able to rename the passwd home's parent can still race the target between revalidation and attach; this is outside the protection boundary and cannot propagate beyond the private namespace |
 | Terminal injection is mistaken for filesystem mediation | Policy output reports `dev.tty.legacy_tiocsti`; any state not proven disabled is repeated in the limitations array, and Landlock ABI 3 is not claimed to mediate terminal ioctls |
+| Discovery leaks sensitive names or contents | Descriptor-relative metadata-only traversal; no regular-file open, FIFO open, `readlink`, raw path serialization or persisted snapshot; output is aggregate classes and counts |
+| Partial discovery is presented as complete | Fixed entry/depth/path/time bounds plus unreadable/vanished counters; any bound or observation gap suppresses the complete delta and sets `sound: false` |
+| A selected or nested discovery directory is swapped | Root device/inode identity is bound across phases; every opened child directory must match its no-follow metadata before traversal; mismatch suppresses the delta |
+| Discovery is mistaken for host-write or read evidence | Every report says host writes are not measured and lists reads, host paths, granted paths, network, IPC, devices and platform account services as unknown |
+| Concurrent writer invalidates a discovery claim | Exclusive cooperative lifecycle lease excludes only Quarters participants; detached and direct same-UID writers remain explicitly unknown |
+| Report descriptor leaks into the measured child | Descriptor must be inherited, writable and at least 3; Quarters duplicates it close-on-exec and closes the original before launch |
+| Post-scan or report failure changes child semantics | Once the child starts, Quarters preserves its native exit/signal status and emits a warning instead of replacing it with an observer failure |
 | Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
 | Secret diagnostics | No state content reads; explicit inherited values render as redacted |
 | MCP lifecycle confusion | Exact 2026/2025 families; cross-family methods and version metadata fail closed |
@@ -139,6 +147,7 @@ policy.
 - claiming network, IPC, device, process or credential isolation from Linux filesystem confinement
 - treating a user-granted path as inspected, trusted, or executable authority
 - hiding known-path metadata or revoking file descriptors opened before Landlock enforcement
+- treating discovery as tracing, content inspection, host-write proof, detached-process discovery or containment
 - treating a private SSH agent as protection from another process with the same UID
 - treating host-fork preview or provenance as authentication against the same UID
 - remote MCP, OAuth, agent-triggered command execution or agent-triggered deletion

@@ -6,6 +6,17 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Add opt-in `quarters discover` for one directly supervised command: bounded
+  descriptor-relative metadata snapshots of selected Quarter home/runtime
+  roots, path-free classified deltas, explicit observation limits, and stable
+  JSON on a caller-supplied close-on-exec report descriptor.
+- Preserve child stdout, stderr and native termination status; hold an
+  exclusive cooperative lifecycle lease, prepare runtime launch state before
+  the first scan, exclude the runtime launcher directory, and suppress the
+  complete delta after any scan bound or observation gap.
+- Keep discovery out of MCP, ordinary logs and persisted Quarter state. Report
+  host access/writes and detached writers as unmeasured instead of inferring
+  isolation from an unchanged Quarter tree.
 - Remove the unreleased `.quarters-store-migration.json` refusal, its
   `migration_marker` doctor/MCP field and the `active-migration` diagnosis
   state before first publication. No released Quarters version emitted them,

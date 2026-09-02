@@ -324,7 +324,40 @@ git config --global user.name
 The last command runs on the host and should retain the host value. File
 permissions and access are still those of the same account.
 
-## 9. Enter the shell
+## 9. Observe one command's Quarter-owned changes
+
+Preview the metadata scope without starting a process:
+
+```sh
+quarters discover clean --preview
+quarters --json discover clean --scan home --preview
+```
+
+Then measure one direct command. Its stdout remains the command's stdout; the
+human discovery summary goes to stderr:
+
+```sh
+quarters discover clean -- git config --global user.email "clean@example.test"
+```
+
+For automation, provide an already-open writable descriptor rather than a
+report path:
+
+```sh
+quarters discover clean --report-fd 3 -- git status 3>discovery.json
+```
+
+Keep that caller-selected report file outside the Quarter roots being measured.
+It is written after the post-scan and is intentionally not part of the delta.
+The JSON contains only counts and semantic classes. Quarters does not open file
+contents, resolve link targets or emit entry paths. `credential-shaped` means a
+disclosed path pattern matched; it is neither content inspection nor a finding
+that a credential exists. An unchanged delta does not show whether the command
+read or wrote host state. Detached and direct same-account writers also remain
+unknown. Use `--confinement filesystem` separately on supported Linux systems
+when an enforceable path policy is required.
+
+## 10. Enter the shell
 
 ```sh
 target/release/quarters enter clean
@@ -352,7 +385,7 @@ target/release/quarters enter clean --login
 
 Host system profiles can run in login mode.
 
-## 10. Pass a variable deliberately
+## 11. Pass a variable deliberately
 
 The baseline does not inherit arbitrary variables:
 
@@ -363,7 +396,7 @@ MY_SETTING=present target/release/quarters exec clean --inherit MY_SETTING -- en
 
 `env clean --inherit MY_SETTING` shows the value as redacted.
 
-## 11. Use host state explicitly
+## 12. Use host state explicitly
 
 Inside a baseline shell:
 
@@ -374,7 +407,7 @@ quarters host -- sh -c 'printf "%s\n" "$HOME"'
 This restores host path variables only. It does not restore blocked credential
 variables. Exit the space when you need the exact original host environment.
 
-## 12. Remove the space
+## 13. Remove the space
 
 Exit every process launched in the space, inspect the name, then run:
 
@@ -398,7 +431,7 @@ Quarters also fails closed when the root or activity lock is invalid.
 For an invalid stored name, obtain the exact value from `quarters --json list`.
 Removal accepts one literal entry name but never a path, `.` or `..`.
 
-## 13. Connect a local agent
+## 14. Connect a local agent
 
 Build or install Quarters, then configure the agent host to run the absolute
 binary path with the single `mcp` argument. Quarters communicates only over the

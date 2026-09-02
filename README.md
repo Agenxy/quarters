@@ -98,6 +98,16 @@ Inspect the complete policy first with
 Seatbelt and App Sandbox are not portable CLI foundations. The prebuilt macOS
 npm binaries are unsigned and unnotarized in this alpha.
 
+`quarters discover` is a deliberately narrower observability instrument. It
+captures bounded metadata before and after one directly supervised command and
+reports only aggregate created, modified, replaced and deleted counts grouped
+as configuration, data, state, cache, credential-shaped, runtime socket,
+runtime or unclassified. It never opens regular files, resolves symbolic links,
+or emits entry paths. The command says `host_writes_observed: not-measured`
+because unchanged Quarter state is not evidence that the child left host state
+alone. Detached and direct same-UID writers remain unknown. Discovery is CLI
+only; MCP has no process-execution or discovery tool.
+
 ## Try it
 
 ```sh
@@ -110,6 +120,8 @@ target/release/quarters clone studio experiment --confirm-sensitive-state studio
 target/release/quarters template create clean-room --from studio --preview
 target/release/quarters snapshot create studio before-change --preview
 target/release/quarters exec work -- env
+target/release/quarters discover work --preview
+target/release/quarters discover work -- git config --global user.name "Work identity"
 target/release/quarters enter work
 ```
 
@@ -174,6 +186,8 @@ publication is not yet available and is not advertised as an install path.
 | `env NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH]` | Show the exact environment and optional non-mutating Landlock policy plan |
 | `enter NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH]` | Open the shell with an optional explicit initial directory |
 | `exec NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH] -- COMMAND` | Run one command; requested confinement never degrades silently |
+| `discover NAME [--scan home\|runtime] [--report-fd FD] -- COMMAND` | Run one command and report bounded, path-free Quarter-owned metadata deltas to stderr and optionally JSON on a caller descriptor |
+| `discover NAME [--scan home\|runtime] --preview` | Show exact roots, bounds and credential-shaped patterns without launching a child; supports `--json` |
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
 | `agent status\|start\|stop\|restart [NAME]` | Manage a protocol-verified private OpenSSH agent |
 | `agent recover NAME --confirm NAME` | Reconcile only dead or protocol-verified private-agent state |
@@ -186,7 +200,9 @@ publication is not yet available and is not advertised as an install path.
 | `mcp` | Serve the bounded local MCP adapter over standard input/output |
 
 Management and inspection commands accept `--json`. Pass-through commands do
-not because child standard output must remain unchanged.
+not because child standard output must remain unchanged. Executing discovery
+uses `--report-fd 3` or higher for machine output; global `--json` is accepted
+only with `discover --preview`.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
 the computed environment. Neither starts a child or reads user content stored

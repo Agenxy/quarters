@@ -5,6 +5,7 @@ mod artifacts;
 mod bundles;
 mod confinement;
 pub(crate) use confinement::print_environment;
+mod discovery;
 mod doctor;
 mod freeze;
 
@@ -14,6 +15,9 @@ pub(crate) use artifacts::{
     print_rollback, print_template_use,
 };
 pub(crate) use bundles::{print_bundle_export, print_bundle_import, print_export_key};
+pub(crate) use discovery::{
+    print_preview as print_discovery_preview, print_report as print_discovery_report, report_json_bytes,
+};
 pub(crate) use freeze::print_freeze;
 
 use crate::adapter::AdapterReport;

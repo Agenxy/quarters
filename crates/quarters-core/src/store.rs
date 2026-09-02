@@ -18,7 +18,7 @@ pub(crate) use layout::{RootFormat, StoreLayout};
 pub use rename::SpaceRenameReport;
 pub use upgrade::SpaceUpgradeReport;
 
-use crate::store_lock::lock_shared_bounded;
+use crate::store_lock::{LifecycleLease, acquire_lifecycle_lease, lock_shared_bounded};
 use crate::store_policy::{validate_private_dir, validate_private_file, validate_stored_manifest};
 use crate::{
     ErrorKind, LATEST_SCHEMA_VERSION, PROFILE_SCHEMA_VERSION, QuartersError, Result, SUPPORTED_SCHEMA_VERSIONS, Space,
@@ -51,6 +51,12 @@ pub struct Store {
 #[derive(Debug)]
 pub struct SpaceLease {
     _file: File,
+}
+
+/// A held exclusive cooperative lease for one bounded discovery invocation.
+#[derive(Debug)]
+pub struct DiscoveryLease {
+    _lease: LifecycleLease,
 }
 
 /// Observable state of Quarters' cooperative activity lease.
@@ -270,6 +276,20 @@ impl Store {
         let _observation = self.begin_mutation()?;
         self.ensure_not_frozen(space)?;
         Self::shared_lease(space)
+    }
+
+    /// Exclude other cooperating launches and lifecycle changes during discovery.
+    ///
+    /// Detached and direct same-UID writers remain outside this evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the space is frozen, another cooperative process
+    /// holds its lifecycle lease, or the store cannot be safely observed.
+    pub fn discovery_lease(&self, space: &Space) -> Result<DiscoveryLease> {
+        let _observation = self.begin_mutation()?;
+        self.ensure_not_frozen(space)?;
+        acquire_lifecycle_lease(space, space.manifest().name.as_str()).map(|lease| DiscoveryLease { _lease: lease })
     }
 
     pub(crate) fn maintenance_lease(&self, space: &Space) -> Result<SpaceLease> {

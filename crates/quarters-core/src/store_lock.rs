@@ -46,6 +46,7 @@ pub(crate) struct ObservationGuard {
 }
 
 /// Non-cloneable ownership token for one space lifecycle lease.
+#[derive(Debug)]
 pub(crate) struct LifecycleLease {
     _file: File,
 }

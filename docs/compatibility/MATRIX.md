@@ -17,6 +17,7 @@ current host. It does not read credentials.
 | Prompt context | B | validated `QUARTERS_PROMPT_PREFIX` plus `shell-init` | parent themes may need explicit ordering; marker is not proof of isolation |
 | Expanded workspace | A/C | HOME/XDG plus conventional personal directories | passwd-home, platform registration and absolute paths may remain host-bound |
 | Linux filesystem confinement | C | opt-in Landlock ABI-3 policy, data-only invocation grants, explicit workdir, reconstructed PATH and exact policy report | Linux only; metadata, `/proc`, network, IPC, terminal ioctls, devices and inherited descriptors retain stated visibility |
+| State discovery | B/C | opt-in metadata-only before/after counts for one direct command, selected Quarter-owned roots and descriptor JSON | no paths/content/reads/host writes; detached writers and GUI launches unknown; not an isolation proof |
 | Host shell fork | B/C | previewed descriptor-anchored selection, digest confirmation and atomic publication | entering may execute copied startup code; credentials, history and directories remain excluded |
 | Lifecycle clone | B/C | bounded native copy with explicit policy and atomic publication | detached writers unknown; selected metadata and embedded absolute paths are not transformed |
 | Named templates | B/C | canonical BLAKE3-verified portable copy plus fresh destination controls | arbitrary state may contain credentials; embedded paths are not rewritten |

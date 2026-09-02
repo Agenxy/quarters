@@ -4,6 +4,7 @@ mod adapter;
 mod app;
 mod cli;
 mod context;
+mod discovery;
 mod output;
 mod process;
 mod shell_init;

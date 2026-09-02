@@ -117,6 +117,37 @@ final symlink and must retain their declared owner, type and private mode.
 Aggregate status holds one observation guard for the entire bounded listing,
 so contention has one deadline rather than one deadline per space.
 
+## Privacy-bounded state discovery
+
+`discover` is a CLI-only process supervisor layered over the ordinary launch
+plan. It takes the space lifecycle lease exclusively, prepares the complete
+environment and any private runtime launcher, then scans selected Quarter-owned
+home and runtime roots before spawning the child. The runtime `bin` subtree is
+excluded because Quarters itself prepares it. After the direct child exits, a
+second scan produces a path-free classified delta. The child stdout and stderr
+remain attached unchanged; the human report goes to stderr and an optional
+stable JSON envelope goes to a caller-provided descriptor.
+
+The scanner retains directory descriptors and uses no-follow relative metadata
+operations. It never opens regular files or FIFOs and never calls `readlink`.
+Entry paths exist only as transient byte components used to compute a
+domain-separated BLAKE3 key and a semantic class. Snapshots are opaque and
+in-memory; output contains only counts. Each phase is bounded to 65,536 entries,
+depth 64, 4,096 relative-path bytes and five seconds. Exceeding any bound,
+encountering an unreadable directory or losing an entry during observation
+marks the scan incomplete and suppresses the entire delta. Selected root
+device/inode identity is bound across phases, and an opened nested directory is
+matched back to its no-follow metadata before traversal. Runtime `bin` contents
+are deliberately excluded and disclosed because Quarters prepares them.
+
+The exclusive lease excludes cooperating Quarters launches and lifecycle
+mutations, not detached descendants or direct same-UID writers. Metadata deltas
+cannot observe reads, file contents, host paths, granted external paths,
+network, IPC, devices, platform keychains or writes that preserve every
+compared field. These remain explicit unknowns in every report. No report is
+stored in the Quarter, captured by lifecycle artifacts or exposed through MCP.
+ADR 0012 defines this boundary.
+
 Directory inspection treats every published entry independently. A damaged
 home or manifest is reported as unhealthy without hiding valid siblings.
 Removal deliberately validates only the invariants it needs: the exact named

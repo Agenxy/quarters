@@ -354,36 +354,21 @@ fn validate_relative_path(path: &Path) -> Result<()> {
 
 fn reject_sensitive_path(path: &Path) -> Result<()> {
     let value = path.to_str().unwrap_or_default().to_ascii_lowercase();
-    let sensitive = [
-        ".aws",
-        ".azure",
-        ".bash_history",
-        ".cache",
-        ".cargo/credentials",
-        ".cargo/credentials.toml",
-        ".claude",
-        ".codex",
-        ".config/gh",
-        ".config/gcloud",
-        ".docker",
-        ".env",
-        ".git-credentials",
-        ".gnupg",
-        ".kube",
-        ".lesshst",
-        ".local/state/shell",
-        ".netrc",
-        ".node_repl_history",
-        ".npmrc",
-        ".python_history",
-        ".pypirc",
-        ".sqlite_history",
-        ".ssh",
-        ".zsh_history",
-    ]
-    .into_iter()
-    .any(|prefix| value == prefix || value.starts_with(&format!("{prefix}/")))
-        || value.starts_with(".env.");
+    let sensitive = crate::discovery::credential_shaped_path(path)
+        || [
+            ".bash_history",
+            ".cache",
+            ".claude",
+            ".codex",
+            ".lesshst",
+            ".local/state/shell",
+            ".node_repl_history",
+            ".python_history",
+            ".sqlite_history",
+            ".zsh_history",
+        ]
+        .into_iter()
+        .any(|prefix| value == prefix || value.strip_prefix(prefix).is_some_and(|tail| tail.starts_with('/')));
     if !sensitive {
         return Ok(());
     }
