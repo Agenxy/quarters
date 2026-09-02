@@ -8,6 +8,8 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use tempfile::TempDir;
 
+const RETIRED_MIGRATION_FILE: &str = ".quarters-store-migration.json";
+
 #[test]
 fn missing_root_is_observed_without_materialization() {
     let temporary = TempDir::new().expect("temporary directory");
@@ -198,13 +200,55 @@ fn nonblocking_marker_open_rejects_a_fifo_without_waiting_for_a_writer() {
 }
 
 #[test]
-fn migration_marker_blocks_even_an_empty_store() {
+fn a_stray_retired_migration_file_is_inert_and_preserved() {
+    let (_temporary, root, store) = visible_store();
+    let stray = protected_file(root.join(RETIRED_MIGRATION_FILE), b"{}", 0o600);
+
+    assert_eq!(
+        store.layout().expect("visible layout").root_format(),
+        RootFormat::Visible
+    );
+    let mutation = store.begin_mutation().expect("visible mutation");
+    drop(mutation);
+    let diagnosis = store.layout_diagnosis();
+
+    assert_eq!(diagnosis.state, "unmarked-visible");
+    assert_eq!(diagnosis.root_format.as_deref(), Some("visible"));
+    assert!(diagnosis.writable);
+    assert_eq!(diagnosis.error_kind, None);
+    assert!(stray.is_file());
+}
+
+#[test]
+fn dual_layout_precedence_survives_a_stray_retired_migration_file() {
     let temporary = TempDir::new().expect("temporary directory");
     let root = protected_dir(temporary.path().join("store"));
-    protected_file(root.join(MIGRATION_FILE), b"{}", 0o600);
+    protected_dir(root.join("spaces"));
+    protected_dir(root.join(".spaces"));
+    let stray = protected_file(root.join(RETIRED_MIGRATION_FILE), b"{}", 0o600);
+    let diagnosis = Store::new(root).expect("store").layout_diagnosis();
 
-    let error = resolve(&root).expect_err("active migration");
-    assert_eq!(error.kind(), ErrorKind::SpaceActive);
+    assert_eq!(diagnosis.state, "ambiguous-dual-layout");
+    assert_eq!(diagnosis.error_kind.as_deref(), Some("corrupt_state"));
+    assert!(stray.is_file());
+}
+
+#[test]
+fn a_stray_retired_migration_file_does_not_make_dotted_layout_writable() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let root = protected_dir(temporary.path().join("store"));
+    protected_dir(root.join(".spaces"));
+    protected_dir(root.join(".trash"));
+    write_marker(&root, 1, "dotted", env!("CARGO_PKG_VERSION"), false);
+    let stray = protected_file(root.join(RETIRED_MIGRATION_FILE), b"{}", 0o600);
+    let store = Store::new(root).expect("store");
+
+    let Err(error) = store.begin_mutation() else {
+        panic!("dotted mutation must remain unavailable");
+    };
+
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert!(stray.is_file());
 }
 
 #[test]
@@ -310,20 +354,8 @@ fn two_link_dotted_marker_cannot_impersonate_a_writer_publication() {
 }
 
 #[test]
-fn migration_and_newer_schema_keep_priority_over_staging_issues() {
+fn newer_schema_keeps_priority_over_staging_issues() {
     let temporary = TempDir::new().expect("temporary directory");
-    let migrating = protected_dir(temporary.path().join("migrating"));
-    protected_file(migrating.join(MIGRATION_FILE), b"{}", 0o600);
-    protected_file(
-        migrating.join(format!("{STAGING_PREFIX}invalid{STAGING_SUFFIX}")),
-        b"partial",
-        0o600,
-    );
-    let migrating = Store::new(migrating).expect("migrating store").layout_diagnosis();
-    assert_eq!(migrating.state, "active-migration");
-    assert_eq!(migrating.error_kind.as_deref(), Some("space_active"));
-    assert_eq!(migrating.staging_error_kind.as_deref(), Some("corrupt_state"));
-
     let newer = protected_dir(temporary.path().join("newer"));
     protected_file(newer.join(MARKER_FILE), br#"{"schema_version":2,"future":true}"#, 0o600);
     protected_file(

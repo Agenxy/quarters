@@ -6,6 +6,12 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Remove the unreleased `.quarters-store-migration.json` refusal, its
+  `migration_marker` doctor/MCP field and the `active-migration` diagnosis
+  state before first publication. No released Quarters version emitted them,
+  and no command ever created or cleared the file. Structured
+  `quarters_doctor` success and failure output is now validated against its
+  published MCP schema.
 - Add experimental Linux `--confinement filesystem` for `env`, `enter` and
   `exec`: a fail-closed Landlock ABI-3 policy, Quarter-home working directory,
   reconstructed tool PATH, private runtime launcher and exact JSON plan.

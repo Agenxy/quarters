@@ -432,8 +432,8 @@ The storage expand phase recognizes both the current `spaces`/`trash` layout
 and the future `.spaces`/`.trash` layout. All writers still use the current
 visible categories. Unmarked visible stores remain compatible; dotted stores
 require a strict `.quarters-store.json` marker and are inspection-only in this
-release. Dual layouts, active migrations, malformed markers, unexplained links
-and newer marker schemas fail closed. The exact two-link no-clobber publication
+release. Dual layouts, malformed markers, unexplained links and newer marker
+schemas fail closed. The exact two-link no-clobber publication
 state remains readable and is repaired under the management lease. `quarters
 doctor` reports this state with bounded detail without creating or repairing
 it.
