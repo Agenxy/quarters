@@ -208,6 +208,7 @@ pub(crate) fn runtime_directory(space: &Space, host: &HostEnvironment) -> Result
     for directory in [
         &runtime,
         &runtime.join("bin"),
+        &runtime.join("mount"),
         &runtime.join("tmp"),
         &runtime.join("tmux"),
     ] {
@@ -394,8 +395,8 @@ fn runtime_namespace(host: &HostEnvironment, uid: u32) -> PathBuf {
 ///
 /// Returns an error on unsupported platforms, blocked namespace policy,
 /// invalid paths, identity-map failure or mount failure.
-pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
-    platform_enter_home_view(space_home, host_home)
+pub fn enter_home_view(space_home: &Path, host_home: &Path, runtime: &Path) -> Result<()> {
+    platform_enter_home_view(space_home, host_home, runtime)
 }
 
 /// Resolve and validate an existing absolute working directory.

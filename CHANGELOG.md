@@ -38,9 +38,10 @@ compatibility notes will be called out here.
 - Map a passwd-home `--workdir` through home view only when its Quarter
   counterpart exists; otherwise fail before mounting instead of silently
   changing its meaning.
-- Attach the Linux home view with descriptor-bound `open_tree` and
-  `move_mount`, and require the composed home-view plus Landlock path to run
-  rather than skip in hosted acceptance.
+- Stage and verify the Linux home view below the private runtime, attach it to
+  the opened passwd-home target with descriptor-bound `move_mount`, and require
+  the composed home-view plus Landlock path to run rather than skip in hosted
+  acceptance.
 
 - Add identity-bound cooperative freeze/unfreeze, immediate stationery capture
   from a current Quarter holding a cooperative lease, and explicit

@@ -7,7 +7,7 @@ use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use nix::mount::{MsFlags, mount};
 use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{Gid, Uid, getgroups};
-use rustix::mount::{MoveMountFlags, OpenTreeFlags, move_mount, open_tree};
+use rustix::mount::{MoveMountFlags, move_mount};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
@@ -85,8 +85,10 @@ pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
     &[]
 }
 
-pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
+pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path, runtime: &Path) -> Result<()> {
     let (space_descriptor, host_descriptor) = validate_home_view_paths(space_home, host_home)?;
+    let mount_staging = runtime.join("mount");
+    let staging_descriptor = open_owned_home_directory(&mount_staging, "runtime mount staging")?;
     ensure_no_extra_groups()?;
     let uid = Uid::current().as_raw();
     let gid = Gid::current().as_raw();
@@ -105,30 +107,64 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> R
     unshare(CloneFlags::CLONE_NEWNS).map_err(|error| namespace_error("create a mount namespace", error))?;
     mount::<str, str, str, str>(None, "/", None, MsFlags::MS_REC | MsFlags::MS_PRIVATE, None)
         .map_err(|error| namespace_error("make mounts private", error))?;
-    attach_home_view(&space_descriptor, &host_descriptor)?;
+    attach_home_view(&space_descriptor, &host_descriptor, &staging_descriptor, &mount_staging)?;
     std::env::set_current_dir(host_home)
         .map_err(|error| QuartersError::io("enter the mounted home", host_home, error))?;
     verify_current_directory(&space_descriptor)
 }
 
-fn attach_home_view(space_descriptor: &File, host_descriptor: &File) -> Result<()> {
-    let tree = open_tree(
-        space_descriptor,
-        "",
-        OpenTreeFlags::OPEN_TREE_CLONE
-            | OpenTreeFlags::OPEN_TREE_CLOEXEC
-            | OpenTreeFlags::AT_EMPTY_PATH
-            | OpenTreeFlags::AT_RECURSIVE,
+fn attach_home_view(
+    space_descriptor: &File,
+    host_descriptor: &File,
+    staging_descriptor: &File,
+    mount_staging: &Path,
+) -> Result<()> {
+    verify_current_directory_at(
+        staging_descriptor,
+        mount_staging,
+        "runtime mount staging changed after validation",
+    )?;
+    let space_descriptor_path = descriptor_path(space_descriptor);
+    mount(
+        Some(&space_descriptor_path),
+        mount_staging,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        None::<&str>,
     )
-    .map_err(|error| mount_api_error("clone the space-home mount tree", error))?;
+    .map_err(|error| namespace_error("stage the space-home mount tree", error))?;
+    let mounted = open_owned_home_directory(mount_staging, "mounted space-home staging")?;
+    verify_descriptors_match(
+        space_descriptor,
+        &mounted,
+        "the staged home view does not match the space home",
+    )?;
     move_mount(
-        &tree,
+        &mounted,
         "",
         host_descriptor,
         "",
         MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH | MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH,
     )
     .map_err(|error| mount_api_error("attach the space home over the passwd home", error))
+}
+
+fn verify_current_directory_at(descriptor: &File, path: &Path, message: &str) -> Result<()> {
+    let current = open_owned_home_directory(path, "runtime mount staging")?;
+    verify_descriptors_match(descriptor, &current, message)
+}
+
+fn verify_descriptors_match(expected: &File, actual: &File, message: &str) -> Result<()> {
+    let expected = expected
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect expected home-view directory", Path::new("."), error))?;
+    let actual = actual
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect actual home-view directory", Path::new("."), error))?;
+    if expected.dev() == actual.dev() && expected.ino() == actual.ino() {
+        return Ok(());
+    }
+    Err(QuartersError::new(ErrorKind::CorruptState, message))
 }
 
 fn verify_current_directory(space_descriptor: &File) -> Result<()> {
@@ -144,6 +180,12 @@ fn verify_current_directory(space_descriptor: &File) -> Result<()> {
         ErrorKind::CorruptState,
         "the mounted current directory does not match the requested space home",
     ))
+}
+
+fn descriptor_path(file: &File) -> PathBuf {
+    use std::os::fd::AsRawFd;
+
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
 
 fn user_namespace_status() -> CapabilityStatus {

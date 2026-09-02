@@ -334,7 +334,7 @@ pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
         None
     };
     if let Some(host_home) = request.host_home {
-        platform::enter_home_view(request.space_home, host_home)?;
+        platform::enter_home_view(request.space_home, host_home, request.runtime)?;
     }
     if let Some(plan) = confinement_plan.as_ref() {
         std::env::set_current_dir(&plan.working_directory).map_err(|error| {
