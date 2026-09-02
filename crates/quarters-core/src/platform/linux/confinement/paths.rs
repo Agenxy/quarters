@@ -435,6 +435,17 @@ fn resolve_working_directory(
             canonical
         });
     }
+    if request.home_view && canonical.starts_with(effective) {
+        let relative = canonical.strip_prefix(effective).unwrap_or(Path::new(""));
+        if space.join(relative).is_dir() {
+            return Ok(effective.join(relative));
+        }
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "--workdir is hidden by --home-view and has no Quarter counterpart",
+        )
+        .with_hint("create the directory inside the Quarter home or choose a path outside the passwd home"));
+    }
     let data_granted = grants.iter().any(|grant| {
         grant.source == "user-granted"
             && matches!(grant.access.as_str(), "data-read" | "data-read-write")
@@ -560,6 +571,7 @@ fn limitations(has_user_grants: bool, legacy_tiocsti: &crate::platform::LegacyTi
         "no_new_privs disables set-id elevation such as ordinary sudo",
         "same-UID unconfined processes retain their normal access to Quarter state",
         "/sys and /dev/shm are omitted, which can affect topology probes and multiprocessing",
+        "descriptor-bound interpreter scripts can observe a /dev/fd source path and inherit one readless O_PATH handle",
     ];
     if has_user_grants {
         items.push(

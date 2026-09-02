@@ -45,10 +45,13 @@ prepared exactly as reported.
 Executable resolution opens the accepted canonical file with `O_PATH`,
 `O_NOFOLLOW` and close-on-exec, verifies the descriptor's device and inode
 against the reviewed metadata, and holds it across Landlock enforcement.
-Process replacement uses `execveat(AT_EMPTY_PATH)`, so libc behavior and a
-same-UID rename cannot substitute a
-different file after review. Linux's interpreter-script case retries only
+Process replacement uses `execveat(AT_EMPTY_PATH)` without a libc path
+fallback, so a same-UID rename cannot substitute a different file after
+review. Linux's interpreter-script case retries only
 after clearing close-on-exec on that same already-validated descriptor.
+That kernel-required script path can appear as `/dev/fd/N` to the interpreter,
+and the readless `O_PATH` handle remains inherited for that script tree; both
+are explicit compatibility limitations rather than hidden isolation claims.
 
 An invocation may add up to 32 distinct explicit data roots with
 `--grant-path ABSOLUTE_PATH:ro|rw`. These grants are never persisted or read

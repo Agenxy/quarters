@@ -193,6 +193,12 @@ fn landlock_confines_content_and_mutation_or_fails_closed() -> Result<(), Box<dy
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
     );
+    run(quarters(&root)
+        .env("HOME", &host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .args(["exec", "confined", "--confinement", "filesystem", "--"])
+        .arg(&script)
+        .arg(home.join("descriptor-script-direct")))?;
     assert_eq!(fs::read(&host_secret)?, b"host-secret\n");
     for name in ["allowed", "moved"] {
         assert!(home.join(name).is_file(), "missing confined output {name}");
@@ -201,6 +207,7 @@ fn landlock_confines_content_and_mutation_or_fails_closed() -> Result<(), Box<dy
     assert_eq!(home.join("python-smoke").is_file(), coverage.has("python3"));
     assert_eq!(home.join("node-smoke").is_file(), coverage.has("node"));
     assert_eq!(fs::read(home.join("descriptor-script-smoke"))?, b"descriptor-bound");
+    assert_eq!(fs::read(home.join("descriptor-script-direct"))?, b"descriptor-bound");
     remove(&root, &host_home, "confined")?;
     remove(&root, &host_home, "sibling")?;
     Ok(())
@@ -417,7 +424,14 @@ fn user_grants_reject_inert_and_reserved_authority() -> Result<(), Box<dyn Error
     let executable_grant = format!("{}:ro", env!("CARGO_BIN_EXE_quarters"));
     let executable_root_grant = "/usr:rw".to_owned();
     let configuration_grant = "/etc:rw".to_owned();
-    for grant in [root_grant, executable_grant, executable_root_grant, configuration_grant] {
+    let process_grant = "/proc:rw".to_owned();
+    for grant in [
+        root_grant,
+        executable_grant,
+        executable_root_grant,
+        configuration_grant,
+        process_grant,
+    ] {
         let output = quarters(&root)
             .env("HOME", &host_home)
             .env_remove("XDG_RUNTIME_DIR")
@@ -621,6 +635,7 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
         .output()?;
     assert_eq!(refused_workdir.status.code(), Some(6));
     assert!(String::from_utf8(refused_workdir.stderr)?.contains("hidden by --home-view"));
+    verify_home_view_host_workdir_mapping(&root, &host_home, &passwd_home, &host_only_workdir)?;
     run(quarters(&root)
         .env("HOME", &host_home)
         .env_remove("XDG_RUNTIME_DIR")
@@ -678,6 +693,25 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
             "test \"$PWD\" = \"$HOME\" && test \"$(quarters current)\" = combined",
         ]))?;
     remove(&root, &host_home, "combined")?;
+    Ok(())
+}
+
+fn verify_home_view_host_workdir_mapping(
+    root: &Path,
+    host_home: &Path,
+    passwd_home: &Path,
+    host_workdir: &Path,
+) -> Result<(), Box<dyn Error>> {
+    let relative = host_workdir.strip_prefix(passwd_home)?;
+    fs::create_dir_all(root.join("spaces/combined/home").join(relative))?;
+    run(quarters(root)
+        .env("HOME", host_home)
+        .env_remove("XDG_RUNTIME_DIR")
+        .args(["exec", "combined", "--home-view", "--confinement", "filesystem"])
+        .arg("--workdir")
+        .arg(host_workdir)
+        .args(["--", "/bin/sh", "-c", "test \"$PWD\" = \"$1\"", "_"])
+        .arg(host_workdir.canonicalize()?))?;
     Ok(())
 }
 

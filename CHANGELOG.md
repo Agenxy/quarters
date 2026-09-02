@@ -28,6 +28,13 @@ compatibility notes will be called out here.
   rule-anchor identity, and report the host's legacy TIOCSTI policy.
 - Add hosted Ubuntu evidence that the distribution-default unprivileged user
   namespace policy makes optional home-view fail closed without a sysctl override.
+- Hold each confined executable by verified device and inode across Landlock
+  enforcement, replace the process through `execveat(AT_EMPTY_PATH)`, report
+  non-disabled or unreadable legacy TIOCSTI state as an explicit limitation,
+  and reject explicit grants that overlap any built-in policy root.
+- Map a passwd-home `--workdir` through home view only when its Quarter
+  counterpart exists; otherwise fail before mounting instead of silently
+  changing its meaning.
 
 - Add identity-bound cooperative freeze/unfreeze, immediate stationery capture
   from a current Quarter holding a cooperative lease, and explicit
