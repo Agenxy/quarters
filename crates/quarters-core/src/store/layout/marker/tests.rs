@@ -208,11 +208,10 @@ fn a_stray_retired_migration_file_is_inert_and_preserved() {
         store.layout().expect("visible layout").root_format(),
         RootFormat::Visible
     );
-    let mutation = store.begin_mutation().expect("visible mutation");
-    drop(mutation);
+    store.ensure_layout().expect("initialize visible layout");
     let diagnosis = store.layout_diagnosis();
 
-    assert_eq!(diagnosis.state, "unmarked-visible");
+    assert_eq!(diagnosis.state, "marked-visible");
     assert_eq!(diagnosis.root_format.as_deref(), Some("visible"));
     assert!(diagnosis.writable);
     assert_eq!(diagnosis.error_kind, None);

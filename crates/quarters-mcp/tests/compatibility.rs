@@ -461,7 +461,8 @@ async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
         .peer_info()
         .ok_or_else(|| io::Error::other("legacy client retained no peer information"))?;
     assert_eq!(peer.protocol_version, ProtocolVersion::V_2025_11_25);
-    assert_catalog(&client.list_tools(None).await?, false)?;
+    let tools = client.list_tools(None).await?;
+    assert_catalog(&tools, false)?;
     let resources = client.list_resources(None).await?;
     assert_eq!(resources.resources.len(), 3);
     assert!(resources.result_type.is_none());
@@ -489,6 +490,13 @@ async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
     )
     .await?;
     assert_eq!(invalid_layout.is_error, Some(true));
+    let doctor_schema = output_schema(&tools, "quarters_doctor")?;
+    assert!(!schema_declares_property(&doctor_schema, "migration_marker"));
+    let doctor = call(&client, "quarters_doctor", json!({})).await?;
+    validate_output(&doctor_schema, structured(&doctor)?)?;
+    let failed_doctor = call(&client, "quarters_doctor", json!({"name": "../invalid"})).await?;
+    assert_eq!(failed_doctor.is_error, Some(true));
+    validate_output(&doctor_schema, structured(&failed_doctor)?)?;
     client.cancel().await?;
     server_task.await??;
     Ok(())
