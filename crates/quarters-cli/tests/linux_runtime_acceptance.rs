@@ -406,7 +406,7 @@ fn user_grants_reject_inert_and_reserved_authority() -> Result<(), Box<dyn Error
         .output()?;
     assert_eq!(nested_output.status.code(), Some(2));
     let error: Value = serde_json::from_slice(&nested_output.stderr)?;
-    assert_eq!(error["error"]["kind"], "invalid-input");
+    assert_eq!(error["error"]["kind"], "invalid_input");
     assert!(
         error["error"]["message"]
             .as_str()
