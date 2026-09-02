@@ -65,7 +65,9 @@ running executable, passwd-home SSH/GnuPG roots or a passwd home hidden by
 root. Each anchor's validated device and inode must match the opened
 Landlock descriptor, so replacement between review and enforcement fails
 closed. `--workdir` is portable process behavior; in confined mode an external
-directory must be covered by one of these data grants.
+directory must be covered by one of these data grants. With `--home-view`, a
+passwd-home path may instead map to the same relative directory already present
+inside the Quarter home; missing counterparts fail before namespace setup.
 
 The policy report also records the observed
 `/proc/sys/dev/tty/legacy_tiocsti` state. Landlock ABI 3 does not mediate that

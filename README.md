@@ -82,7 +82,9 @@ Landlock ABI 3, defaults to the Quarter home, reconstructs PATH from Quarter
 and reviewed system locations, and fails closed unless the complete policy is
 enforced. Invocation-local `--grant-path /absolute/path:ro|rw` options admit
 data without making that path executable; `--workdir` selects the initial
-directory and must be covered by a grant when it is outside the Quarter home.
+directory. An external path requires a data grant, except that `--home-view`
+can map an existing passwd-home path to the same relative directory inside the
+Quarter home; a missing Quarter counterpart fails before the mount.
 Inspect the complete policy first with
 `quarters --json env NAME --confinement filesystem`. macOS remains unsupported;
 Seatbelt and App Sandbox are not portable CLI foundations. The prebuilt macOS

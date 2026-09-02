@@ -32,6 +32,9 @@ compatibility notes will be called out here.
   enforcement, replace the process through `execveat(AT_EMPTY_PATH)`, report
   non-disabled or unreadable legacy TIOCSTI state as an explicit limitation,
   and reject explicit grants that overlap any built-in policy root.
+- Disclose that descriptor-bound interpreter scripts can observe `/dev/fd` as
+  their source path and inherit one readless `O_PATH` handle required by the
+  kernel retry.
 - Map a passwd-home `--workdir` through home view only when its Quarter
   counterpart exists; otherwise fail before mounting instead of silently
   changing its meaning.

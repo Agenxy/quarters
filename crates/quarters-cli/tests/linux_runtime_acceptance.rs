@@ -535,6 +535,13 @@ fn verify_policy(policy: &Value, home: &Path) -> Result<ToolCoverage, Box<dyn Er
     assert!(!executable_path.is_empty());
     assert!(executable_path.iter().all(Value::is_string));
     assert!(policy["result"]["environment"].get("QUARTERS_HOST_PATH").is_none());
+    assert!(
+        policy["result"]["confinement"]["limitations"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item
+                .as_str()
+                .is_some_and(|text| text.contains("descriptor-bound interpreter"))))
+    );
     let tiocsti = &policy["result"]["confinement"]["legacy_tiocsti"];
     assert!(matches!(
         tiocsti["state"].as_str(),
@@ -626,15 +633,7 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
     fs::create_dir(&quarter_workdir)?;
     let host_only_workdir = covered.path().join("host-only-workdir");
     fs::create_dir(&host_only_workdir)?;
-    let refused_workdir = quarters(&root)
-        .env("HOME", &host_home)
-        .env_remove("XDG_RUNTIME_DIR")
-        .args(["exec", "combined", "--home-view", "--workdir"])
-        .arg(&host_only_workdir)
-        .args(["--", "/bin/true"])
-        .output()?;
-    assert_eq!(refused_workdir.status.code(), Some(6));
-    assert!(String::from_utf8(refused_workdir.stderr)?.contains("hidden by --home-view"));
+    verify_missing_home_view_workdir_refusal(&root, &host_home, &host_only_workdir)?;
     verify_home_view_host_workdir_mapping(&root, &host_home, &passwd_home, &host_only_workdir)?;
     run(quarters(&root)
         .env("HOME", &host_home)
@@ -703,15 +702,55 @@ fn verify_home_view_host_workdir_mapping(
     host_workdir: &Path,
 ) -> Result<(), Box<dyn Error>> {
     let relative = host_workdir.strip_prefix(passwd_home)?;
-    fs::create_dir_all(root.join("spaces/combined/home").join(relative))?;
-    run(quarters(root)
-        .env("HOME", host_home)
-        .env_remove("XDG_RUNTIME_DIR")
-        .args(["exec", "combined", "--home-view", "--confinement", "filesystem"])
-        .arg("--workdir")
-        .arg(host_workdir)
-        .args(["--", "/bin/sh", "-c", "test \"$PWD\" = \"$1\"", "_"])
-        .arg(host_workdir.canonicalize()?))?;
+    let counterpart = root.join("spaces/combined/home").join(relative);
+    fs::create_dir_all(&counterpart)?;
+    fs::write(counterpart.join("quarter-marker"), b"quarter\n")?;
+    for confined in [false, true] {
+        let mut command = quarters(root);
+        command
+            .env("HOME", host_home)
+            .env_remove("XDG_RUNTIME_DIR")
+            .args(["exec", "combined", "--home-view"]);
+        if confined {
+            command.args(["--confinement", "filesystem"]);
+        }
+        run(command
+            .arg("--workdir")
+            .arg(host_workdir)
+            .args([
+                "--",
+                "/bin/sh",
+                "-c",
+                "test \"$PWD\" = \"$1\" && test -f quarter-marker",
+                "_",
+            ])
+            .arg(host_workdir.canonicalize()?))?;
+    }
+    Ok(())
+}
+
+fn verify_missing_home_view_workdir_refusal(
+    root: &Path,
+    host_home: &Path,
+    host_workdir: &Path,
+) -> Result<(), Box<dyn Error>> {
+    for confined in [false, true] {
+        let mut command = quarters(root);
+        command
+            .env("HOME", host_home)
+            .env_remove("XDG_RUNTIME_DIR")
+            .args(["exec", "combined", "--home-view"]);
+        if confined {
+            command.args(["--confinement", "filesystem"]);
+        }
+        let output = command
+            .arg("--workdir")
+            .arg(host_workdir)
+            .args(["--", "/bin/true"])
+            .output()?;
+        assert_eq!(output.status.code(), Some(6));
+        assert!(String::from_utf8(output.stderr)?.contains("hidden by --home-view"));
+    }
     Ok(())
 }
 
