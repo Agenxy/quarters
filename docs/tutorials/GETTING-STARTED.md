@@ -155,7 +155,45 @@ quarters --json env studio --confinement filesystem
 quarters enter studio --confinement filesystem
 ```
 
-The shell starts in the Quarter home. Its PATH contains Quarter-local tools and
+To work on one host repository without admitting the rest of the host home,
+grant it for that invocation and make it the initial directory:
+
+```sh
+quarters --json env studio --confinement filesystem \
+  --grant-path "$PWD:rw" --workdir "$PWD"
+quarters enter studio --confinement filesystem \
+  --grant-path "$PWD:rw" --workdir "$PWD"
+```
+
+The grant is not saved in the Quarter. It permits data access only; commands
+must still resolve from the Quarter or a reported system executable root.
+
+The JSON plan keeps the working directory separate from executable authority
+and reports terminal-injection host policy explicitly. A representative excerpt
+is:
+
+```json
+{
+  "working_directory": "/srv/project",
+  "quarter_command_root": "/home/user/.quarters/spaces/studio/home",
+  "grants": [
+    {
+      "path": "/srv/project",
+      "access": "data-read-write",
+      "requested_access": "rw",
+      "source": "user-granted",
+      "required": true
+    }
+  ],
+  "legacy_tiocsti": {
+    "probed": true,
+    "state": "disabled"
+  }
+}
+```
+
+The shell starts in the Quarter home unless `--workdir` selects an admitted
+directory. Its PATH contains Quarter-local tools and
 reported fixed system roots, not host-home shims. Ungranted file contents,
 directory listings and mutations are denied, but known-path metadata can remain
 visible; `/proc`, network, IPC and selected terminal devices remain shared.

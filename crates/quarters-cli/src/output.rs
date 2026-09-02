@@ -4,6 +4,7 @@ mod agents;
 mod artifacts;
 mod bundles;
 mod confinement;
+pub(crate) use confinement::print_environment;
 mod doctor;
 mod freeze;
 
@@ -24,7 +25,7 @@ use quarters_core::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 const OUTPUT_SCHEMA_VERSION: u32 = 1;
@@ -412,42 +413,6 @@ pub(crate) fn print_current(current: &str, json_output: bool) -> quarters_core::
         return print_success("current", &json!({ "space": safe_json_text(current, 64) }), true);
     }
     println!("{}", escape_for_human(current));
-    Ok(())
-}
-
-pub(crate) fn print_environment(
-    space: &Space,
-    values: &BTreeMap<String, String>,
-    confinement: Option<&quarters_core::ConfinementPlan>,
-    json_output: bool,
-) -> quarters_core::Result<()> {
-    if json_output {
-        let safe_values: BTreeMap<String, String> = values
-            .iter()
-            .map(|(name, value)| (safe_json_text(name, 128), safe_json_text(value, 512)))
-            .collect();
-        return print_success(
-            "env",
-            &json!({
-                "space": safe_json_text(space.manifest().name.as_str(), 64),
-                "environment": safe_values,
-                "confinement": confinement.map(confinement::value),
-            }),
-            true,
-        );
-    }
-    for (name, value) in values {
-        println!("{}={}", escape_for_human(name), escape_for_human(value));
-    }
-    if let Some(plan) = confinement {
-        println!(
-            "Confinement=filesystem (Landlock ABI {}+, cwd {})",
-            plan.minimum_abi,
-            bounded_path_for_human(&plan.working_directory)
-        );
-        println!("ConfinementGrants={}", plan.grants.len());
-        println!("ConfinementOmittedHostPathEntries={}", plan.omitted_host_path_entries);
-    }
     Ok(())
 }
 

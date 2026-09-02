@@ -2,15 +2,14 @@
 
 mod confinement;
 
-use super::{Capabilities, CapabilityStatus, ConfinementPlan};
+use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
-use nix::mount::{MsFlags, mount};
+use nix::mount::{MntFlags, MsFlags, mount, umount2};
 use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{Gid, Uid, getgroups};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -37,13 +36,8 @@ pub(super) fn platform_capabilities() -> Capabilities {
     }
 }
 
-pub(super) fn platform_confinement_plan(
-    space_home: &Path,
-    effective_home: &Path,
-    runtime: &Path,
-    host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
-    confinement::plan(space_home, effective_home, runtime, host_path)
+pub(super) fn platform_confinement_plan(request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
+    confinement::plan(request)
 }
 
 pub(super) fn platform_prepare_filesystem_confinement(plan: &ConfinementPlan) -> Result<PlatformPreparedConfinement> {
@@ -58,7 +52,7 @@ pub(super) fn platform_resolve_confined_executable(
     program: &OsStr,
     search_path: &OsStr,
     plan: &ConfinementPlan,
-) -> Result<PathBuf> {
+) -> Result<crate::platform::ConfinedExecutable> {
     confinement::resolve_executable(program, search_path, plan)
 }
 
@@ -90,8 +84,10 @@ pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
     &[]
 }
 
-pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
+pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path, runtime: &Path) -> Result<()> {
     let (space_descriptor, host_descriptor) = validate_home_view_paths(space_home, host_home)?;
+    let mount_staging = runtime.join("mount");
+    let staging_descriptor = open_owned_home_directory(&mount_staging, "runtime mount staging")?;
     ensure_no_extra_groups()?;
     let uid = Uid::current().as_raw();
     let gid = Gid::current().as_raw();
@@ -110,19 +106,82 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> R
     unshare(CloneFlags::CLONE_NEWNS).map_err(|error| namespace_error("create a mount namespace", error))?;
     mount::<str, str, str, str>(None, "/", None, MsFlags::MS_REC | MsFlags::MS_PRIVATE, None)
         .map_err(|error| namespace_error("make mounts private", error))?;
-    let space_descriptor_path = descriptor_path(&space_descriptor);
-    let host_descriptor_path = descriptor_path(&host_descriptor);
+    attach_home_view(
+        space_home,
+        &space_descriptor,
+        host_home,
+        &host_descriptor,
+        &staging_descriptor,
+        &mount_staging,
+    )?;
+    std::env::set_current_dir(host_home)
+        .map_err(|error| QuartersError::io("enter the mounted home", host_home, error))?;
+    verify_current_directory(&space_descriptor)
+}
+
+fn attach_home_view(
+    space_home: &Path,
+    space_descriptor: &File,
+    host_home: &Path,
+    host_descriptor: &File,
+    staging_descriptor: &File,
+    mount_staging: &Path,
+) -> Result<()> {
+    verify_path_matches_descriptor(
+        staging_descriptor,
+        mount_staging,
+        "runtime mount staging",
+        "runtime mount staging changed after validation",
+    )?;
     mount(
-        Some(&space_descriptor_path),
-        &host_descriptor_path,
+        Some(space_home),
+        mount_staging,
         None::<&str>,
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
     )
-    .map_err(|error| namespace_error("bind the space home over the passwd home", error))?;
-    std::env::set_current_dir(host_home)
-        .map_err(|error| QuartersError::io("enter the mounted home", host_home, error))?;
-    verify_current_directory(&space_descriptor)
+    .map_err(|error| namespace_error("stage the space-home mount tree", error))?;
+    let mounted = open_owned_home_directory(mount_staging, "mounted space-home staging")?;
+    verify_descriptors_match(
+        space_descriptor,
+        &mounted,
+        "the staged home view does not match the space home",
+    )?;
+    verify_path_matches_descriptor(
+        host_descriptor,
+        host_home,
+        "account",
+        "account home changed after validation",
+    )?;
+    mount(
+        Some(mount_staging),
+        host_home,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        None::<&str>,
+    )
+    .map_err(|error| namespace_error("attach the space home over the passwd home", error))?;
+    drop(mounted);
+    umount2(mount_staging, MntFlags::MNT_DETACH)
+        .map_err(|error| namespace_error("detach the home-view staging mount", error))
+}
+
+fn verify_path_matches_descriptor(descriptor: &File, path: &Path, label: &str, message: &str) -> Result<()> {
+    let current = open_owned_home_directory(path, label)?;
+    verify_descriptors_match(descriptor, &current, message)
+}
+
+fn verify_descriptors_match(expected: &File, actual: &File, message: &str) -> Result<()> {
+    let expected = expected
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect expected home-view directory", Path::new("."), error))?;
+    let actual = actual
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect actual home-view directory", Path::new("."), error))?;
+    if expected.dev() == actual.dev() && expected.ino() == actual.ino() {
+        return Ok(());
+    }
+    Err(QuartersError::new(ErrorKind::CorruptState, message))
 }
 
 fn verify_current_directory(space_descriptor: &File) -> Result<()> {
@@ -233,10 +292,6 @@ fn open_owned_home_directory(path: &Path, label: &str) -> Result<File> {
         ErrorKind::CorruptState,
         format!("{label} home is not a current-user directory"),
     ))
-}
-
-fn descriptor_path(file: &File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
 
 fn write_namespace_map(path: &Path, contents: String) -> Result<()> {

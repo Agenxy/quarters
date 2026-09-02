@@ -1,6 +1,6 @@
 //! macOS profile backend.
 
-use super::{Capabilities, CapabilityStatus, ConfinementPlan, unsupported_home_view};
+use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest, unsupported_home_view};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -63,16 +63,11 @@ pub(super) fn platform_derived_cache_directories() -> &'static [&'static str] {
     &["Library/Caches"]
 }
 
-pub(super) fn platform_enter_home_view(_space_home: &Path, _host_home: &Path) -> Result<()> {
+pub(super) fn platform_enter_home_view(_space_home: &Path, _host_home: &Path, _runtime: &Path) -> Result<()> {
     Err(unsupported_home_view())
 }
 
-pub(super) fn platform_confinement_plan(
-    _space_home: &Path,
-    _effective_home: &Path,
-    _runtime: &Path,
-    _host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
+pub(super) fn platform_confinement_plan(_request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
     Err(unsupported_confinement())
 }
 
@@ -88,7 +83,7 @@ pub(super) fn platform_resolve_confined_executable(
     _program: &std::ffi::OsStr,
     _search_path: &std::ffi::OsStr,
     _plan: &ConfinementPlan,
-) -> Result<PathBuf> {
+) -> Result<crate::platform::ConfinedExecutable> {
     Err(unsupported_confinement())
 }
 

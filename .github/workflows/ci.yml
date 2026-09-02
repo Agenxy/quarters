@@ -38,6 +38,22 @@ jobs:
         env:
           QUARTERS_REQUIRE_LANDLOCK: ${{ runner.os == 'Linux' && '1' || '' }}
         run: make check
+      - name: Exercise the Linux home-view and confinement composition
+        if: runner.os == 'Linux'
+        env:
+          QUARTERS_REQUIRE_HOME_VIEW: "1"
+          QUARTERS_REQUIRE_LANDLOCK: "1"
+        run: |
+          test_name="combined_home_view_and_landlock_work_with_a_store_below_passwd_home"
+          cargo_bin="$(command -v cargo)"
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          cargo test --locked --package quarters --test linux_runtime_acceptance -- --list \
+            | grep -Fqx "${test_name}: test"
+          sudo /usr/bin/setpriv --reuid "${runner_uid}" --regid "${runner_gid}" --clear-groups -- \
+            /usr/bin/env HOME="${HOME}" PATH="${PATH}" QUARTERS_REQUIRE_HOME_VIEW=1 QUARTERS_REQUIRE_LANDLOCK=1 \
+            "${cargo_bin}" test --locked --package quarters --test linux_runtime_acceptance \
+            "${test_name}" -- --exact
       - name: Build release binary
         run: cargo build --locked --workspace --release
       - name: Smoke-test command
@@ -55,6 +71,24 @@ jobs:
         run: cargo install --locked cargo-audit --version 0.22.2
       - name: Audit locked dependencies
         run: cargo audit --deny warnings
+
+  linux-default-userns:
+    name: Linux default user-namespace policy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Prove home view fails closed under distribution policy
+        env:
+          QUARTERS_REQUIRE_HOME_VIEW_UNAVAILABLE: "1"
+        run: |
+          test_name="home_view_mounts_space_state_and_disables_host_escape"
+          cargo test --locked --package quarters --test linux_runtime_acceptance -- --list \
+            | grep -Fqx "${test_name}: test"
+          cargo test --locked --package quarters --test linux_runtime_acceptance \
+            "${test_name}" -- --exact
 
   linux-musl:
     name: Linux x86_64 musl

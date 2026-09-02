@@ -95,10 +95,16 @@ policy.
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Requested Linux confinement silently degrades | ABI-3 hard requirement, `no_new_privs`, `FullyEnforced` check and required hosted-kernel gate |
 | Confined child reads or mutates host/store content | Fixed descriptor-anchored allowlist; exact Quarter home/runtime are writable while ungranted content reads, directory enumeration and mutation are denied |
+| User grant expands confinement unexpectedly | Invocation-local absolute path plus explicit `ro`/`rw`; canonical data-only rule, distinct bounded roots, JSON disclosure, validated device/inode match on the opened rule anchor and overlap rejection for store/runtime/current and request executables/executable-root/passwd credential/home-view roots |
+| Granted workspace supplies an executable | User grants omit Landlock execute rights, cannot overlap broader executable grants, and executable resolution uses the separate Quarter command root plus reviewed system roots rather than the selected workdir |
+| Executable changes between policy review and process replacement | Quarters verifies and holds an `O_PATH` descriptor, then uses descriptor-bound execution after Landlock is enforced; interpreter fallback retains the same reviewed descriptor |
+| External confined working directory is ambient | `--workdir` is canonicalized and must lie below the Quarter home, an explicit directory data grant, or a passwd-home path whose same relative directory is verified inside the Quarter home before `--home-view` mounts it |
 | Confinement is mistaken for invisibility | Policy JSON and docs state that known-path metadata, `stat`, `readlink`, existence checks, `O_PATH` and path traversal alone remain observable |
-| Confinement launcher leaks store or host handles | Parent retains the cooperative lease; policy anchors are close-on-exec; launcher is single-threaded and immediately execs after restriction; inherited caller descriptors remain an explicit limitation |
+| Confinement launcher leaks store or host handles | Parent retains the cooperative lease; policy anchors are close-on-exec; launcher is single-threaded and immediately execs after restriction; inherited caller descriptors remain an explicit limitation; descriptor-bound interpreter scripts intentionally inherit one readless `O_PATH` handle and can observe `/dev/fd` as their source path |
 | Host PATH bypasses the policy | Confined PATH is reconstructed from Quarter-local bins and entries whose canonical directories fall beneath fixed executable grants; omitted host entries are counted |
 | Namespace setup affecting caller | Dedicated internal child performs Linux namespace calls |
+| Home-view source or target changes during setup | Both owned directories remain open; a private runtime staging mount is verified against the source descriptor; the target pathname is revalidated immediately before its private-namespace attach; the resulting home view is verified and staging is detached before process replacement. A same-UID process able to rename the passwd home's parent can still race the target between revalidation and attach; this is outside the protection boundary and cannot propagate beyond the private namespace |
+| Terminal injection is mistaken for filesystem mediation | Policy output reports `dev.tty.legacy_tiocsti`; any state not proven disabled is repeated in the limitations array, and Landlock ABI 3 is not claimed to mediate terminal ioctls |
 | Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
 | Secret diagnostics | No state content reads; explicit inherited values render as redacted |
 | MCP lifecycle confusion | Exact 2026/2025 families; cross-family methods and version metadata fail closed |
@@ -118,6 +124,7 @@ policy.
 - separating network, process, device or IPC namespaces
 - virtualizing macOS Keychain, TCC, app containers or Secure Enclave
 - preserving ordinary `sudo` inside Linux `--home-view`
+- treating Linux `--home-view` as an irreversible mount or security boundary
 - discovering detached descendants or same-user servers after their Quarters supervisor exits
 - secure deletion from snapshots, backups or recovery media
 - crash-consistent live snapshot or export
@@ -130,6 +137,7 @@ policy.
   were quiescent
 - treating workspace directories or a stable space ID as containment or authorization
 - claiming network, IPC, device, process or credential isolation from Linux filesystem confinement
+- treating a user-granted path as inspected, trusted, or executable authority
 - hiding known-path metadata or revoking file descriptors opened before Landlock enforcement
 - treating a private SSH agent as protection from another process with the same UID
 - treating host-fork preview or provenance as authentication against the same UID
