@@ -107,13 +107,20 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path, runt
     unshare(CloneFlags::CLONE_NEWNS).map_err(|error| namespace_error("create a mount namespace", error))?;
     mount::<str, str, str, str>(None, "/", None, MsFlags::MS_REC | MsFlags::MS_PRIVATE, None)
         .map_err(|error| namespace_error("make mounts private", error))?;
-    attach_home_view(&space_descriptor, &host_descriptor, &staging_descriptor, &mount_staging)?;
+    attach_home_view(
+        space_home,
+        &space_descriptor,
+        &host_descriptor,
+        &staging_descriptor,
+        &mount_staging,
+    )?;
     std::env::set_current_dir(host_home)
         .map_err(|error| QuartersError::io("enter the mounted home", host_home, error))?;
     verify_current_directory(&space_descriptor)
 }
 
 fn attach_home_view(
+    space_home: &Path,
     space_descriptor: &File,
     host_descriptor: &File,
     staging_descriptor: &File,
@@ -124,9 +131,8 @@ fn attach_home_view(
         mount_staging,
         "runtime mount staging changed after validation",
     )?;
-    let space_descriptor_path = descriptor_path(space_descriptor);
     mount(
-        Some(&space_descriptor_path),
+        Some(space_home),
         mount_staging,
         None::<&str>,
         MsFlags::MS_BIND | MsFlags::MS_REC,
@@ -180,12 +186,6 @@ fn verify_current_directory(space_descriptor: &File) -> Result<()> {
         ErrorKind::CorruptState,
         "the mounted current directory does not match the requested space home",
     ))
-}
-
-fn descriptor_path(file: &File) -> PathBuf {
-    use std::os::fd::AsRawFd;
-
-    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
 
 fn user_namespace_status() -> CapabilityStatus {
