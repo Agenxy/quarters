@@ -106,10 +106,10 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> R
     mount::<str, str, str, str>(None, "/", None, MsFlags::MS_REC | MsFlags::MS_PRIVATE, None)
         .map_err(|error| namespace_error("make mounts private", error))?;
     let space_descriptor_path = descriptor_path(&space_descriptor);
-    let host_descriptor_path = descriptor_path(&host_descriptor);
+    verify_directory_identity(host_home, &host_descriptor)?;
     mount(
         Some(&space_descriptor_path),
-        &host_descriptor_path,
+        host_home,
         None::<&str>,
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
@@ -118,6 +118,21 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> R
     std::env::set_current_dir(host_home)
         .map_err(|error| QuartersError::io("enter the mounted home", host_home, error))?;
     verify_current_directory(&space_descriptor)
+}
+
+fn verify_directory_identity(path: &Path, descriptor: &File) -> Result<()> {
+    let expected = descriptor
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect the account home descriptor", path, error))?;
+    let actual = fs::symlink_metadata(path)
+        .map_err(|error| QuartersError::io("revalidate the account home mount target", path, error))?;
+    if actual.is_dir() && expected.dev() == actual.dev() && expected.ino() == actual.ino() {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::CorruptState,
+        "the account home mount target changed after validation",
+    ))
 }
 
 fn verify_current_directory(space_descriptor: &File) -> Result<()> {
