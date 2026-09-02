@@ -219,8 +219,6 @@ pub(crate) struct StoreLayoutView {
     pub(crate) marker: String,
     /// Observed category families.
     pub(crate) category_entries: Vec<String>,
-    /// Whether an active migration marker exists.
-    pub(crate) migration_marker: bool,
     /// Presentation-safe reserved staging identifiers.
     pub(crate) staging_entries: Vec<String>,
     /// Lower bound on all observed reserved staging entries.
@@ -246,7 +244,6 @@ impl From<quarters_core::StoreLayoutDiagnosis> for StoreLayoutView {
             interrupted_publication: diagnosis.interrupted_publication,
             marker: diagnosis.marker,
             category_entries: diagnosis.category_entries,
-            migration_marker: diagnosis.migration_marker,
             staging_entries: diagnosis.staging_entries,
             staging_entries_at_least: diagnosis.staging_entries_at_least,
             staging_error_kind: diagnosis.staging_error_kind,

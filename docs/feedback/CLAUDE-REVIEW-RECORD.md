@@ -922,3 +922,57 @@ The managed Codex deep security scan remains unavailable because this host
 session exposes an unmanaged/disabled filesystem permission profile, so no
 deep-scan result is claimed and pull request 8 remains unmerged. Dibs was known
 to be unavailable during this phase and was not treated as an acceptance gate.
+
+## Alpha 6 storage-contract cleanup, 2026-09-01
+
+Claude Code used Claude Opus at maximum effort before implementation. The
+read-only review of clean checkpoint `1f3cf28` confirmed that the unreleased
+`.quarters-store-migration.json` sidecar was only read: no command created,
+cleared or recovered it. A same-UID process could therefore plant a permanent
+store-wide denial while the architecture simultaneously stated that no active
+migration state existed. The review accepted removal with two required
+documentation corrections: any future physical migration must publish a newer
+authoritative root-marker schema before changing a category directory, and the
+removed doctor/MCP field must be described as unreleased rather than as a
+shipped JSON-contract break. It returned:
+
+> VERDICT: ACCEPT
+
+The implementation at `6c4b640` removed the runtime refusal, diagnosis state
+and doctor/MCP field while retaining visible-only writers, dotted read-only
+inspection, dual-layout detection, strict marker handling, bounded staging
+diagnosis and the management-held writable-layout token. Tests prove the
+retired filename is inert and preserved, cannot make a dotted store writable,
+and cannot outrank dual-layout failure. CLI acceptance proves ordinary doctor
+and creation continue without deleting the file. MCP acceptance now validates
+successful and failed `quarters_doctor` structured output against its
+advertised closed schema and proves that schema omits `migration_marker`.
+
+An exact-head Opus review re-derived the error precedence, unlink reachability,
+schema references, test non-vacuity, released-tag history and every retained
+`SpaceActive` exit-code path. It returned `VERDICT: ACCEPT` with nonblocking
+coverage and prose observations. Checkpoint `b6da2a3` then extended the doctor
+schema proof to both official protocol families, 2026-07-28 and 2025-11-25,
+drove the core preservation test through `ensure_layout` and staging
+reclamation, and repaired the prose. A second exact-head Opus review reran the
+gates, confirmed every requested correction and returned:
+
+> VERDICT: ACCEPT
+
+Final evidence on the accepted source checkpoint `b6da2a3`:
+
+- local `make check`: Bun launcher install/typecheck/tests/audit, formatting,
+  host Clippy, all unit and acceptance suites, structural ceilings and
+  warning-free rustdoc pass
+- dependency advisories, bans, licences and sources: pass
+- `x86_64-unknown-linux-musl` workspace, all-target, all-feature Clippy with
+  explicit `-D warnings`: pass
+- hosted push run `33591513238` and pull-request run `33591518639`: all six
+  jobs pass on the exact source checkpoint, including macOS, Ubuntu, static
+  musl, default-policy refusal, RustSec and dependency policy
+- `git diff --check`: pass
+
+The managed Codex deep security scan remains unavailable under this host
+session's unmanaged/disabled filesystem permission profile. No deep-scan result
+is claimed. Pull request 9 remains unmerged and stacked on the likewise
+unmerged pull request 8.
