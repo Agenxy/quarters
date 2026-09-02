@@ -636,12 +636,15 @@ fn combined_home_view_and_landlock_work_with_a_store_below_passwd_home() -> Resu
         .env_remove("XDG_RUNTIME_DIR")
         .args(["--json", "doctor"]))?;
     let report: Value = serde_json::from_slice(&doctor.stdout)?;
-    let available = report["result"]["platform"]["confinement"]["available"] == true
-        && report["result"]["platform"]["home_view"]["available"] == true;
-    if !available {
-        if home_view_required() || landlock_required() {
-            return Err("required combined home view and confinement capabilities are unavailable".into());
-        }
+    let confinement_available = report["result"]["platform"]["confinement"]["available"] == true;
+    let home_view_available = report["result"]["platform"]["home_view"]["available"] == true;
+    if !confinement_available && (landlock_required() || home_view_required()) {
+        return Err("required filesystem confinement capability is unavailable".into());
+    }
+    if !home_view_available && home_view_required() {
+        return Err("required home-view capability is unavailable".into());
+    }
+    if !confinement_available || !home_view_available {
         return Ok(());
     }
     let quarter_workdir = root.join("spaces/combined/home/project");
