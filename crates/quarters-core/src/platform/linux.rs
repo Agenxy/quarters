@@ -53,7 +53,7 @@ pub(super) fn platform_resolve_confined_executable(
     program: &OsStr,
     search_path: &OsStr,
     plan: &ConfinementPlan,
-) -> Result<PathBuf> {
+) -> Result<crate::platform::ConfinedExecutable> {
     confinement::resolve_executable(program, search_path, plan)
 }
 

@@ -456,7 +456,7 @@ pub(crate) struct ProfileArgs {
     #[arg(long)]
     pub(crate) home_view: bool,
 
-    /// Enforce the named native filesystem policy; starts in the Quarter home.
+    /// Enforce the named native filesystem policy; defaults to the Quarter home.
     #[arg(long, value_enum)]
     pub(crate) confinement: Option<ConfinementArg>,
 

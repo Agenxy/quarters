@@ -83,7 +83,7 @@ pub(super) fn platform_resolve_confined_executable(
     _program: &std::ffi::OsStr,
     _search_path: &std::ffi::OsStr,
     _plan: &ConfinementPlan,
-) -> Result<PathBuf> {
+) -> Result<crate::platform::ConfinedExecutable> {
     Err(unsupported_confinement())
 }
 

@@ -1,13 +1,13 @@
 //! Policy path discovery, reporting and executable resolution.
 
-use crate::platform::{ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess};
+use crate::platform::{ConfinedExecutable, ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess};
 use crate::{ErrorKind, QuartersError, Result};
 use nix::unistd::Uid;
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::fs::OpenOptions;
+use std::fs::{self, File};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 
@@ -87,6 +87,8 @@ pub(super) fn build_plan(request: &ConfinementRequest<'_>) -> Result<Confinement
         .map_err(|error| QuartersError::io("resolve confined Quarter command root", request.effective_home, error))?;
     let executable_path = reconstructed_path(request.effective_home, request.runtime, &grants, request.host_path);
     let omitted_host_path_entries = omitted_path_count(request.host_path, &executable_path);
+    let legacy_tiocsti = legacy_tiocsti_status();
+    let limitations = limitations(!request.user_grants.is_empty(), &legacy_tiocsti);
     Ok(ConfinementPlan {
         mode: "filesystem".to_owned(),
         minimum_abi: 3,
@@ -96,12 +98,16 @@ pub(super) fn build_plan(request: &ConfinementRequest<'_>) -> Result<Confinement
         omitted_paths: omitted,
         executable_path,
         omitted_host_path_entries,
-        legacy_tiocsti: legacy_tiocsti_status(),
-        limitations: limitations(!request.user_grants.is_empty()),
+        legacy_tiocsti,
+        limitations,
     })
 }
 
-pub(super) fn resolve_executable(program: &OsStr, search_path: &OsStr, plan: &ConfinementPlan) -> Result<PathBuf> {
+pub(super) fn resolve_executable(
+    program: &OsStr,
+    search_path: &OsStr,
+    plan: &ConfinementPlan,
+) -> Result<ConfinedExecutable> {
     let path = Path::new(program);
     let candidate = if path.is_absolute() {
         path.to_path_buf()
@@ -121,18 +127,46 @@ pub(super) fn resolve_executable(program: &OsStr, search_path: &OsStr, plan: &Co
         || plan.grants.iter().any(|grant| {
             matches!(grant.access.as_str(), "read-execute" | "read-write") && canonical.starts_with(&grant.path)
         });
-    let executable =
-        fs::metadata(&canonical).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
-    if allowed && executable {
-        return Ok(canonical);
+    let metadata = fs::metadata(&canonical)
+        .map_err(|error| QuartersError::io("inspect confined executable", &canonical, error))?;
+    if !allowed || !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "the requested executable is outside the confined executable roots",
+        )
+        .with_hint(
+            "install it inside the Quarter or use a system executable reported by 'quarters env --confinement filesystem'",
+        ));
+    }
+    let descriptor = open_stable_executable(&canonical, &metadata)?;
+    Ok(ConfinedExecutable {
+        path: canonical,
+        descriptor,
+    })
+}
+
+fn open_stable_executable(path: &Path, expected: &fs::Metadata) -> Result<File> {
+    use nix::fcntl::{OFlag, open};
+    use nix::sys::stat::Mode;
+
+    let descriptor = open(
+        path,
+        OFlag::O_PATH | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|error| QuartersError::io("open confined executable", path, error.into()))?;
+    let descriptor = File::from(descriptor);
+    let observed = descriptor
+        .metadata()
+        .map_err(|error| QuartersError::io("inspect opened confined executable", path, error))?;
+    if observed.dev() == expected.dev() && observed.ino() == expected.ino() && observed.is_file() {
+        return Ok(descriptor);
     }
     Err(QuartersError::new(
-        ErrorKind::Unsupported,
-        "the requested executable is outside the confined executable roots",
+        ErrorKind::System,
+        "the confined executable changed while it was being opened",
     )
-    .with_hint(
-        "install it inside the Quarter or use a system executable reported by 'quarters env --confinement filesystem'",
-    ))
+    .with_hint("retry after concurrent changes to the executable have stopped"))
 }
 
 fn validate_private_directory(path: &Path, label: &str) -> Result<()> {
@@ -270,7 +304,7 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
         }
         user_paths.insert(canonical.clone());
         reject_reserved_grant(&canonical, &reserved)?;
-        reject_executable_root_grant(&canonical, grants)?;
+        reject_built_in_grant_overlap(&canonical, grants)?;
         let metadata = fs::metadata(&canonical)
             .map_err(|error| QuartersError::io("inspect user-granted path", &canonical, error))?;
         let access = user_access_class(requested.access, &metadata, &canonical)?;
@@ -286,18 +320,15 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
     Ok(())
 }
 
-fn reject_executable_root_grant(path: &Path, grants: &[ConfinementGrant]) -> Result<()> {
-    if grants
-        .iter()
-        .filter(|grant| grant.access == "read-execute")
-        .all(|grant| !paths_overlap(path, &grant.path))
-    {
+fn reject_built_in_grant_overlap(path: &Path, grants: &[ConfinementGrant]) -> Result<()> {
+    if grants.iter().all(|grant| !paths_overlap(path, &grant.path)) {
         return Ok(());
     }
-    Err(
-        QuartersError::new(ErrorKind::Unsupported, "user grant overlaps a confined executable root")
-            .with_hint("select a data path outside the executable roots reported by the confinement plan"),
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        "user grant overlaps a built-in confinement root",
     )
+    .with_hint("select a distinct data path outside every root reported by the confinement plan"))
 }
 
 fn user_access_class(access: UserGrantAccess, metadata: &fs::Metadata, path: &Path) -> Result<&'static str> {
@@ -520,7 +551,7 @@ fn resolve_name(program: &OsStr, search_path: &OsStr) -> Result<PathBuf> {
     .with_hint("install it inside the Quarter or choose a system command"))
 }
 
-fn limitations(has_user_grants: bool) -> Vec<String> {
+fn limitations(has_user_grants: bool, legacy_tiocsti: &crate::platform::LegacyTiocstiStatus) -> Vec<String> {
     let mut items = vec![
         "known-path metadata, stat, readlink, access checks and O_PATH remain observable",
         "the policy grants /proc for compatibility; process visibility also depends on kernel ptrace policy",
@@ -535,7 +566,12 @@ fn limitations(has_user_grants: bool) -> Vec<String> {
             "user-granted host paths are exposed to the confined process tree; Quarters does not inspect their content",
         );
         items.push(
-            "Landlock combines overlapping rules by union; Quarters rejects duplicate paths and executable-root overlap but nested data grants still combine their data access",
+            "Landlock combines overlapping rules by union; Quarters rejects overlap between explicit grants and all other explicit or built-in roots",
+        );
+    }
+    if legacy_tiocsti.state != "disabled" {
+        items.push(
+            "legacy TIOCSTI terminal injection is not proven disabled; a shared controlling terminal can cross the filesystem boundary",
         );
     }
     items.into_iter().map(str::to_owned).collect()
@@ -543,7 +579,10 @@ fn limitations(has_user_grants: bool) -> Vec<String> {
 
 fn legacy_tiocsti_status() -> crate::platform::LegacyTiocstiStatus {
     let path = Path::new("/proc/sys/dev/tty/legacy_tiocsti");
-    let value = fs::read_to_string(path);
+    legacy_tiocsti_status_from(&fs::read_to_string(path))
+}
+
+fn legacy_tiocsti_status_from(value: &std::io::Result<String>) -> crate::platform::LegacyTiocstiStatus {
     match value.as_deref().map(str::trim) {
         Ok("0") => crate::platform::LegacyTiocstiStatus {
             probed: true,
@@ -562,7 +601,7 @@ fn legacy_tiocsti_status() -> crate::platform::LegacyTiocstiStatus {
         },
         Err(error) => crate::platform::LegacyTiocstiStatus {
             probed: false,
-            state: "unavailable".to_owned(),
+            state: "unreadable".to_owned(),
             detail: format!("dev.tty.legacy_tiocsti could not be read: {error}"),
         },
     }
@@ -570,7 +609,10 @@ fn legacy_tiocsti_status() -> crate::platform::LegacyTiocstiStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfinementGrant, omitted_path_count, overlaps_executable_root, terminal_is_unavailable};
+    use super::{
+        ConfinementGrant, legacy_tiocsti_status_from, limitations, omitted_path_count, overlaps_executable_root,
+        terminal_is_unavailable,
+    };
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
 
@@ -620,5 +662,18 @@ mod tests {
         for code in [nix::libc::EACCES, nix::libc::EMFILE, nix::libc::ENOMEM] {
             assert!(!terminal_is_unavailable(&std::io::Error::from_raw_os_error(code)));
         }
+    }
+
+    #[test]
+    fn unreadable_tiocsti_policy_is_explicitly_unsafe() {
+        let result = Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+        let status = legacy_tiocsti_status_from(&result);
+        assert!(!status.probed);
+        assert_eq!(status.state, "unreadable");
+        assert!(
+            limitations(false, &status)
+                .iter()
+                .any(|item| item.contains("not proven disabled"))
+        );
     }
 }

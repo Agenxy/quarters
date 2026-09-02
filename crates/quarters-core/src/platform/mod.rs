@@ -12,7 +12,7 @@ use nix::unistd::Uid;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs::{self, DirBuilder};
+use std::fs::{self, DirBuilder, File};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
@@ -51,7 +51,7 @@ pub struct CapabilityStatus {
 pub struct LegacyTiocstiStatus {
     /// Whether the sysctl was read and interpreted.
     pub probed: bool,
-    /// Stable state: `disabled`, `enabled`, `unknown` or `unavailable`.
+    /// Stable state: `disabled`, `enabled`, `unknown` or `unreadable`.
     pub state: String,
     /// Human-readable evidence or limitation.
     pub detail: String,
@@ -74,6 +74,21 @@ pub struct ConfinementGrant {
     /// Inode recorded when this exact anchor was validated.
     #[serde(skip)]
     pub(crate) anchor_inode: u64,
+}
+
+/// An executable held stable between confinement review and process replacement.
+#[derive(Debug)]
+pub struct ConfinedExecutable {
+    path: PathBuf,
+    descriptor: File,
+}
+
+impl ConfinedExecutable {
+    /// Consume the stable executable into its diagnostic path and descriptor.
+    #[must_use]
+    pub fn into_parts(self) -> (PathBuf, File) {
+        (self.path, self.descriptor)
+    }
 }
 
 /// Access requested for one invocation-local host data grant.
@@ -421,7 +436,7 @@ pub fn resolve_confined_executable(
     program: &std::ffi::OsStr,
     search_path: &std::ffi::OsStr,
     plan: &ConfinementPlan,
-) -> Result<PathBuf> {
+) -> Result<ConfinedExecutable> {
     platform_resolve_confined_executable(program, search_path, plan)
 }
 

@@ -5,9 +5,13 @@ use quarters_core::{
     ConfinementRequest, EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, Result, Space, Store,
     UserConfinementGrant,
 };
+#[cfg(target_os = "linux")]
+use std::ffi::CString;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+#[cfg(target_os = "linux")]
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -338,23 +342,109 @@ pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
         std::env::set_current_dir(&workdir)
             .map_err(|error| QuartersError::io("enter requested working directory", &workdir, error))?;
     }
-    let program = if let Some(plan) = confinement_plan.as_ref() {
+    let confined_executable = if let Some(plan) = confinement_plan.as_ref() {
         let mapped = map_home_view_program(program, request.space_home, effective_home);
         let path = std::env::var_os("PATH")
             .ok_or_else(|| QuartersError::new(ErrorKind::CorruptState, "confined launcher has no executable PATH"))?;
-        platform::resolve_confined_executable(&mapped, &path, plan)?
+        Some(platform::resolve_confined_executable(&mapped, &path, plan)?)
     } else {
-        PathBuf::from(program)
+        None
     };
     if let Some(prepared) = prepared_confinement {
         platform::enter_filesystem_confinement(prepared)?;
     }
+    if let Some(executable) = confined_executable {
+        let (program, descriptor) = executable.into_parts();
+        return exec_confined_descriptor(&descriptor, &program, arguments);
+    }
+    let program = PathBuf::from(program);
     let error = std::os::unix::process::CommandExt::exec(Command::new(&program).args(arguments));
     Err(process_error(
         "replace the namespace launcher",
         program.as_os_str(),
         error,
     ))
+}
+
+#[cfg(target_os = "linux")]
+fn exec_confined_descriptor(descriptor: &File, program: &Path, arguments: &[OsString]) -> Result<i32> {
+    use nix::errno::Errno;
+    use nix::fcntl::{AtFlags, FcntlArg, FdFlag, fcntl};
+    use nix::unistd::execveat;
+
+    let argument_storage = std::iter::once(program.as_os_str())
+        .chain(arguments.iter().map(OsString::as_os_str))
+        .map(execution_c_string)
+        .collect::<Result<Vec<_>>>()?;
+    let argument_refs = argument_storage.iter().map(CString::as_c_str).collect::<Vec<_>>();
+    let environment_storage = std::env::vars_os()
+        .map(|(name, value)| {
+            let mut entry = name.into_vec();
+            entry.push(b'=');
+            entry.extend(value.into_vec());
+            CString::new(entry).map_err(|error| {
+                QuartersError::new(
+                    ErrorKind::CorruptState,
+                    "process environment contains an invalid NUL byte",
+                )
+                .with_source(error)
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let environment_refs = environment_storage.iter().map(CString::as_c_str).collect::<Vec<_>>();
+    match execveat(
+        descriptor,
+        c"",
+        &argument_refs,
+        &environment_refs,
+        AtFlags::AT_EMPTY_PATH,
+    ) {
+        Ok(never) => match never {},
+        Err(Errno::ENOENT) => {
+            fcntl(descriptor, FcntlArg::F_SETFD(FdFlag::empty())).map_err(|error| {
+                QuartersError::new(ErrorKind::System, "could not prepare a script executable descriptor")
+                    .with_source(error)
+            })?;
+            match execveat(
+                descriptor,
+                c"",
+                &argument_refs,
+                &environment_refs,
+                AtFlags::AT_EMPTY_PATH,
+            ) {
+                Ok(never) => match never {},
+                Err(error) => Err(executable_descriptor_error(program, error)),
+            }
+        }
+        Err(error) => Err(executable_descriptor_error(program, error)),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn exec_confined_descriptor(_descriptor: &File, program: &Path, _arguments: &[OsString]) -> Result<i32> {
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        format!(
+            "descriptor-bound confinement execution is unavailable for {}",
+            program.display()
+        ),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn execution_c_string(value: &OsStr) -> Result<CString> {
+    CString::new(value.as_bytes()).map_err(|error| {
+        QuartersError::new(ErrorKind::InvalidInput, "command arguments contain an invalid NUL byte").with_source(error)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn executable_descriptor_error(program: &Path, error: nix::errno::Errno) -> QuartersError {
+    process_error(
+        "replace the namespace launcher through its stable descriptor",
+        program.as_os_str(),
+        std::io::Error::from_raw_os_error(error as i32),
+    )
 }
 
 fn map_home_view_program(program: &OsStr, space_home: &Path, effective_home: &Path) -> OsString {
@@ -412,9 +502,24 @@ fn map_home_view_workdir(path: &Path, space_home: &Path, effective_home: &Path) 
     let space = space_home
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve Quarter home for working directory", space_home, error))?;
-    Ok(canonical
-        .strip_prefix(space)
-        .map_or(canonical.clone(), |relative| effective_home.join(relative)))
+    if let Ok(relative) = canonical.strip_prefix(&space) {
+        return Ok(effective_home.join(relative));
+    }
+    let host = effective_home
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve passwd home for working directory", effective_home, error))?;
+    let Ok(relative) = canonical.strip_prefix(&host) else {
+        return Ok(canonical);
+    };
+    let mapped_source = space.join(relative);
+    if mapped_source.is_dir() {
+        return Ok(host.join(relative));
+    }
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        "--workdir is hidden by --home-view and has no Quarter counterpart",
+    )
+    .with_hint("create the directory inside the Quarter home or choose a path outside the passwd home"))
 }
 
 fn required_environment_path(environment: &EnvironmentPlan, name: &str) -> Result<PathBuf> {

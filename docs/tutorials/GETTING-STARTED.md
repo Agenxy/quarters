@@ -192,7 +192,8 @@ is:
 }
 ```
 
-The shell starts in the Quarter home. Its PATH contains Quarter-local tools and
+The shell starts in the Quarter home unless `--workdir` selects an admitted
+directory. Its PATH contains Quarter-local tools and
 reported fixed system roots, not host-home shims. Ungranted file contents,
 directory listings and mutations are denied, but known-path metadata can remain
 visible; `/proc`, network, IPC and selected terminal devices remain shared.

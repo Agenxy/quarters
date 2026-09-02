@@ -3,11 +3,10 @@
 mod paths;
 mod policy;
 
-use super::super::{CapabilityStatus, ConfinementPlan, ConfinementRequest};
+use super::super::{CapabilityStatus, ConfinedExecutable, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, QuartersError, Result};
 use landlock::{ABI, Access, AccessFs, CompatLevel, Compatible, Ruleset, RulesetAttr};
 use std::ffi::OsStr;
-use std::path::PathBuf;
 
 pub(super) struct PreparedConfinement {
     ruleset: landlock::RulesetCreated,
@@ -41,7 +40,11 @@ pub(super) fn restrict_current_thread(prepared: PreparedConfinement) -> Result<(
     policy::enforce(prepared.ruleset)
 }
 
-pub(super) fn resolve_executable(program: &OsStr, search_path: &OsStr, plan: &ConfinementPlan) -> Result<PathBuf> {
+pub(super) fn resolve_executable(
+    program: &OsStr,
+    search_path: &OsStr,
+    plan: &ConfinementPlan,
+) -> Result<ConfinedExecutable> {
     paths::resolve_executable(program, search_path, plan)
 }
 

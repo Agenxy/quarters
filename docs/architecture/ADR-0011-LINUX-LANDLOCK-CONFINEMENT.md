@@ -42,6 +42,14 @@ Unexpected probe failures remain fatal. Landlock opens every admitted rule
 anchor separately and fails closed if any required or optional anchor cannot be
 prepared exactly as reported.
 
+Executable resolution opens the accepted canonical file with `O_PATH`,
+`O_NOFOLLOW` and close-on-exec, verifies the descriptor's device and inode
+against the reviewed metadata, and holds it across Landlock enforcement.
+Process replacement uses `execveat(AT_EMPTY_PATH)`, so libc behavior and a
+same-UID rename cannot substitute a
+different file after review. Linux's interpreter-script case retries only
+after clearing close-on-exec on that same already-validated descriptor.
+
 An invocation may add up to 32 distinct explicit data roots with
 `--grant-path ABSOLUTE_PATH:ro|rw`. These grants are never persisted or read
 from the environment. Canonical grant roots must be non-overlapping and
@@ -50,7 +58,8 @@ narrower access request. Their rules omit executable access, so an executable in
 a granted workspace cannot become a command root. Quarters canonicalizes each
 path, reports the requested access and rejects overlap with its store, runtime,
 running executable, passwd-home SSH/GnuPG roots or a passwd home hidden by
-`--home-view` or a broader executable root. Each anchor's validated device and inode must match the opened
+`--home-view`, and every built-in configuration, compatibility or executable
+root. Each anchor's validated device and inode must match the opened
 Landlock descriptor, so replacement between review and enforcement fails
 closed. `--workdir` is portable process behavior; in confined mode an external
 directory must be covered by one of these data grants.
@@ -60,6 +69,8 @@ The policy report also records the observed
 terminal ioctl, so an enabled legacy setting remains a host-policy limitation,
 not an unreported part of the filesystem claim. JSON reports this as
 `probed` plus the stable `state`, never as generic capability availability.
+An unreadable or non-disabled setting also appears in the explicit limitations
+array because a shared controlling terminal can cross the filesystem boundary.
 
 Inside the domain, `current`, prompt generation, shortcut inspection and
 managed OpenSSH adapters use a no-store route; shortcut mutation still refuses
