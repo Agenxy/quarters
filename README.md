@@ -75,7 +75,9 @@ ordinary `sudo` does not work inside that view. Quarters fails closed instead of
 starting a home view that would silently reduce the account's group authority.
 Before the mount, it copies the current native launcher and the four managed
 OpenSSH links into the private runtime directory that remains reachable after
-the host home is covered.
+the host home is covered. The mount itself uses Linux's descriptor-based
+`open_tree` and `move_mount` API so the reviewed source and target directories
+cannot be exchanged through a pathname race.
 
 Linux also offers experimental, opt-in `--confinement filesystem`. It requires
 Landlock ABI 3, defaults to the Quarter home, reconstructs PATH from Quarter

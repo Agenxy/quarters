@@ -7,10 +7,10 @@ use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use nix::mount::{MsFlags, mount};
 use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{Gid, Uid, getgroups};
+use rustix::mount::{MoveMountFlags, OpenTreeFlags, move_mount, open_tree};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -105,34 +105,30 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path) -> R
     unshare(CloneFlags::CLONE_NEWNS).map_err(|error| namespace_error("create a mount namespace", error))?;
     mount::<str, str, str, str>(None, "/", None, MsFlags::MS_REC | MsFlags::MS_PRIVATE, None)
         .map_err(|error| namespace_error("make mounts private", error))?;
-    let space_descriptor_path = descriptor_path(&space_descriptor);
-    verify_directory_identity(host_home, &host_descriptor)?;
-    mount(
-        Some(&space_descriptor_path),
-        host_home,
-        None::<&str>,
-        MsFlags::MS_BIND | MsFlags::MS_REC,
-        None::<&str>,
-    )
-    .map_err(|error| namespace_error("bind the space home over the passwd home", error))?;
+    attach_home_view(&space_descriptor, &host_descriptor)?;
     std::env::set_current_dir(host_home)
         .map_err(|error| QuartersError::io("enter the mounted home", host_home, error))?;
     verify_current_directory(&space_descriptor)
 }
 
-fn verify_directory_identity(path: &Path, descriptor: &File) -> Result<()> {
-    let expected = descriptor
-        .metadata()
-        .map_err(|error| QuartersError::io("inspect the account home descriptor", path, error))?;
-    let actual = fs::symlink_metadata(path)
-        .map_err(|error| QuartersError::io("revalidate the account home mount target", path, error))?;
-    if actual.is_dir() && expected.dev() == actual.dev() && expected.ino() == actual.ino() {
-        return Ok(());
-    }
-    Err(QuartersError::new(
-        ErrorKind::CorruptState,
-        "the account home mount target changed after validation",
-    ))
+fn attach_home_view(space_descriptor: &File, host_descriptor: &File) -> Result<()> {
+    let tree = open_tree(
+        space_descriptor,
+        "",
+        OpenTreeFlags::OPEN_TREE_CLONE
+            | OpenTreeFlags::OPEN_TREE_CLOEXEC
+            | OpenTreeFlags::AT_EMPTY_PATH
+            | OpenTreeFlags::AT_RECURSIVE,
+    )
+    .map_err(|error| mount_api_error("clone the space-home mount tree", error))?;
+    move_mount(
+        &tree,
+        "",
+        host_descriptor,
+        "",
+        MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH | MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH,
+    )
+    .map_err(|error| mount_api_error("attach the space home over the passwd home", error))
 }
 
 fn verify_current_directory(space_descriptor: &File) -> Result<()> {
@@ -245,15 +241,17 @@ fn open_owned_home_directory(path: &Path, label: &str) -> Result<File> {
     ))
 }
 
-fn descriptor_path(file: &File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
-}
-
 fn write_namespace_map(path: &Path, contents: String) -> Result<()> {
     fs::write(path, contents).map_err(|error| QuartersError::io("write a user-namespace identity map", path, error))
 }
 
 fn namespace_error(operation: &str, source: nix::errno::Errno) -> QuartersError {
+    QuartersError::new(ErrorKind::Unsupported, format!("could not {operation}"))
+        .with_hint("omit --home-view for the portable environment-profile mode")
+        .with_source(source)
+}
+
+fn mount_api_error(operation: &str, source: rustix::io::Errno) -> QuartersError {
     QuartersError::new(ErrorKind::Unsupported, format!("could not {operation}"))
         .with_hint("omit --home-view for the portable environment-profile mode")
         .with_source(source)
