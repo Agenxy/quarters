@@ -75,9 +75,10 @@ ordinary `sudo` does not work inside that view. Quarters fails closed instead of
 starting a home view that would silently reduce the account's group authority.
 Before the mount, it copies the current native launcher and the four managed
 OpenSSH links into the private runtime directory that remains reachable after
-the host home is covered. The mount is staged below that private runtime,
-verified against the reviewed source descriptor, then attached to the opened
-passwd-home target with Linux's descriptor-based `move_mount` API.
+the host home is covered. The mount is staged below that private runtime and
+verified against the reviewed source descriptor. Quarters revalidates the
+passwd-home target, attaches the staged mount inside the private namespace, and
+verifies the resulting home view before it executes the requested program.
 
 Linux also offers experimental, opt-in `--confinement filesystem`. It requires
 Landlock ABI 3, defaults to the Quarter home, reconstructs PATH from Quarter

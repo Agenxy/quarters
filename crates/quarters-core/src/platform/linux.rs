@@ -7,7 +7,6 @@ use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use nix::mount::{MsFlags, mount};
 use nix::sched::{CloneFlags, unshare};
 use nix::unistd::{Gid, Uid, getgroups};
-use rustix::mount::{MoveMountFlags, move_mount};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
@@ -110,6 +109,7 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path, runt
     attach_home_view(
         space_home,
         &space_descriptor,
+        host_home,
         &host_descriptor,
         &staging_descriptor,
         &mount_staging,
@@ -122,13 +122,15 @@ pub(super) fn platform_enter_home_view(space_home: &Path, host_home: &Path, runt
 fn attach_home_view(
     space_home: &Path,
     space_descriptor: &File,
+    host_home: &Path,
     host_descriptor: &File,
     staging_descriptor: &File,
     mount_staging: &Path,
 ) -> Result<()> {
-    verify_current_directory_at(
+    verify_path_matches_descriptor(
         staging_descriptor,
         mount_staging,
+        "runtime mount staging",
         "runtime mount staging changed after validation",
     )?;
     mount(
@@ -145,18 +147,24 @@ fn attach_home_view(
         &mounted,
         "the staged home view does not match the space home",
     )?;
-    move_mount(
-        &mounted,
-        "",
+    verify_path_matches_descriptor(
         host_descriptor,
-        "",
-        MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH | MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH,
+        host_home,
+        "account",
+        "account home changed after validation",
+    )?;
+    mount(
+        Some(mount_staging),
+        host_home,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        None::<&str>,
     )
-    .map_err(|error| mount_api_error("attach the space home over the passwd home", error))
+    .map_err(|error| namespace_error("attach the space home over the passwd home", error))
 }
 
-fn verify_current_directory_at(descriptor: &File, path: &Path, message: &str) -> Result<()> {
-    let current = open_owned_home_directory(path, "runtime mount staging")?;
+fn verify_path_matches_descriptor(descriptor: &File, path: &Path, label: &str, message: &str) -> Result<()> {
+    let current = open_owned_home_directory(path, label)?;
     verify_descriptors_match(descriptor, &current, message)
 }
 
@@ -288,12 +296,6 @@ fn write_namespace_map(path: &Path, contents: String) -> Result<()> {
 }
 
 fn namespace_error(operation: &str, source: nix::errno::Errno) -> QuartersError {
-    QuartersError::new(ErrorKind::Unsupported, format!("could not {operation}"))
-        .with_hint("omit --home-view for the portable environment-profile mode")
-        .with_source(source)
-}
-
-fn mount_api_error(operation: &str, source: rustix::io::Errno) -> QuartersError {
     QuartersError::new(ErrorKind::Unsupported, format!("could not {operation}"))
         .with_hint("omit --home-view for the portable environment-profile mode")
         .with_source(source)
