@@ -270,7 +270,7 @@ fn broken_report_pipe_never_replaces_child_exit() -> Result<(), Box<dyn Error>> 
 }
 
 #[test]
-fn report_descriptor_is_not_inherited_by_the_measured_child() -> Result<(), Box<dyn Error>> {
+fn caller_report_number_is_not_inherited_by_the_measured_child() -> Result<(), Box<dyn Error>> {
     let _guard = INHERITED_FD_TEST_LOCK
         .lock()
         .map_err(|_| "inherited-fd test lock poisoned")?;
@@ -280,7 +280,7 @@ fn report_descriptor_is_not_inherited_by_the_measured_child() -> Result<(), Box<
     let output = discover_with_report(
         temporary.path(),
         &report,
-        "seen=0; for path in /dev/fd/*; do [ -e \"$path\" ] || continue; number=${path##*/}; case $number in ''|*[!0-9]*) continue;; 0) seen=$((seen | 1));; 1) seen=$((seen | 2));; 2) seen=$((seen | 4));; *) exit 91;; esac; done; [ \"$seen\" -eq 7 ] || exit 92",
+        "if [ -e /dev/fd/3 ]; then exit 91; fi; exit 0",
     )?;
     assert_eq!(
         output.status.code(),

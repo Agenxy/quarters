@@ -228,6 +228,28 @@ fn descriptor_system_error(operation: &str, source: nix::errno::Errno) -> Quarte
     QuartersError::new(ErrorKind::System, format!("could not {operation}")).with_source(source)
 }
 
+#[cfg(test)]
+mod common_tests {
+    use super::ReportWriter;
+    use std::error::Error;
+    use std::os::fd::{AsRawFd, IntoRawFd};
+    use std::process::Command;
+
+    #[test]
+    fn reopened_report_sink_is_closed_across_exec() -> Result<(), Box<dyn Error>> {
+        let descriptor = tempfile::tempfile()?.into_raw_fd();
+        let report = ReportWriter::open(descriptor)?;
+        let reopened = report.file.as_raw_fd().to_string();
+        let status = Command::new("/bin/sh")
+            .args(["-c", "if [ -e \"/dev/fd/$REPORT_FD\" ]; then exit 91; fi"])
+            .env("REPORT_FD", reopened)
+            .status()?;
+        assert!(status.success());
+        drop(report);
+        Ok(())
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod macos_tests {
     use super::ReportWriter;
