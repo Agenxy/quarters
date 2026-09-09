@@ -165,7 +165,8 @@ requires `/proc/self/fd`; regular-file position and append mode are restored,
 and the matching `/proc/self/fdinfo` record must expose parseable `pos`, `flags`,
 and `ino` fields. Blocking anonymous pipes are supported; sockets, named FIFOs
 and nonblocking pipes fail explicitly. The report sink is written only after
-the post-scan and is outside the observed delta.
+the post-scan and is outside the observed delta. macOS delegates descriptor
+duplication to `/dev/fd`, including writable named FIFOs the kernel accepts.
 
 The exclusive lease excludes cooperating Quarters launches and lifecycle
 mutations, not detached descendants or direct same-UID writers. Metadata deltas

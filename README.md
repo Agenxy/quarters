@@ -209,7 +209,8 @@ only with `discover --preview`. The descriptor is caller-transferred and closed
 before child execution. On Linux this surface requires `/proc/self/fd` plus
 readable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`; it supports
 regular files and blocking anonymous pipes, and rejects sockets, named FIFOs,
-and nonblocking pipes explicitly.
+and nonblocking pipes explicitly. macOS uses native `/dev/fd` duplication and
+therefore accepts writable named FIFOs when the kernel can duplicate them.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
 the computed environment. Neither starts a child or reads user content stored

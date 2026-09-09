@@ -359,7 +359,8 @@ and parseable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`. Regular
 files and blocking anonymous pipes are supported, while sockets, named FIFOs
 and nonblocking pipes are rejected explicitly. Quarters validates and consumes
 the descriptor before opening store state, so the number cannot alias an
-internal lock.
+internal lock. On macOS, native `/dev/fd` duplication also accepts writable
+named FIFOs when the kernel can duplicate them.
 The JSON contains only counts and semantic classes. Quarters does not open file
 contents, resolve link targets or emit entry paths. `credential-shaped` means a
 disclosed path pattern matched; it is neither content inspection nor a finding

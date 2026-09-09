@@ -22,7 +22,8 @@ compatibility notes will be called out here.
   Quarter or store state, preventing an absent descriptor number from aliasing
   an internal activity lock. Keep the reopened sink close-on-exec, preserve
   regular-file append/position behavior, support blocking anonymous pipes, and
-  reject Linux sockets, named FIFOs and nonblocking pipes explicitly.
+  reject Linux sockets, named FIFOs and nonblocking pipes explicitly. Preserve
+  native `/dev/fd` named-FIFO duplication on macOS and test that contract.
 - Conservatively extend host-fork sensitive-path refusal to nested credential
   shapes shared with discovery, including common agent-state roots and
   descendants of basename- or suffix-matched directories.

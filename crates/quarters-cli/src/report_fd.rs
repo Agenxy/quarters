@@ -71,7 +71,7 @@ fn platform_open(descriptor: i32) -> Result<File> {
     let append = info.flags.contains(OFlag::O_APPEND);
     let anonymous_pipe = link.as_os_str().as_encoded_bytes().starts_with(b"pipe:");
     let named_pipe = original.mode() & nix::libc::S_IFMT == nix::libc::S_IFIFO;
-    if named_pipe {
+    if named_pipe && !anonymous_pipe {
         return Err(QuartersError::new(
             ErrorKind::Unsupported,
             "Linux --report-fd does not accept a named FIFO because its reader can disconnect before safe reopening",
@@ -228,9 +228,38 @@ fn descriptor_system_error(operation: &str, source: nix::errno::Errno) -> Quarte
     QuartersError::new(ErrorKind::System, format!("could not {operation}")).with_source(source)
 }
 
+#[cfg(all(test, target_os = "macos"))]
+mod macos_tests {
+    use super::ReportWriter;
+    use std::error::Error;
+    use std::fs::OpenOptions;
+    use std::io::Read;
+    use std::os::fd::IntoRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    #[test]
+    fn writable_named_fifo_is_duplicated_without_inheritance() -> Result<(), Box<dyn Error>> {
+        let temporary = tempfile::tempdir()?;
+        let path = temporary.path().join("report-fifo");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR)?;
+        let mut reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_NONBLOCK)
+            .open(&path)?;
+        let descriptor = OpenOptions::new().write(true).open(&path)?.into_raw_fd();
+        let mut report = ReportWriter::open(descriptor)?;
+        report.write(b"{}")?;
+        let mut output = [0_u8; 2];
+        reader.read_exact(&mut output)?;
+        assert_eq!(output, *b"{}");
+        Ok(())
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::ReportWriter;
+    use nix::fcntl::{FcntlArg, OFlag, fcntl};
     use std::error::Error;
     use std::fs::OpenOptions;
     use std::os::fd::IntoRawFd;
@@ -266,6 +295,22 @@ mod tests {
             .err()
             .ok_or("nonblocking fifo must fail")?;
         assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
+        nix::unistd::close(descriptor)?;
+        drop(reader);
+        Ok(())
+    }
+
+    #[test]
+    fn nonblocking_anonymous_pipe_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let (reader, writer) = nix::unistd::pipe()?;
+        let flags = fcntl(&writer, FcntlArg::F_GETFL).map(OFlag::from_bits_truncate)?;
+        fcntl(&writer, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
+        let descriptor = writer.into_raw_fd();
+        let error = ReportWriter::open(descriptor)
+            .err()
+            .ok_or("nonblocking anonymous pipe must fail")?;
+        assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("requires a blocking pipe"));
         nix::unistd::close(descriptor)?;
         drop(reader);
         Ok(())
