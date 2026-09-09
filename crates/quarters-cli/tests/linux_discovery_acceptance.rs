@@ -94,7 +94,7 @@ fn discovery_crosses_confinement_and_home_view_launchers_without_leaking_report_
                 &options,
                 &temporary.path().join(format!("{name}.json")),
             )?;
-            assert_eq!(report["result"]["sound"], true);
+            assert_eq!(report["result"]["complete"], true);
             assert_eq!(report["result"]["child"]["exit_code"], 0);
             assert!(
                 report["result"]["delta"]["created"]["runtime"]

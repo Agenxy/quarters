@@ -71,7 +71,14 @@ fn platform_open(descriptor: i32) -> Result<File> {
     let append = info.flags.contains(OFlag::O_APPEND);
     let anonymous_pipe = link.as_os_str().as_encoded_bytes().starts_with(b"pipe:");
     let named_pipe = original.mode() & nix::libc::S_IFMT == nix::libc::S_IFIFO;
-    let pipe = anonymous_pipe || named_pipe;
+    if named_pipe {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "Linux --report-fd does not accept a named FIFO because its reader can disconnect before safe reopening",
+        )
+        .with_hint("use a regular file, blocking anonymous pipe, or the human stderr report"));
+    }
+    let pipe = anonymous_pipe;
     let originally_nonblocking = info.flags.contains(OFlag::O_NONBLOCK);
     if pipe && originally_nonblocking {
         return Err(QuartersError::new(
@@ -152,7 +159,7 @@ fn validate_close_on_exec(file: &File) -> Result<()> {
 struct LinuxFdInfo {
     position: u64,
     flags: OFlag,
-    inode: nix::libc::ino_t,
+    inode: u64,
 }
 
 #[cfg(target_os = "linux")]
@@ -171,7 +178,7 @@ fn linux_fd_info(descriptor: i32) -> Result<LinuxFdInfo> {
     Ok(LinuxFdInfo {
         position,
         flags: OFlag::from_bits_truncate(i32::try_from(flags).map_err(fdinfo_range_error)?),
-        inode: inode.try_into().map_err(fdinfo_range_error)?,
+        inode,
     })
 }
 
@@ -224,42 +231,62 @@ fn descriptor_system_error(operation: &str, source: nix::errno::Errno) -> Quarte
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::ReportWriter;
+    use std::error::Error;
     use std::fs::OpenOptions;
     use std::os::fd::IntoRawFd;
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::net::UnixStream;
 
     #[test]
-    fn socket_report_descriptors_fail_explicitly() {
-        let (stream, peer) = UnixStream::pair().expect("socket pair");
+    fn socket_report_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let (stream, peer) = UnixStream::pair()?;
         let descriptor = stream.into_raw_fd();
-        let error = ReportWriter::open(descriptor).err().expect("socket must fail");
+        let error = ReportWriter::open(descriptor).err().ok_or("socket must fail")?;
         assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
-        nix::unistd::close(descriptor).expect("close rejected descriptor");
+        nix::unistd::close(descriptor)?;
         drop(peer);
+        Ok(())
     }
 
     #[test]
-    fn nonblocking_named_pipe_descriptors_fail_explicitly() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+    fn nonblocking_named_pipe_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let temporary = tempfile::tempdir()?;
         let path = temporary.path().join("report-fifo");
-        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR).expect("create fifo");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR)?;
         let reader = OpenOptions::new()
             .read(true)
             .custom_flags(nix::libc::O_NONBLOCK)
-            .open(&path)
-            .expect("open fifo reader");
+            .open(&path)?;
         let writer = OpenOptions::new()
             .write(true)
             .custom_flags(nix::libc::O_NONBLOCK)
-            .open(&path)
-            .expect("open fifo writer");
+            .open(&path)?;
         let descriptor = writer.into_raw_fd();
         let error = ReportWriter::open(descriptor)
             .err()
-            .expect("nonblocking fifo must fail");
+            .ok_or("nonblocking fifo must fail")?;
         assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
-        nix::unistd::close(descriptor).expect("close rejected descriptor");
+        nix::unistd::close(descriptor)?;
         drop(reader);
+        Ok(())
+    }
+
+    #[test]
+    fn blocking_named_pipe_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let temporary = tempfile::tempdir()?;
+        let path = temporary.path().join("report-fifo");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR)?;
+        let reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_NONBLOCK)
+            .open(&path)?;
+        let writer = OpenOptions::new().write(true).open(&path)?;
+        let descriptor = writer.into_raw_fd();
+        let error = ReportWriter::open(descriptor).err().ok_or("named fifo must fail")?;
+        assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("named FIFO"));
+        nix::unistd::close(descriptor)?;
+        drop(reader);
+        Ok(())
     }
 }

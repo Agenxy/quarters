@@ -25,10 +25,10 @@ The first instrument is `quarters discover SPACE [--scan home|runtime]...
 [--report-fd N] [PROFILE OPTIONS] -- COMMAND...`. Both roots are selected by
 default. `--preview` is a non-mutating plan: it takes no activity lease, creates
 no runtime state, performs no scan and discloses the exact root selectors,
-fixed limits and credential-shaped pattern set. Profile options are validated
-only when execution prepares the launch. Global `--json` is available only for
-preview. Executing discovery keeps
-child stdout and stderr unchanged; human output goes to stderr and optional
+fixed limits and ASCII case-insensitive credential-shaped pattern set. Profile
+options are validated only when execution prepares the launch. Global `--json`
+is available only for preview. Executing discovery keeps child stdout and stderr
+unchanged; human output goes to stderr and optional
 machine output uses an inherited writable descriptor numbered three or higher.
 Quarters writes that caller-selected sink after the post-scan, so the sink is
 outside the measured delta. Callers should not direct it into a selected root.
@@ -38,8 +38,8 @@ closes the original number. This prevents an absent caller number from aliasing
 a later internal descriptor. macOS uses `/dev/fd`. Linux requires
 `/proc/self/fd`; regular files retain their observed position and append mode,
 and `/proc/self/fdinfo` must expose parseable `pos`, `flags`, and `ino` fields.
-Blocking anonymous pipes and FIFOs are supported; sockets or nonblocking pipes
-fail explicitly.
+Blocking anonymous pipes are supported; sockets, named FIFOs and nonblocking
+pipes fail explicitly.
 
 Quarters holds the lifecycle lease exclusively for the full invocation. It
 prepares the environment, runtime directory and any namespace launcher before

@@ -136,6 +136,8 @@ pub struct DiscoveryRootReport {
 pub struct CredentialShapeDisclosure {
     /// Stable classification basis.
     pub basis: String,
+    /// Stable letter-case matching semantics.
+    pub matching_case: String,
     /// Whether any contents were inspected.
     pub contents_inspected: bool,
     /// Whether benign paths may match.
@@ -190,8 +192,6 @@ pub struct DiscoveryReport {
     pub space: String,
     /// Stable measurement state.
     pub state: String,
-    /// Whether the delta is sound within the documented observation boundary.
-    pub sound: bool,
     /// Whether both scans completed within bounds without observation gaps.
     pub complete: bool,
     /// Preserved child termination status.
@@ -232,6 +232,8 @@ pub struct DiscoveryPreview {
     pub credential_pattern_set_version: u32,
     /// Exact path patterns used for credential-shaped classification.
     pub credential_patterns: Vec<String>,
+    /// Stable letter-case semantics for credential-shaped patterns.
+    pub credential_pattern_matching_case: String,
     /// Whether file contents were inspected.
     pub contents_inspected: bool,
     /// Explicit host-write observation status.
@@ -251,6 +253,7 @@ pub(super) fn preview(space: &str, selectors: &[DiscoverySelector], limits: Disc
             .iter()
             .map(|value| (*value).to_owned())
             .collect(),
+        credential_pattern_matching_case: "ascii-case-insensitive".to_owned(),
         contents_inspected: false,
         host_writes_observed: "not-measured".to_owned(),
         host_state_access: host_state_access(),
@@ -330,7 +333,6 @@ pub(super) fn report(
     DiscoveryReport {
         space: space.to_owned(),
         state: state.to_owned(),
-        sound: complete,
         complete,
         child,
         roots,
@@ -348,6 +350,7 @@ pub(super) fn report(
 fn credential_disclosure() -> CredentialShapeDisclosure {
     CredentialShapeDisclosure {
         basis: "path-shape-only".to_owned(),
+        matching_case: "ascii-case-insensitive".to_owned(),
         contents_inspected: false,
         false_positives_expected: true,
         false_negatives_expected: true,

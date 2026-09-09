@@ -356,7 +356,7 @@ Passing the descriptor transfers it to Quarters; its inherited number is closed
 before the child begins. It is written after the post-scan and is intentionally
 not part of the delta. On Linux the descriptor route requires `/proc/self/fd`
 and parseable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`. Regular
-files, blocking anonymous pipes and blocking FIFOs are supported, while sockets
+files and blocking anonymous pipes are supported, while sockets, named FIFOs
 and nonblocking pipes are rejected explicitly. Quarters validates and consumes
 the descriptor before opening store state, so the number cannot alias an
 internal lock.

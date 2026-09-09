@@ -76,7 +76,11 @@ fn preview_discloses_scope_bounds_and_patterns_without_execution() -> Result<(),
     assert_eq!(value["result"]["host_writes_observed"], "not-measured");
     assert_eq!(value["result"]["limits"]["entries"], 262_144);
     assert_eq!(value["result"]["limits"]["pending_name_bytes"], 16_777_216);
-    assert_eq!(value["result"]["credential_pattern_set_version"], 2);
+    assert_eq!(value["result"]["credential_pattern_set_version"], 3);
+    assert_eq!(
+        value["result"]["credential_pattern_matching_case"],
+        "ascii-case-insensitive"
+    );
     assert!(
         value["result"]["credential_patterns"]
             .as_array()
@@ -125,7 +129,12 @@ fn execution_preserves_child_streams_and_reports_only_classified_metadata() -> R
     assert!(!encoded.contains("secret"));
     let value: Value = serde_json::from_slice(&bytes)?;
     assert_eq!(value["command"], "discover");
-    assert_eq!(value["result"]["sound"], true);
+    assert_eq!(value["result"]["complete"], true);
+    assert!(value["result"].get("sound").is_none());
+    assert_eq!(
+        value["result"]["credential_shaped"]["matching_case"],
+        "ascii-case-insensitive"
+    );
     assert_eq!(value["result"]["child"]["exit_code"], 0);
     assert!(
         value["result"]["delta"]["created"]["configuration"]
@@ -271,7 +280,7 @@ fn report_descriptor_is_not_inherited_by_the_measured_child() -> Result<(), Box<
     let output = discover_with_report(
         temporary.path(),
         &report,
-        "for path in /dev/fd/*; do [ -e \"$path\" ] || continue; number=${path##*/}; case $number in ''|*[!0-9]*) continue;; esac; if [ \"$number\" -ge 3 ]; then exit 91; fi; done; exit 0",
+        "seen=0; for path in /dev/fd/*; do [ -e \"$path\" ] || continue; number=${path##*/}; case $number in ''|*[!0-9]*) continue;; 0) seen=$((seen | 1));; 1) seen=$((seen | 2));; 2) seen=$((seen | 4));; *) exit 91;; esac; done; [ \"$seen\" -eq 7 ] || exit 92",
     )?;
     assert_eq!(
         output.status.code(),
@@ -336,7 +345,7 @@ fn post_scan_failure_preserves_child_exit_and_emits_an_incomplete_report() -> Re
     assert_eq!(output.status.code(), Some(23));
     let value = report_value(&report)?;
     assert_eq!(value["result"]["state"], "post-scan-failed");
-    assert_eq!(value["result"]["sound"], false);
+    assert_eq!(value["result"]["complete"], false);
     assert!(value["result"]["delta"].is_null());
     assert_eq!(value["result"]["child"]["exit_code"], 23);
     std::fs::set_permissions(

@@ -21,10 +21,13 @@ compatibility notes will be called out here.
 - Consume and validate caller-transferred report descriptors before opening any
   Quarter or store state, preventing an absent descriptor number from aliasing
   an internal activity lock. Keep the reopened sink close-on-exec, preserve
-  regular-file append/position behavior, support blocking anonymous pipes and
-  FIFOs, and reject Linux sockets and nonblocking pipes explicitly.
+  regular-file append/position behavior, support blocking anonymous pipes, and
+  reject Linux sockets, named FIFOs and nonblocking pipes explicitly.
 - Conservatively extend host-fork sensitive-path refusal to nested credential
-  shapes shared with discovery, including common agent-state roots.
+  shapes shared with discovery, including common agent-state roots and
+  descendants of basename- or suffix-matched directories.
+- Disclose ASCII case-insensitive credential-shape matching and publish one
+  `complete` observation signal instead of two synonymous booleans.
 - Keep discovery out of MCP, ordinary logs and persisted Quarter state. Report
   host access/writes and detached writers as unmeasured instead of inferring
   isolation from an unchanged Quarter tree.

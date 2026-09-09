@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-pub(super) const CREDENTIAL_PATTERN_SET_VERSION: u32 = 2;
+pub(super) const CREDENTIAL_PATTERN_SET_VERSION: u32 = 3;
 
 pub(super) const CREDENTIAL_PATTERNS: &[&str] = &[
     ".anthropic",
@@ -52,17 +52,29 @@ pub(super) const CREDENTIAL_PATTERNS: &[&str] = &[
     ".ssh",
     ".ssh/**",
     "**/.pgpass",
+    "**/.pgpass/**",
     "**/*.kdbx",
+    "**/*.kdbx/**",
     "**/*.key",
+    "**/*.key/**",
     "**/*.p12",
+    "**/*.p12/**",
     "**/*.pem",
+    "**/*.pem/**",
     "**/*.pfx",
+    "**/*.pfx/**",
     "**/auth.json",
+    "**/auth.json/**",
     "**/credentials",
+    "**/credentials/**",
     "**/credentials.json",
+    "**/credentials.json/**",
     "**/hosts.yml",
+    "**/hosts.yml/**",
     "**/token",
+    "**/token/**",
     "**/token.json",
+    "**/token.json/**",
 ];
 
 pub(super) fn classify(selector: DiscoverySelector, path: &[OsString], mode: nix::libc::mode_t) -> DiscoveryClass {
@@ -109,10 +121,6 @@ pub(crate) fn credential_shaped_path(path: &Path) -> bool {
 
 fn credential_shaped_components(path: &[OsString]) -> bool {
     let value = joined_ascii_lowercase(path);
-    let basename = path
-        .last()
-        .map(|value| ascii_lowercase(value.as_bytes()))
-        .unwrap_or_default();
     let prefix = [
         b".anthropic".as_slice(),
         b".aws".as_slice(),
@@ -141,13 +149,19 @@ fn credential_shaped_components(path: &[OsString]) -> bool {
     prefix
         || value == b".env"
         || value.starts_with(b".env.")
-        || matches!(
-            basename.as_slice(),
-            b"auth.json" | b"credentials" | b"credentials.json" | b"hosts.yml" | b"token" | b"token.json" | b".pgpass"
-        )
-        || [b".pem".as_slice(), b".key", b".p12", b".pfx", b".kdbx"]
+        || path
             .iter()
-            .any(|suffix| basename.ends_with(suffix))
+            .any(|component| credential_shaped_component(component.as_bytes()))
+}
+
+fn credential_shaped_component(component: &[u8]) -> bool {
+    let component = ascii_lowercase(component);
+    matches!(
+        component.as_slice(),
+        b"auth.json" | b"credentials" | b"credentials.json" | b"hosts.yml" | b"token" | b"token.json" | b".pgpass"
+    ) || [b".pem".as_slice(), b".key", b".p12", b".pfx", b".kdbx"]
+        .iter()
+        .any(|suffix| component.ends_with(suffix))
 }
 
 fn joined_ascii_lowercase(path: &[OsString]) -> Vec<u8> {
@@ -185,4 +199,23 @@ fn derived_cache(path: &[OsString]) -> bool {
             .collect::<Vec<_>>();
         components_start_with(path, &components)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::credential_shaped_path;
+    use std::path::Path;
+
+    #[test]
+    fn basename_and_suffix_matches_include_descendants() {
+        for path in [
+            ".pgpass/child",
+            "nested/CREDENTIALS/key.json",
+            "agent/token/cache/item",
+            "cert.pem/child",
+        ] {
+            assert!(credential_shaped_path(Path::new(path)), "missed {path}");
+        }
+        assert!(!credential_shaped_path(Path::new("nested/settings/child")));
+    }
 }

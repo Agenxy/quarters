@@ -257,7 +257,7 @@ fn replacing_a_selected_root_suppresses_the_delta() -> Result<(), Box<dyn std::e
         DiscoveryLimits::ALPHA,
     );
     assert_eq!(result.state, "root-identity-changed");
-    assert!(!result.sound);
+    assert!(!result.complete);
     assert!(result.delta.is_none());
     assert!(result.observation.root_identity_changed);
     Ok(())

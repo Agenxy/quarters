@@ -632,6 +632,8 @@ mod tests {
             ".Env.Local",
             ".env/secret",
             ".cargo/credentials.toml/child",
+            ".config/tool/credentials/key.json",
+            "certificate.PEM/child",
             ".ZSH_HISTORY",
             ".CACHE/tool",
         ] {

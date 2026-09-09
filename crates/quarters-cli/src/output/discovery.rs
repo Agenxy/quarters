@@ -22,7 +22,7 @@ pub(crate) fn print_preview(preview: &DiscoveryPreview, json_output: bool) -> Re
         preview.limits.pending_name_bytes,
         preview.limits.phase_milliseconds
     );
-    println!("  Credential-shaped patterns (path shape only; incomplete by design)");
+    println!("  Credential-shaped patterns (ASCII case-insensitive path shape; incomplete by design)");
     for pattern in &preview.credential_patterns {
         println!("    {pattern}");
     }

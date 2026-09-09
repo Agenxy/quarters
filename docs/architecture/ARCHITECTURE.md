@@ -153,9 +153,9 @@ and phase, so both roots can spend at most 20 seconds across both scans.
 
 `discover --preview` is a non-mutating plan disclosure. It takes no activity
 lease, prepares no runtime state and performs no scan; it prints the selected
-roots, every fixed bound and the exact credential-shaped pattern set. Execution
-validates the profile options and prepares its launch state after acquiring the
-exclusive lease.
+roots, every fixed bound and the exact ASCII case-insensitive credential-shaped
+pattern set. Execution validates the profile options and prepares its launch
+state after acquiring the exclusive lease.
 
 The caller transfers ownership of `--report-fd` to Quarters. It is validated
 and reopened close-on-exec before Quarters opens any store or Quarter state;
@@ -163,9 +163,9 @@ the inherited number is then closed. This ordering prevents an absent caller
 number from aliasing a later internal descriptor. macOS uses `/dev/fd`. Linux
 requires `/proc/self/fd`; regular-file position and append mode are restored,
 and the matching `/proc/self/fdinfo` record must expose parseable `pos`, `flags`,
-and `ino` fields. Blocking anonymous pipes and FIFOs are supported; sockets and
-nonblocking pipes fail explicitly. The report sink is written only after the
-post-scan and is outside the observed delta.
+and `ino` fields. Blocking anonymous pipes are supported; sockets, named FIFOs
+and nonblocking pipes fail explicitly. The report sink is written only after
+the post-scan and is outside the observed delta.
 
 The exclusive lease excludes cooperating Quarters launches and lifecycle
 mutations, not detached descendants or direct same-UID writers. Metadata deltas

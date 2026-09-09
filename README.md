@@ -190,7 +190,7 @@ publication is not yet available and is not advertised as an install path.
 | `enter NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH]` | Open the shell with an optional explicit initial directory |
 | `exec NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH] -- COMMAND` | Run one command; requested confinement never degrades silently |
 | `discover NAME [--scan home\|runtime] [--report-fd FD] -- COMMAND` | Run one command and report bounded, path-free Quarter-owned metadata deltas to stderr and optionally JSON on a caller descriptor |
-| `discover NAME [--scan home\|runtime] --preview` | Show exact roots, bounds and credential-shaped patterns without launching a child; supports `--json` |
+| `discover NAME [--scan home\|runtime] --preview` | Show exact roots, bounds and ASCII case-insensitive credential-shaped patterns without launching a child; supports `--json` |
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
 | `agent status\|start\|stop\|restart [NAME]` | Manage a protocol-verified private OpenSSH agent |
 | `agent recover NAME --confirm NAME` | Reconcile only dead or protocol-verified private-agent state |
@@ -208,7 +208,7 @@ uses `--report-fd 3` or higher for machine output; global `--json` is accepted
 only with `discover --preview`. The descriptor is caller-transferred and closed
 before child execution. On Linux this surface requires `/proc/self/fd` plus
 readable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`; it supports
-regular files, blocking anonymous pipes and blocking FIFOs, and rejects sockets
+regular files and blocking anonymous pipes, and rejects sockets, named FIFOs,
 and nonblocking pipes explicitly.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
