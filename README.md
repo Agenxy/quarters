@@ -207,10 +207,12 @@ not because child standard output must remain unchanged. Executing discovery
 uses `--report-fd 3` or higher for machine output; global `--json` is accepted
 only with `discover --preview`. The descriptor is caller-transferred and closed
 before child execution. On Linux this surface requires `/proc/self/fd` plus
-readable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`; it supports
-regular files and blocking anonymous pipes, and rejects sockets, named FIFOs,
-and nonblocking pipes explicitly. macOS uses native `/dev/fd` duplication and
-therefore accepts writable named FIFOs when the kernel can duplicate them.
+readable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`. Tested Linux
+sinks include regular files, character devices and blocking anonymous pipes;
+sockets, named FIFOs and nonblocking anonymous pipes are rejected explicitly.
+macOS uses native `/dev/fd` duplication and accepts any writable descriptor that
+the kernel can duplicate, including sockets, pipes, named FIFOs and character
+devices. Report-write failure never replaces the child status.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
 the computed environment. Neither starts a child or reads user content stored

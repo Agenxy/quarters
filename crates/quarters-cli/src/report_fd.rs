@@ -258,7 +258,7 @@ mod macos_tests {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use super::ReportWriter;
+    use super::{ReportWriter, descriptor_flags};
     use nix::fcntl::{FcntlArg, OFlag, fcntl};
     use std::error::Error;
     use std::fs::OpenOptions;
@@ -312,6 +312,17 @@ mod tests {
         assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
         assert!(error.to_string().contains("requires a blocking pipe"));
         nix::unistd::close(descriptor)?;
+        drop(reader);
+        Ok(())
+    }
+
+    #[test]
+    fn blocking_anonymous_pipe_is_reopened_in_blocking_mode() -> Result<(), Box<dyn Error>> {
+        let (reader, writer) = nix::unistd::pipe()?;
+        let descriptor = writer.into_raw_fd();
+        let report = ReportWriter::open(descriptor)?;
+        assert!(!descriptor_flags(&report.file)?.contains(OFlag::O_NONBLOCK));
+        drop(report);
         drop(reader);
         Ok(())
     }

@@ -23,7 +23,9 @@ compatibility notes will be called out here.
   an internal activity lock. Keep the reopened sink close-on-exec, preserve
   regular-file append/position behavior, support blocking anonymous pipes, and
   reject Linux sockets, named FIFOs and nonblocking pipes explicitly. Preserve
-  native `/dev/fd` named-FIFO duplication on macOS and test that contract.
+  native `/dev/fd` duplication on macOS, document its broader writable
+  descriptor contract, and test named-FIFO delivery. Test that Linux restores
+  blocking mode on a reopened anonymous pipe.
 - Conservatively extend host-fork sensitive-path refusal to nested credential
   shapes shared with discovery, including common agent-state roots and
   descendants of basename- or suffix-matched directories.

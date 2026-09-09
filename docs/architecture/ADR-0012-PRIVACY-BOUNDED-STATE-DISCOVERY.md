@@ -38,9 +38,11 @@ closes the original number. This prevents an absent caller number from aliasing
 a later internal descriptor. macOS uses `/dev/fd`. Linux requires
 `/proc/self/fd`; regular files retain their observed position and append mode,
 and `/proc/self/fdinfo` must expose parseable `pos`, `flags`, and `ino` fields.
-Blocking anonymous pipes are supported; sockets, named FIFOs and nonblocking
-pipes fail explicitly. macOS delegates duplication to `/dev/fd` and accepts a
-writable named FIFO when the kernel can duplicate it safely.
+Tested Linux sinks include regular files, character devices and blocking
+anonymous pipes; sockets, named FIFOs and nonblocking anonymous pipes fail
+explicitly. macOS delegates duplication to `/dev/fd` and accepts any writable
+descriptor the kernel can duplicate, including sockets, pipes, named FIFOs and
+character devices.
 
 Quarters holds the lifecycle lease exclusively for the full invocation. It
 prepares the environment, runtime directory and any namespace launcher before

@@ -163,10 +163,12 @@ the inherited number is then closed. This ordering prevents an absent caller
 number from aliasing a later internal descriptor. macOS uses `/dev/fd`. Linux
 requires `/proc/self/fd`; regular-file position and append mode are restored,
 and the matching `/proc/self/fdinfo` record must expose parseable `pos`, `flags`,
-and `ino` fields. Blocking anonymous pipes are supported; sockets, named FIFOs
-and nonblocking pipes fail explicitly. The report sink is written only after
-the post-scan and is outside the observed delta. macOS delegates descriptor
-duplication to `/dev/fd`, including writable named FIFOs the kernel accepts.
+and `ino` fields. Tested Linux sinks include regular files, character devices
+and blocking anonymous pipes; sockets, named FIFOs and nonblocking anonymous
+pipes fail explicitly. The report sink is written only after the post-scan and
+is outside the observed delta. macOS delegates duplication to `/dev/fd` and
+accepts any writable descriptor the kernel can duplicate, including sockets,
+pipes, named FIFOs and character devices.
 
 The exclusive lease excludes cooperating Quarters launches and lifecycle
 mutations, not detached descendants or direct same-UID writers. Metadata deltas
