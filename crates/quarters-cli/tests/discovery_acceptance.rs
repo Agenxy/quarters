@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 use std::error::Error;
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::{Child, Command, Output};
 use std::time::{Duration, Instant};
@@ -202,6 +203,53 @@ fn read_only_report_descriptor_fails_before_child_execution() -> Result<(), Box<
     assert!(!marker.exists());
     let stderr = String::from_utf8(output.stderr)?;
     assert!(stderr.contains("not an inherited writable") || stderr.contains("not writable"));
+    Ok(())
+}
+
+#[test]
+fn unowned_report_number_cannot_collide_with_store_descriptors() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "demo")?;
+    let lock = temporary.path().join("spaces/demo/.active");
+    let original = std::fs::read(&lock)?;
+    let marker = temporary.path().join("spaces/demo/home/must-not-run");
+    let output = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(
+            "exec 4>&-; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 4 -- /bin/sh -c 'printf marker > \"$HOME/must-not-run\"'",
+        )
+        .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
+        .env("STORE_ROOT", temporary.path())
+        .output()?;
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!marker.exists());
+    assert_eq!(std::fs::read(lock)?, original);
+    assert!(String::from_utf8(output.stderr)?.contains("not an inherited writable descriptor"));
+    Ok(())
+}
+
+#[test]
+fn broken_report_pipe_never_replaces_child_exit() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "demo")?;
+    let (reader, writer) = nix::unistd::pipe()?;
+    drop(reader);
+    nix::fcntl::fcntl(&writer, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()))?;
+    let descriptor = writer.as_raw_fd().to_string();
+    let output = quarters(temporary.path())
+        .args([
+            "discover",
+            "demo",
+            "--report-fd",
+            &descriptor,
+            "--",
+            "/bin/sh",
+            "-c",
+            "exit 29",
+        ])
+        .output()?;
+    assert_eq!(output.status.code(), Some(29));
+    assert!(String::from_utf8(output.stderr)?.contains("report descriptor failed"));
     Ok(())
 }
 

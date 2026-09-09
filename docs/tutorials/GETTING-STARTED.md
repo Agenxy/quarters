@@ -355,7 +355,9 @@ Keep that caller-selected report file outside the Quarter roots being measured.
 Passing the descriptor transfers it to Quarters; its inherited number is closed
 before the child begins. It is written after the post-scan and is intentionally
 not part of the delta. On Linux the descriptor route requires `/proc/self/fd`;
-regular files and pipes are supported, while sockets are rejected explicitly.
+regular files and blocking pipes are supported, while sockets and nonblocking
+pipes are rejected explicitly. Quarters validates and consumes the descriptor
+before opening store state, so the number cannot alias an internal lock.
 The JSON contains only counts and semantic classes. Quarters does not open file
 contents, resolve link targets or emit entry paths. `credential-shaped` means a
 disclosed path pattern matched; it is neither content inspection nor a finding

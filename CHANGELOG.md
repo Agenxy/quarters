@@ -18,9 +18,13 @@ compatibility notes will be called out here.
 - Make discovery previews non-mutating and non-locking; apply independent
   per-root entry/time budgets, a bounded pending-name budget, per-root
   completeness evidence and path-free unreadable-directory classes.
-- Validate caller-transferred report descriptors after the pre-scan, keep them
-  close-on-exec, preserve regular-file append/position behavior, support pipes,
-  and reject unsupported Linux socket descriptors explicitly.
+- Consume and validate caller-transferred report descriptors before opening any
+  Quarter or store state, preventing an absent descriptor number from aliasing
+  an internal activity lock. Keep the reopened sink close-on-exec, preserve
+  regular-file append/position behavior, support blocking pipes, and reject
+  Linux sockets and nonblocking pipes explicitly.
+- Conservatively extend host-fork sensitive-path refusal to nested credential
+  shapes shared with discovery, including common agent-state roots.
 - Keep discovery out of MCP, ordinary logs and persisted Quarter state. Report
   host access/writes and detached writers as unmeasured instead of inferring
   isolation from an unchanged Quarter tree.

@@ -146,6 +146,10 @@ metadata before traversal.
 Both roots must already satisfy the ordinary Quarters private-root invariant:
 current UID, directory type and exact mode `0700`. Discovery refuses a damaged
 root rather than silently repairing permissions or weakening that invariant.
+With both roots selected, the two retained snapshots can contain at most
+1,048,576 entry records in aggregate; only the scanner for the current root
+holds the additional 16 MiB pending-name budget. The time ceiling is per root
+and phase, so both roots can spend at most 20 seconds across both scans.
 
 `discover --preview` is a non-mutating plan disclosure. It takes no activity
 lease, prepares no runtime state and performs no scan; it prints the selected
@@ -154,12 +158,13 @@ validates the profile options and prepares its launch state after acquiring the
 exclusive lease.
 
 The caller transfers ownership of `--report-fd` to Quarters. It is validated
-after the pre-scan, reopened close-on-exec and the inherited number is closed
-before the child starts. macOS uses `/dev/fd`. Linux requires `/proc/self/fd`;
-regular-file position and append mode are restored, pipes are supported, and
-sockets fail explicitly because this no-unsafe implementation cannot own a raw
-inherited descriptor directly. The report sink is written only after the
-post-scan and is outside the observed delta.
+and reopened close-on-exec before Quarters opens any store or Quarter state;
+the inherited number is then closed. This ordering prevents an absent caller
+number from aliasing a later internal descriptor. macOS uses `/dev/fd`. Linux
+requires `/proc/self/fd`; regular-file position and append mode are restored,
+blocking pipes are supported, and sockets or nonblocking pipes fail explicitly.
+The report sink is written only after the post-scan and is outside the observed
+delta.
 
 The exclusive lease excludes cooperating Quarters launches and lifecycle
 mutations, not detached descendants or direct same-UID writers. Metadata deltas

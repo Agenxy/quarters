@@ -46,6 +46,7 @@ fn platform_open(descriptor: i32) -> Result<File> {
 fn platform_open(descriptor: i32) -> Result<File> {
     use nix::sys::stat::{SFlag, fstat};
     use std::io::{Seek, SeekFrom};
+    use std::os::unix::fs::MetadataExt;
 
     let info = linux_fd_info(descriptor)?;
     if info.flags & OFlag::O_ACCMODE == OFlag::O_RDONLY {
@@ -63,12 +64,26 @@ fn platform_open(descriptor: i32) -> Result<File> {
     let append = info.flags.contains(OFlag::O_APPEND);
     let pipe = link.as_os_str().as_encoded_bytes().starts_with(b"pipe:");
     let originally_nonblocking = info.flags.contains(OFlag::O_NONBLOCK);
+    if pipe && originally_nonblocking {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "Linux --report-fd requires a blocking pipe descriptor",
+        )
+        .with_hint("open a blocking pipe, use a regular file, or use the human stderr report"));
+    }
+    let original = std::fs::metadata(&path).map_err(|error| invalid_descriptor(descriptor, error))?;
+    if original.ino() != info.inode {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "the Linux discovery report descriptor changed during validation",
+        ));
+    }
     let mut file = writable_options(append, pipe || originally_nonblocking)
         .open(&path)
         .map_err(|error| invalid_descriptor(descriptor, error))?;
     let metadata =
         fstat(&file).map_err(|error| descriptor_system_error("inspect reopened report descriptor", error))?;
-    if metadata.st_ino != info.inode {
+    if metadata.st_dev != original.dev() || metadata.st_ino != original.ino() {
         return Err(QuartersError::new(
             ErrorKind::CorruptState,
             "the Linux discovery report descriptor identity changed during validation",

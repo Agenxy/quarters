@@ -111,7 +111,7 @@ policy.
 | A selected or nested discovery directory is swapped | Root device/inode identity is bound across phases; every opened child directory must match its no-follow metadata before traversal; mismatch suppresses the delta |
 | Discovery is mistaken for host-write or read evidence | Every report says host writes are not measured and lists reads, host paths, granted paths, network, IPC, devices and platform account services as unknown |
 | Concurrent writer invalidates a discovery claim | Exclusive cooperative lifecycle lease excludes only Quarters participants; detached and direct same-UID writers remain explicitly unknown |
-| Report descriptor leaks into the measured child | Descriptor must be inherited, writable and at least 3; after the pre-scan Quarters validates and reopens it close-on-exec, closes the caller-transferred original before launch, preserves regular-file position/append semantics, supports pipes and explicitly rejects Linux sockets |
+| Report descriptor aliases internal state or leaks into the measured child | Before opening store state, the descriptor must exist, be writable and be at least 3; Quarters reopens it close-on-exec, closes the caller-transferred original, preserves regular-file position/append semantics, supports blocking pipes and explicitly rejects Linux sockets and nonblocking pipes |
 | Post-scan or report failure changes child semantics | Once the child starts, Quarters preserves its native exit/signal status and emits a warning instead of replacing it with an observer failure |
 | Supplementary groups in home view | Capability is unavailable unless the primary group is the only active group |
 | Secret diagnostics | No state content reads; explicit inherited values render as redacted |

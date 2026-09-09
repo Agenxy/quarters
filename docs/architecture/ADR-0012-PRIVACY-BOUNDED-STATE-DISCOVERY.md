@@ -33,10 +33,11 @@ machine output uses an inherited writable descriptor numbered three or higher.
 Quarters writes that caller-selected sink after the post-scan, so the sink is
 outside the measured delta. Callers should not direct it into a selected root.
 The caller transfers ownership of the inherited descriptor. Quarters validates
-and reopens it close-on-exec after the pre-scan, then closes the original number
-before launch. macOS uses `/dev/fd`. Linux requires `/proc/self/fd`; regular
-files retain their observed position and append mode, pipes are supported, and
-socket descriptors fail explicitly under the workspace's no-unsafe policy.
+and reopens it close-on-exec before opening any store or Quarter state, then
+closes the original number. This prevents an absent caller number from aliasing
+a later internal descriptor. macOS uses `/dev/fd`. Linux requires
+`/proc/self/fd`; regular files retain their observed position and append mode,
+blocking pipes are supported, and sockets or nonblocking pipes fail explicitly.
 
 Quarters holds the lifecycle lease exclusively for the full invocation. It
 prepares the environment, runtime directory and any namespace launcher before
@@ -71,6 +72,11 @@ expects false positives and false negatives.
 Selected roots must be current-UID directories with exact mode `0700`, matching
 the existing Quarters private-root contract. Discovery fails rather than
 repairing a root or accepting a weaker mode.
+
+With both roots selected, two retained snapshots can contain at most 1,048,576
+entry records in aggregate, plus the current scanner's 16 MiB pending-name
+budget. The five-second limit is per root and phase, for a 20-second maximum
+across the default two-root pre/post scan.
 
 ## Claim boundary
 

@@ -11,15 +11,9 @@ pub(crate) fn run(
     space: &Space,
     host: &HostEnvironment,
     arguments: &DiscoverArgs,
+    mut writer: Option<ReportWriter>,
     json: bool,
 ) -> Result<i32> {
-    if json && !arguments.preview {
-        return Err(QuartersError::new(
-            quarters_core::ErrorKind::InvalidInput,
-            "--json is unavailable while discovery executes a command because child stdout must remain unchanged",
-        )
-        .with_hint("use --report-fd for a machine report, or add --preview to inspect scope as JSON"));
-    }
     let selectors = selectors(&arguments.scans);
     let limits = DiscoveryLimits::ALPHA;
     if arguments.preview {
@@ -32,7 +26,6 @@ pub(crate) fn run(
     let prepared = launch.prepare_process()?;
     let runtime = prepared.runtime_directory()?;
     let pre = quarters_core::discovery_snapshot(&space.home(), &runtime, &selectors, limits)?;
-    let mut writer = arguments.report_fd.map(ReportWriter::open).transpose()?;
     let status = launch.run_prepared(&arguments.command, &prepared)?;
     let code = process::status_code(status);
     let child = process::discovery_child(status);
@@ -53,6 +46,17 @@ pub(crate) fn run(
         warn(&format!("discovery report descriptor failed: {error}"));
     }
     Ok(code)
+}
+
+pub(crate) fn prepare_report_writer(arguments: &DiscoverArgs, json: bool) -> Result<Option<ReportWriter>> {
+    if json && !arguments.preview {
+        return Err(QuartersError::new(
+            quarters_core::ErrorKind::InvalidInput,
+            "--json is unavailable while discovery executes a command because child stdout must remain unchanged",
+        )
+        .with_hint("use --report-fd for a machine report, or add --preview to inspect scope as JSON"));
+    }
+    arguments.report_fd.map(ReportWriter::open).transpose()
 }
 
 fn warn(message: &str) {

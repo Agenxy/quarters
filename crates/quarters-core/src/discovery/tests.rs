@@ -47,6 +47,31 @@ fn snapshot_is_metadata_only_for_unreadable_files_and_links() -> Result<(), Box<
 }
 
 #[test]
+fn directory_symlinks_are_never_descended() -> Result<(), Box<dyn std::error::Error>> {
+    let (temporary, home, runtime) = private_roots()?;
+    let outside = temporary.path().join("outside");
+    fs::create_dir(&outside)?;
+    fs::write(outside.join("secret"), b"before")?;
+    symlink(&outside, home.join("linked-directory"))?;
+    let before = snapshot(&home, &runtime, &[DiscoverySelector::Home], DiscoveryLimits::ALPHA)?;
+    fs::write(outside.join("secret"), b"after")?;
+    let after = snapshot(&home, &runtime, &[DiscoverySelector::Home], DiscoveryLimits::ALPHA)?;
+    let result = report(
+        "test",
+        &before,
+        Some(&after),
+        DiscoveryChild {
+            exit_code: Some(0),
+            signal: None,
+        },
+        DiscoveryLimits::ALPHA,
+    );
+    assert!(result.complete);
+    assert_eq!(result.totals, Some(super::DiscoveryTotals::default()));
+    Ok(())
+}
+
+#[test]
 fn report_classifies_created_modified_replaced_and_deleted() -> Result<(), Box<dyn std::error::Error>> {
     let (_temporary, home, runtime) = private_roots()?;
     fs::write(home.join(".zshrc"), b"before")?;

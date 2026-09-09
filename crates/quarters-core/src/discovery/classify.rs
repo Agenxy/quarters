@@ -30,6 +30,7 @@ pub(super) const CREDENTIAL_PATTERNS: &[&str] = &[
     ".pgpass",
     ".pypirc",
     ".ssh/**",
+    "**/.pgpass",
     "**/*.kdbx",
     "**/*.key",
     "**/*.p12",
@@ -44,14 +45,14 @@ pub(super) const CREDENTIAL_PATTERNS: &[&str] = &[
 ];
 
 pub(super) fn classify(selector: DiscoverySelector, path: &[OsString], mode: nix::libc::mode_t) -> DiscoveryClass {
+    if credential_shaped_components(path) {
+        return DiscoveryClass::CredentialShaped;
+    }
     if mode & nix::libc::S_IFMT == nix::libc::S_IFSOCK {
         return DiscoveryClass::RuntimeSocket;
     }
     if selector == DiscoverySelector::Runtime {
         return DiscoveryClass::Runtime;
-    }
-    if credential_shaped_components(path) {
-        return DiscoveryClass::CredentialShaped;
     }
     let Some(first) = path.first().map(|value| value.as_bytes()) else {
         return DiscoveryClass::Unclassified;
