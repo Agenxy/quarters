@@ -15,7 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
-const MAXIMUM_TOTAL_STARTUP_WAIT: Duration = Duration::from_secs(10);
+pub(super) const MAXIMUM_TOTAL_STARTUP_WAIT: Duration = Duration::from_secs(10);
 const MAXIMUM_LAUNCH_ATTEMPTS: usize = 2;
 pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Result<AgentStatus> {
     store.ensure_no_rename_target(&space.manifest().name)?;
@@ -25,43 +25,64 @@ pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Res
     }
     let _lease = store.lease(space)?;
     let runtime = crate::platform::runtime_directory(space, host)?;
-    let reservation = {
-        let _lock = agent_lock(&runtime)?;
-        reserve(store, space, &runtime)?
-    };
-    match reservation {
-        Reservation::Active(status) => Ok(status),
-        Reservation::Observe(starting) => reconcile(space, &runtime, &starting),
-        Reservation::Spawned { child, starting, owner } => {
-            await_spawned(store, space, &runtime, child, starting, owner)
-        }
-        Reservation::Cleanup {
-            mut child,
-            error,
-            owner: _owner,
-        } => {
-            if let Err(cleanup) = cleanup_spawned_child(&runtime, &mut child) {
-                return Err(error.with_hint(format!("private-agent launcher cleanup also failed: {cleanup}")));
+    let absolute_deadline = Instant::now() + MAXIMUM_TOTAL_STARTUP_WAIT;
+    loop {
+        let reservation = {
+            let _lock = agent_lock(&runtime)?;
+            reserve(store, space, &runtime)?
+        };
+        let status = match reservation {
+            Reservation::Active(status) => status,
+            Reservation::Observe(starting) => match reconcile(space, &runtime, &starting, absolute_deadline)? {
+                Reconciled::Active(status) => status,
+                Reconciled::Recovered => {
+                    ensure_startup_time_remains(absolute_deadline)?;
+                    continue;
+                }
+            },
+            Reservation::Spawned { child, starting, owner } => {
+                await_spawned(store, space, &runtime, child, starting, owner)?
             }
-            Err(error)
+            Reservation::Cleanup {
+                mut child,
+                error,
+                owner: _owner,
+            } => {
+                if let Err(cleanup) = cleanup_spawned_child(&runtime, &mut child) {
+                    return Err(error.with_hint(format!("private-agent launcher cleanup also failed: {cleanup}")));
+                }
+                return Err(error);
+            }
+        };
+        if status.state == AgentState::Active {
+            return Ok(status);
         }
+        return Err(QuartersError::new(
+            ErrorKind::System,
+            "private-agent startup completed without an active agent",
+        ));
     }
 }
 
-pub(super) fn reconcile(space: &Space, runtime: &Path, starting: &AgentRecord) -> Result<AgentStatus> {
+pub(super) fn reconcile(
+    space: &Space,
+    runtime: &Path,
+    starting: &AgentRecord,
+    absolute_deadline: Instant,
+) -> Result<Reconciled> {
     validate_starting(starting)?;
     let mut current_starting = starting.clone();
-    let absolute_deadline = Instant::now() + MAXIMUM_TOTAL_STARTUP_WAIT;
     let mut deadline = Instant::now() + STARTUP_TIMEOUT;
     loop {
         let observed = protocol::verified_socket_identity(&registry::socket_path(runtime), current_starting.pid).ok();
-        let alive = process::process_is_alive(current_starting.pid)?;
+        let alive = process::process_matches_generation(current_starting.pid, current_starting.process_generation)?;
         match reconcile_orphan(space, runtime, &current_starting, observed, alive)? {
-            ReconcileStep::Ready(status) => return Ok(status),
+            ReconcileStep::Ready(status) => return Ok(Reconciled::Active(status)),
             ReconcileStep::Follow(replacement) => {
                 current_starting = replacement;
                 deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
             }
+            ReconcileStep::Rereserve => return Ok(Reconciled::Recovered),
             ReconcileStep::Pending => {}
         }
         if Instant::now() >= deadline {
@@ -83,7 +104,13 @@ fn reconcile_orphan(
     alive: bool,
 ) -> Result<ReconcileStep> {
     let _lock = agent_lock(runtime)?;
-    let record = registry::read(runtime, space)?.ok_or_else(missing_registry)?;
+    let Some(record) = registry::read(runtime, space)? else {
+        return if orphan_startup_guard(runtime)?.is_some() {
+            Ok(ReconcileStep::Rereserve)
+        } else {
+            Ok(ReconcileStep::Pending)
+        };
+    };
     if record.state == StoredAgentState::Active {
         let current = inspect_at(space, runtime)?;
         return if current.state == AgentState::Active && current.pid == Some(record.pid) {
@@ -96,7 +123,7 @@ fn reconcile_orphan(
         return Ok(ReconcileStep::Follow(record));
     }
     if record != *starting {
-        return Err(changed_startup_error());
+        return reconcile_replacement(space, runtime, &record);
     }
     let Some(_orphan_guard) = orphan_startup_guard(runtime)? else {
         return Ok(ReconcileStep::Pending);
@@ -119,7 +146,31 @@ fn reconcile_orphan(
     if alive {
         return Ok(ReconcileStep::Pending);
     }
-    recover_inactive_record(space, runtime, starting).map(ReconcileStep::Ready)
+    recover_inactive_record(space, runtime, starting)?;
+    Ok(ReconcileStep::Rereserve)
+}
+
+fn reconcile_replacement(space: &Space, runtime: &Path, record: &AgentRecord) -> Result<ReconcileStep> {
+    if record.state != StoredAgentState::Failed
+        || process::process_matches_generation(record.pid, record.process_generation)?
+    {
+        return Err(changed_startup_error());
+    }
+    let Some(_orphan_guard) = orphan_startup_guard(runtime)? else {
+        return Ok(ReconcileStep::Pending);
+    };
+    recover_inactive_record(space, runtime, record)?;
+    Ok(ReconcileStep::Rereserve)
+}
+
+fn ensure_startup_time_remains(absolute_deadline: Instant) -> Result<()> {
+    if Instant::now() < absolute_deadline {
+        return Ok(());
+    }
+    Err(QuartersError::new(
+        ErrorKind::ResourceLimit,
+        "private-agent startup did not converge within ten seconds",
+    ))
 }
 
 fn reserve(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> {
@@ -130,12 +181,14 @@ fn reserve(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> 
             let starting = registry::read(runtime, space)?.ok_or_else(missing_registry)?;
             return Ok(Reservation::Observe(starting));
         }
-        AgentState::Failed
-            if current
-                .pid
-                .is_some_and(|pid| !process::process_is_alive(pid).unwrap_or(true)) =>
-        {
+        AgentState::Failed => {
             let record = registry::read(runtime, space)?.ok_or_else(missing_registry)?;
+            if process::process_matches_generation(record.pid, record.process_generation)? {
+                return Err(QuartersError::new(
+                    ErrorKind::CorruptState,
+                    "private SSH-agent state is failed but its recorded process generation is alive",
+                ));
+            }
             recover_inactive_record(space, runtime, &record)?;
         }
         AgentState::Unset => {}
@@ -152,7 +205,7 @@ fn reserve(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> 
             )
             .with_hint("run 'quarters agent status NAME' and resolve the reported state before retrying"));
         }
-        AgentState::Stopping | AgentState::Failed => {
+        AgentState::Stopping => {
             return Err(QuartersError::new(
                 ErrorKind::CorruptState,
                 format!("private SSH-agent state is {}; start refused", current.state.as_str()),
@@ -171,12 +224,17 @@ fn reserve_new(store: &Store, space: &Space, runtime: &Path) -> Result<Reservati
     let created_unix_ms = epoch_millis()?;
     let owner = startup_owner_guard(runtime)?;
     let child = process::spawn_helper(store, space, &token)?;
+    let process_generation = match process::process_generation(child.id()) {
+        Ok(generation) => generation,
+        Err(error) => return Ok(Reservation::Cleanup { child, error, owner }),
+    };
     let starting = AgentRecord {
         schema_version: REGISTRY_SCHEMA_VERSION,
         state: StoredAgentState::Starting,
         space_id: id,
         token,
         pid: child.id(),
+        process_generation: Some(process_generation),
         created_unix_ms,
         socket_inode: None,
         socket_device: None,
@@ -272,12 +330,22 @@ fn retry_exited_launch(store: &Store, space: &Space, runtime: &Path, starting: &
         return Err(changed_startup_error());
     }
     let mut child = process::spawn_helper(store, space, &token)?;
+    let process_generation = match process::process_generation(child.id()) {
+        Ok(generation) => generation,
+        Err(error) => {
+            return match stop_spawned_child(&mut child) {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(error.with_hint(format!("private-agent launcher cleanup also failed: {cleanup}"))),
+            };
+        }
+    };
     let replacement = AgentRecord {
         schema_version: REGISTRY_SCHEMA_VERSION,
         state: StoredAgentState::Starting,
         space_id: starting.space_id.clone(),
         token,
         pid: child.id(),
+        process_generation: Some(process_generation),
         created_unix_ms,
         socket_inode: None,
         socket_device: None,
@@ -287,7 +355,7 @@ fn retry_exited_launch(store: &Store, space: &Space, runtime: &Path, starting: &
         if registry::read(runtime, space)?.as_ref() == Some(&replacement) {
             return Ok(RetryLaunch::Spawned(child, replacement));
         }
-        if let Err(cleanup) = cleanup_spawned_child(runtime, &mut child) {
+        if let Err(cleanup) = cleanup_spawned_child_locked(runtime, &mut child) {
             return Err(error.with_hint(format!("replacement launcher cleanup also failed: {cleanup}")));
         }
         return Err(error);
@@ -436,6 +504,11 @@ fn stop_spawned_child(child: &mut Child) -> Result<()> {
 }
 
 fn cleanup_spawned_child(runtime: &Path, child: &mut Child) -> Result<()> {
+    let _lock = agent_lock(runtime)?;
+    cleanup_spawned_child_locked(runtime, child)
+}
+
+fn cleanup_spawned_child_locked(runtime: &Path, child: &mut Child) -> Result<()> {
     let socket = registry::socket_path(runtime);
     let observed = protocol::existing_socket_identity(&socket).ok().flatten();
     stop_spawned_child(child)?;
@@ -446,6 +519,7 @@ fn cleanup_spawned_child(runtime: &Path, child: &mut Child) -> Result<()> {
 }
 
 fn cleanup_exited_socket(runtime: &Path) -> Result<()> {
+    let _lock = agent_lock(runtime)?;
     let socket = registry::socket_path(runtime);
     let Some(identity) = protocol::existing_socket_identity(&socket)? else {
         return Ok(());
@@ -510,9 +584,16 @@ enum Reservation {
     },
 }
 
+#[derive(Debug)]
+pub(super) enum Reconciled {
+    Active(AgentStatus),
+    Recovered,
+}
+
 enum ReconcileStep {
     Ready(AgentStatus),
     Follow(AgentRecord),
+    Rereserve,
     Pending,
 }
 

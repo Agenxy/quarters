@@ -5,6 +5,8 @@ mod process;
 mod protocol;
 mod registry;
 mod startup;
+#[cfg(test)]
+mod startup_tests;
 
 pub use model::{AgentState, AgentStatus};
 
@@ -113,7 +115,15 @@ impl Store {
                 }
             }
         };
-        startup::reconcile(space, &runtime, &starting)
+        match startup::reconcile(
+            space,
+            &runtime,
+            &starting,
+            Instant::now() + startup::MAXIMUM_TOTAL_STARTUP_WAIT,
+        )? {
+            startup::Reconciled::Active(status) => Ok(status),
+            startup::Reconciled::Recovered => Ok(AgentStatus::unset(space)),
+        }
     }
 }
 
@@ -159,7 +169,11 @@ fn recover_inactive_state(space: &Space, runtime: &Path) -> Result<AgentStatus> 
     let Some(record) = registry::read(runtime, space)? else {
         return reject_unowned_socket(runtime).map(|()| AgentStatus::unset(space));
     };
-    let alive = process::process_is_alive(record.pid)?;
+    let alive = if record.state == StoredAgentState::Starting {
+        process::process_matches_generation(record.pid, record.process_generation)?
+    } else {
+        process::process_is_alive(record.pid)?
+    };
     if alive && record.state == StoredAgentState::Stopping {
         let expected = recorded_socket_identity(&record)?;
         if protocol::recoverable_disconnected_socket(&registry::socket_path(runtime), expected)? {
@@ -489,6 +503,7 @@ mod tests {
             space_id: space.id().cloned().expect("stable ID"),
             token: "0123456789abcdef0123456789abcdef".to_owned(),
             pid,
+            process_generation: Some(1),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: None,
             socket_device: None,
@@ -569,6 +584,7 @@ mod tests {
             space_id: space.id().cloned().expect("stable ID"),
             token: "abcdef0123456789abcdef0123456789".to_owned(),
             pid,
+            process_generation: Some(1),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: Some(identity.inode),
             socket_device: Some(identity.device),
@@ -762,6 +778,7 @@ mod tests {
             space_id: space.id().cloned().expect("stable ID"),
             token: "abcdef0123456789abcdef0123456789".to_owned(),
             pid,
+            process_generation: Some(1),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: Some(identity.inode),
             socket_device: Some(identity.device),
@@ -776,6 +793,7 @@ mod tests {
             space_id: space.id().cloned().expect("stable ID"),
             token: "0123456789abcdef0123456789abcdef".to_owned(),
             pid,
+            process_generation: Some(1),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: None,
             socket_device: None,
