@@ -103,7 +103,10 @@ captures bounded metadata before and after one directly supervised command and
 reports only aggregate created, modified, replaced and deleted counts grouped
 as configuration, data, state, cache, credential-shaped, runtime socket,
 runtime or unclassified. It never opens regular files, resolves symbolic links,
-or emits entry paths. The command says `host_writes_observed: not-measured`
+or emits entry paths. Each selected root has independent fixed scan and memory
+bounds; incomplete observations suppress the whole delta. Preview is a
+non-mutating plan disclosure and does not acquire the activity lease or create
+runtime state. The command says `host_writes_observed: not-measured`
 because unchanged Quarter state is not evidence that the child left host state
 alone. Detached and direct same-UID writers remain unknown. Discovery is CLI
 only; MCP has no process-execution or discovery tool.
@@ -202,7 +205,9 @@ publication is not yet available and is not advertised as an install path.
 Management and inspection commands accept `--json`. Pass-through commands do
 not because child standard output must remain unchanged. Executing discovery
 uses `--report-fd 3` or higher for machine output; global `--json` is accepted
-only with `discover --preview`.
+only with `discover --preview`. The descriptor is caller-transferred and closed
+before child execution. On Linux this surface requires `/proc/self/fd`, supports
+regular files and pipes, and rejects sockets explicitly.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
 the computed environment. Neither starts a child or reads user content stored

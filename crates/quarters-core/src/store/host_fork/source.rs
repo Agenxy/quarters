@@ -627,7 +627,14 @@ mod tests {
 
     #[test]
     fn sensitive_path_filter_is_case_insensitive_and_history_aware() {
-        for path in [".SSH/config", ".Env.Local", ".ZSH_HISTORY", ".CACHE/tool"] {
+        for path in [
+            ".SSH/config",
+            ".Env.Local",
+            ".env/secret",
+            ".cargo/credentials.toml/child",
+            ".ZSH_HISTORY",
+            ".CACHE/tool",
+        ] {
             assert!(reject_sensitive_path(Path::new(path)).is_err(), "accepted {path}");
         }
         assert!(reject_sensitive_path(Path::new(".config/theme")).is_ok());

@@ -183,7 +183,7 @@ Implemented on the Alpha 7 development branch as opt-in `quarters discover`.
 The CLI captures bounded before/after metadata for explicitly selected
 Quarter-owned roots around one directly supervised command. It records no raw
 paths or contents and emits only aggregate classifications. The complete delta
-is absent after any bound, unreadable directory, vanished-entry observation or
+is absent after any bound, unreadable directory, unstable-entry observation or
 post-scan failure.
 
 Current Linux Landlock denial observability is privileged, system-wide audit or

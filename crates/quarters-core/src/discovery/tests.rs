@@ -1,4 +1,4 @@
-use super::{DiscoveryChild, DiscoveryLimits, DiscoverySelector, preview, report, snapshot};
+use super::{DiscoveryChild, DiscoveryLimits, DiscoverySelector, report, snapshot};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
@@ -112,10 +112,6 @@ fn bounds_and_observation_gaps_never_emit_partial_deltas() -> Result<(), Box<dyn
     fs::create_dir(&inaccessible)?;
     fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o000))?;
     let incomplete = snapshot(&home, &runtime, &[DiscoverySelector::Home], DiscoveryLimits::ALPHA)?;
-    assert_eq!(
-        preview("test", &incomplete, DiscoveryLimits::ALPHA).state,
-        "observation-gap"
-    );
     let incomplete_report = report(
         "test",
         &incomplete,
@@ -128,7 +124,90 @@ fn bounds_and_observation_gaps_never_emit_partial_deltas() -> Result<(), Box<dyn
     );
     assert_eq!(incomplete_report.state, "observation-gap");
     assert!(incomplete_report.delta.is_none());
+    assert_eq!(incomplete_report.observation.unreadable_directories, 2);
+    assert_eq!(incomplete_report.observation.unreadable_classes.data, 2);
     fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[test]
+fn selected_roots_have_independent_entry_budgets() -> Result<(), Box<dyn std::error::Error>> {
+    let (_temporary, home, runtime) = private_roots()?;
+    fs::write(home.join("one"), b"1")?;
+    fs::write(home.join("two"), b"2")?;
+    fs::write(runtime.join("only"), b"1")?;
+    let limits = DiscoveryLimits {
+        entries: 1,
+        ..DiscoveryLimits::ALPHA
+    };
+    let captured = snapshot(
+        &home,
+        &runtime,
+        &[DiscoverySelector::Home, DiscoverySelector::Runtime],
+        limits,
+    )?;
+    let result = report(
+        "test",
+        &captured,
+        Some(&captured),
+        DiscoveryChild {
+            exit_code: Some(0),
+            signal: None,
+        },
+        limits,
+    );
+    let home_report = result
+        .roots
+        .iter()
+        .find(|root| root.selector == DiscoverySelector::Home);
+    let runtime_report = result
+        .roots
+        .iter()
+        .find(|root| root.selector == DiscoverySelector::Runtime);
+    assert!(home_report.is_some_and(|root| root.bounds_exceeded_pre && !root.complete_pre));
+    assert!(runtime_report.is_some_and(|root| root.entries_pre == 1 && root.complete_pre));
+    assert_eq!(result.state, "bounds-exceeded");
+    assert!(result.delta.is_none());
+    Ok(())
+}
+
+#[test]
+fn every_scan_resource_bound_suppresses_the_delta() -> Result<(), Box<dyn std::error::Error>> {
+    let (_temporary, home, runtime) = private_roots()?;
+    fs::create_dir(home.join("directory"))?;
+    fs::write(home.join("directory/entry"), b"1")?;
+    for limits in [
+        DiscoveryLimits {
+            depth: 0,
+            ..DiscoveryLimits::ALPHA
+        },
+        DiscoveryLimits {
+            relative_path_bytes: 1,
+            ..DiscoveryLimits::ALPHA
+        },
+        DiscoveryLimits {
+            pending_name_bytes: 1,
+            ..DiscoveryLimits::ALPHA
+        },
+        DiscoveryLimits {
+            phase_milliseconds: 0,
+            ..DiscoveryLimits::ALPHA
+        },
+    ] {
+        let captured = snapshot(&home, &runtime, &[DiscoverySelector::Home], limits)?;
+        let result = report(
+            "test",
+            &captured,
+            Some(&captured),
+            DiscoveryChild {
+                exit_code: Some(0),
+                signal: None,
+            },
+            limits,
+        );
+        assert_eq!(result.state, "bounds-exceeded");
+        assert!(result.delta.is_none());
+    }
     Ok(())
 }
 

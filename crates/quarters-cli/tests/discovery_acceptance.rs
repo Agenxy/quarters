@@ -39,6 +39,22 @@ fn report_value(path: &Path) -> Result<Value, Box<dyn Error>> {
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }
 
+fn runtime_paths(root: &Path) -> Result<Vec<std::path::PathBuf>, Box<dyn Error>> {
+    let manifest: Value = serde_json::from_slice(&std::fs::read(root.join("spaces/demo/.quarters.json"))?)?;
+    let space_id = manifest["space_id"].as_str().ok_or("missing space ID")?;
+    let namespace = format!("quarters-{}", nix::unistd::Uid::current().as_raw());
+    let mut bases = vec![std::path::PathBuf::from("/tmp")];
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
+        bases.push(runtime.into());
+    }
+    bases.sort_unstable();
+    bases.dedup();
+    Ok(bases
+        .into_iter()
+        .map(|base| base.join(&namespace).join(space_id))
+        .collect())
+}
+
 #[test]
 fn preview_discloses_scope_bounds_and_patterns_without_execution() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
@@ -51,9 +67,11 @@ fn preview_discloses_scope_bounds_and_patterns_without_execution() -> Result<(),
     let value: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(value["command"], "discover-preview");
     assert_eq!(value["result"]["selectors"], serde_json::json!(["home"]));
+    assert_eq!(value["result"]["state"], "planned");
     assert_eq!(value["result"]["contents_inspected"], false);
     assert_eq!(value["result"]["host_writes_observed"], "not-measured");
-    assert_eq!(value["result"]["limits"]["entries"], 65_536);
+    assert_eq!(value["result"]["limits"]["entries"], 262_144);
+    assert_eq!(value["result"]["limits"]["pending_name_bytes"], 16_777_216);
     assert!(
         value["result"]["credential_patterns"]
             .as_array()
@@ -75,6 +93,7 @@ fn preview_discloses_scope_bounds_and_patterns_without_execution() -> Result<(),
         .output()?;
     assert_eq!(refused.status.code(), Some(2));
     assert!(!marker.exists());
+    assert!(runtime_paths(temporary.path())?.iter().all(|path| !path.exists()));
     Ok(())
 }
 
@@ -85,7 +104,7 @@ fn execution_preserves_child_streams_and_reports_only_classified_metadata() -> R
     let report = temporary.path().join("report.json");
     let hostile = "private-hostile-entry-name";
     let script = format!(
-        "/bin/mkdir -p \"$HOME/.config/tool\" \"$HOME/.ssh\" \"$HOME/.cache/tool\"; printf config > \"$HOME/.config/tool/settings\"; printf secret > \"$HOME/.ssh/token\"; printf cache > \"$HOME/.cache/tool/item\"; printf hidden > \"$HOME/{hostile}\"; printf 'child-out\\n'; printf 'child-err\\n' >&2"
+        "/bin/mkdir -p \"$HOME/.config/tool\" \"$HOME/.ssh\" \"$HOME/.cache/tool\" \"$XDG_RUNTIME_DIR/bin\"; printf config > \"$HOME/.config/tool/settings\"; printf secret > \"$HOME/.ssh/token\"; printf cache > \"$HOME/.cache/tool/item\"; printf hidden > \"$HOME/{hostile}\"; printf runtime > \"$XDG_RUNTIME_DIR/bin/child-created\"; printf 'child-out\\n'; printf 'child-err\\n' >&2"
     );
     let output = discover_with_report(temporary.path(), &report, &script)?;
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -118,12 +137,71 @@ fn execution_preserves_child_streams_and_reports_only_classified_metadata() -> R
             .as_u64()
             .is_some_and(|count| count >= 2)
     );
+    assert!(
+        value["result"]["delta"]["created"]["runtime"]
+            .as_u64()
+            .is_some_and(|count| count >= 1)
+    );
     assert_eq!(value["result"]["host_writes_observed"], "not-measured");
     assert!(
         value["result"]["host_state_access"]["unknown"]
             .as_array()
             .is_some_and(|items| !items.is_empty())
     );
+    Ok(())
+}
+
+#[test]
+fn report_descriptor_preserves_position_append_and_pipe_delivery() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "demo")?;
+    let report = temporary.path().join("position.json");
+    std::fs::write(&report, b"prefix\n")?;
+    let output = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(
+            "exec 3>>\"$REPORT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /usr/bin/true",
+        )
+        .env("REPORT_PATH", &report)
+        .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
+        .env("STORE_ROOT", temporary.path())
+        .output()?;
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let bytes = std::fs::read(&report)?;
+    assert!(bytes.starts_with(b"prefix\n{"));
+
+    let piped = Command::new("/bin/sh")
+        .arg("-c")
+        .arg("exec 3>&1; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /usr/bin/true")
+        .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
+        .env("STORE_ROOT", temporary.path())
+        .output()?;
+    assert!(piped.status.success(), "{}", String::from_utf8_lossy(&piped.stderr));
+    let value: Value = serde_json::from_slice(&piped.stdout)?;
+    assert_eq!(value["result"]["child"]["exit_code"], 0);
+    Ok(())
+}
+
+#[test]
+fn read_only_report_descriptor_fails_before_child_execution() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "demo")?;
+    let input = temporary.path().join("read-only");
+    std::fs::write(&input, b"input")?;
+    let marker = temporary.path().join("spaces/demo/home/must-not-run");
+    let output = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(
+            "exec 3<\"$INPUT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /bin/sh -c 'printf marker > \"$HOME/must-not-run\"'",
+        )
+        .env("INPUT_PATH", &input)
+        .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
+        .env("STORE_ROOT", temporary.path())
+        .output()?;
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!marker.exists());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("not an inherited writable") || stderr.contains("not writable"));
     Ok(())
 }
 
@@ -255,6 +333,35 @@ fn exclusive_discovery_lease_rejects_a_cooperating_launch() -> Result<(), Box<dy
     let discovery_status = discovery.wait()?;
     assert_eq!(competing.status.code(), Some(8));
     assert!(String::from_utf8(competing.stderr)?.contains("space activity"));
+    assert!(discovery_status.success());
+    Ok(())
+}
+
+#[test]
+fn preview_does_not_contend_with_an_active_discovery() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "demo")?;
+    let marker = temporary.path().join("spaces/demo/home/preview-ready");
+    let mut discovery = quarters(temporary.path())
+        .args([
+            "discover",
+            "demo",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf ready > \"$HOME/preview-ready\"; exec /bin/sleep 2",
+        ])
+        .spawn()?;
+    wait_for_path(&marker, &mut discovery)?;
+    let preview = quarters(temporary.path())
+        .args(["--json", "discover", "demo", "--preview"])
+        .output()?;
+    let discovery_status = discovery.wait()?;
+    assert!(preview.status.success(), "{}", String::from_utf8_lossy(&preview.stderr));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&preview.stdout)?["result"]["state"],
+        "planned"
+    );
     assert!(discovery_status.success());
     Ok(())
 }

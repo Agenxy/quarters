@@ -23,17 +23,24 @@ and [Landlock LSM administration guide](https://www.kernel.org/doc/html/latest/a
 
 The first instrument is `quarters discover SPACE [--scan home|runtime]...
 [--report-fd N] [PROFILE OPTIONS] -- COMMAND...`. Both roots are selected by
-default. `--preview` performs the prepared pre-scan but starts no child and
-discloses the exact root selectors, fixed limits and credential-shaped pattern
-set. Global `--json` is available only for preview. Executing discovery keeps
+default. `--preview` is a non-mutating plan: it takes no activity lease, creates
+no runtime state, performs no scan and discloses the exact root selectors,
+fixed limits and credential-shaped pattern set. Profile options are validated
+only when execution prepares the launch. Global `--json` is available only for
+preview. Executing discovery keeps
 child stdout and stderr unchanged; human output goes to stderr and optional
 machine output uses an inherited writable descriptor numbered three or higher.
 Quarters writes that caller-selected sink after the post-scan, so the sink is
 outside the measured delta. Callers should not direct it into a selected root.
+The caller transfers ownership of the inherited descriptor. Quarters validates
+and reopens it close-on-exec after the pre-scan, then closes the original number
+before launch. macOS uses `/dev/fd`. Linux requires `/proc/self/fd`; regular
+files retain their observed position and append mode, pipes are supported, and
+socket descriptors fail explicitly under the workspace's no-unsafe policy.
 
 Quarters holds the lifecycle lease exclusively for the full invocation. It
 prepares the environment, runtime directory and any namespace launcher before
-the pre-scan; runtime `bin` is excluded. It then starts exactly one direct child,
+the pre-scan. It then starts exactly one direct child,
 waits, performs the post-scan and preserves the child's native exit or signal
 status even when post-scan, serialization or descriptor output fails.
 
@@ -47,14 +54,23 @@ opaque snapshots nor entry keys are serialized or persisted.
 The selected root device/inode identities must agree across phases. Every
 nested directory opened after a no-follow metadata observation must still match
 that exact object before traversal. Root replacement, duplicate opaque keys or
-other metadata races become observation gaps, never partial deltas. Runtime
-`bin` contents are excluded and declared because they contain Quarters-prepared
-launch machinery rather than measured application state.
+other metadata races become observation gaps, never partial deltas. A vanished,
+replaced or metadata-changing entry observed within either scan increments the
+single truthful `unstable_entries` counter. Because
+Quarters prepares runtime launch machinery before the first scan, later child
+writes under runtime `bin` are measured rather than excluded.
 
-The alpha limits each phase to 65,536 entries, depth 64, 4,096 relative-path
-bytes and five seconds. Any exceeded bound or observation gap suppresses the
-entire delta. Credential classification uses disclosed path shapes only and
-explicitly expects false positives and false negatives.
+The alpha gives each selected root an independent per-phase budget of 262,144
+entries, depth 64, 4,096 relative-path bytes, 16 MiB of pending directory-entry
+names and five seconds. Each root reports its own completeness and bound state.
+Any exceeded bound or observation gap suppresses the entire delta. Unreadable
+directories are counted by semantic class without exposing their paths.
+Credential classification uses disclosed path shapes only and explicitly
+expects false positives and false negatives.
+
+Selected roots must be current-UID directories with exact mode `0700`, matching
+the existing Quarters private-root contract. Discovery fails rather than
+repairing a root or accepting a weaker mode.
 
 ## Claim boundary
 
@@ -76,8 +92,11 @@ outside Quarters.
 Unit tests prove mode-000 regular files, FIFOs and symbolic links are never
 opened or resolved; hostile names and targets do not appear in serialized
 reports; all change classes work; and bounds or unreadable subtrees suppress
-the delta. CLI acceptance proves preview behavior, exact child streams,
-descriptor non-inheritance, classified JSON, post-scan failure handling,
+the delta. Tests exercise every resource bound and prove that one bounded root
+does not consume another root's budget. CLI acceptance proves non-mutating and
+non-locking preview behavior, exact child streams, runtime-`bin` observation,
+descriptor non-inheritance, regular-file append/position and pipe delivery,
+read-only descriptor rejection, classified JSON, post-scan failure handling,
 pre-execution JSON refusal and exclusive cooperative coordination.
 
 ## Consequences

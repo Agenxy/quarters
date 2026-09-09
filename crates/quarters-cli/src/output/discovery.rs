@@ -11,23 +11,20 @@ pub(crate) fn print_preview(preview: &DiscoveryPreview, json_output: bool) -> Re
     println!("Discovery preview for {}", preview.space);
     println!("  Scope");
     for selector in &preview.selectors {
-        let count = preview.entries.get(selector).copied().unwrap_or(0);
-        println!("    {:<8} {count} entries", selector.as_str());
+        println!("    {}", selector.as_str());
     }
     println!("  Scan     metadata only; file contents and symlink targets are not inspected");
     println!(
-        "  Bounds   {} entries, depth {}, {} relative-path bytes, {} ms per phase",
+        "  Bounds   {} entries/root, depth {}, {} relative-path bytes, {} pending-name bytes, {} ms/root/phase",
         preview.limits.entries,
         preview.limits.depth,
         preview.limits.relative_path_bytes,
+        preview.limits.pending_name_bytes,
         preview.limits.phase_milliseconds
     );
     println!("  Credential-shaped patterns (path shape only; incomplete by design)");
     for pattern in &preview.credential_patterns {
         println!("    {pattern}");
-    }
-    for exclusion in &preview.exclusions {
-        println!("  Excludes {exclusion}");
     }
     println!("  Host     access and writes are not measured");
     Ok(())
@@ -63,6 +60,7 @@ pub(crate) fn print_report(report: &DiscoveryReport) -> io::Result<()> {
             |code| format!("exit {code}")
         )
     )?;
+    write_counts(&mut output, "Unreadable", &report.observation.unreadable_classes)?;
     writeln!(
         output,
         "  Boundary Quarter-owned metadata only; host access and writes were not measured"

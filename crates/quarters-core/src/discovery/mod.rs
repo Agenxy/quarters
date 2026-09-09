@@ -40,23 +40,26 @@ impl DiscoverySelector {
 #[serde(deny_unknown_fields)]
 /// Hard resource bounds applied independently to each metadata scan phase.
 pub struct DiscoveryLimits {
-    /// Maximum total entries retained in one scan.
+    /// Maximum entries retained for each selected root.
     pub entries: u64,
     /// Maximum traversal depth below a selected root.
     pub depth: u32,
     /// Maximum relative path size processed for an entry.
     pub relative_path_bytes: u64,
-    /// Maximum wall-clock duration for one scan phase.
+    /// Maximum wall-clock duration for each selected root in one scan phase.
     pub phase_milliseconds: u64,
+    /// Maximum aggregate bytes retained for pending directory-entry names.
+    pub pending_name_bytes: u64,
 }
 
 impl DiscoveryLimits {
     /// Fixed limits for the alpha discovery contract.
     pub const ALPHA: Self = Self {
-        entries: 65_536,
+        entries: 262_144,
         depth: 64,
         relative_path_bytes: 4_096,
         phase_milliseconds: 5_000,
+        pending_name_bytes: 16 * 1_024 * 1_024,
     };
 }
 
@@ -82,10 +85,10 @@ struct EntryIdentity {
     gid: nix::libc::gid_t,
     links: nix::libc::nlink_t,
     size: nix::libc::off_t,
-    modified_seconds: nix::libc::time_t,
-    modified_nanoseconds: nix::libc::c_long,
-    changed_seconds: nix::libc::time_t,
-    changed_nanoseconds: nix::libc::c_long,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
 }
 
 impl EntryIdentity {
@@ -142,10 +145,13 @@ struct Snapshot {
     entries: HashMap<[u8; 32], EntryRecord>,
     roots: BTreeMap<DiscoverySelector, u64>,
     root_identities: BTreeMap<DiscoverySelector, RootIdentity>,
+    root_complete: BTreeMap<DiscoverySelector, bool>,
+    root_bounds_exceeded: BTreeMap<DiscoverySelector, bool>,
     complete: bool,
     bounds_exceeded: bool,
     unreadable_directories: u64,
-    vanished_entries: u64,
+    unreadable_classes: DiscoveryClassCounts,
+    unstable_entries: u64,
     foreign_owned: u64,
     metadata_errors: u64,
     entry_key_collisions: u64,
@@ -157,10 +163,13 @@ impl Default for Snapshot {
             entries: HashMap::new(),
             roots: BTreeMap::new(),
             root_identities: BTreeMap::new(),
+            root_complete: BTreeMap::new(),
+            root_bounds_exceeded: BTreeMap::new(),
             complete: true,
             bounds_exceeded: false,
             unreadable_directories: 0,
-            vanished_entries: 0,
+            unreadable_classes: DiscoveryClassCounts::default(),
+            unstable_entries: 0,
             foreign_owned: 0,
             metadata_errors: 0,
             entry_key_collisions: 0,
@@ -201,10 +210,10 @@ pub fn snapshot(
     scan::scan(&roots, limits).map(DiscoverySnapshot)
 }
 
-/// Builds the non-executing discovery preview for a captured snapshot.
+/// Builds a non-mutating preview of discovery scope and classification rules.
 #[must_use]
-pub fn preview(space: &str, snapshot: &DiscoverySnapshot, limits: DiscoveryLimits) -> DiscoveryPreview {
-    report::preview(space, &snapshot.0, limits)
+pub fn preview(space: &str, selectors: &[DiscoverySelector], limits: DiscoveryLimits) -> DiscoveryPreview {
+    report::preview(space, selectors, limits)
 }
 
 /// Compares pre- and post-execution snapshots without exposing entry paths.

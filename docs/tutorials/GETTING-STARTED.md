@@ -333,6 +333,10 @@ quarters discover clean --preview
 quarters --json discover clean --scan home --preview
 ```
 
+This preview is a plan disclosure: it takes no activity lease, creates no
+runtime directories and performs no metadata scan. It shows the exact selected
+roots, independent per-root resource bounds and credential-shaped rules.
+
 Then measure one direct command. Its stdout remains the command's stdout; the
 human discovery summary goes to stderr:
 
@@ -348,7 +352,10 @@ quarters discover clean --report-fd 3 -- git status 3>discovery.json
 ```
 
 Keep that caller-selected report file outside the Quarter roots being measured.
-It is written after the post-scan and is intentionally not part of the delta.
+Passing the descriptor transfers it to Quarters; its inherited number is closed
+before the child begins. It is written after the post-scan and is intentionally
+not part of the delta. On Linux the descriptor route requires `/proc/self/fd`;
+regular files and pipes are supported, while sockets are rejected explicitly.
 The JSON contains only counts and semantic classes. Quarters does not open file
 contents, resolve link targets or emit entry paths. `credential-shaped` means a
 disclosed path pattern matched; it is neither content inspection nor a finding

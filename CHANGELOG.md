@@ -12,8 +12,15 @@ compatibility notes will be called out here.
   JSON on a caller-supplied close-on-exec report descriptor.
 - Preserve child stdout, stderr and native termination status; hold an
   exclusive cooperative lifecycle lease, prepare runtime launch state before
-  the first scan, exclude the runtime launcher directory, and suppress the
-  complete delta after any scan bound or observation gap.
+  the first scan, observe later child writes beneath the runtime launcher
+  directory, and suppress the complete delta after any scan bound or
+  observation gap.
+- Make discovery previews non-mutating and non-locking; apply independent
+  per-root entry/time budgets, a bounded pending-name budget, per-root
+  completeness evidence and path-free unreadable-directory classes.
+- Validate caller-transferred report descriptors after the pre-scan, keep them
+  close-on-exec, preserve regular-file append/position behavior, support pipes,
+  and reject unsupported Linux socket descriptors explicitly.
 - Keep discovery out of MCP, ordinary logs and persisted Quarter state. Report
   host access/writes and detached writers as unmeasured instead of inferring
   isolation from an unchanged Quarter tree.

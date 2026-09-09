@@ -122,23 +122,44 @@ so contention has one deadline rather than one deadline per space.
 `discover` is a CLI-only process supervisor layered over the ordinary launch
 plan. It takes the space lifecycle lease exclusively, prepares the complete
 environment and any private runtime launcher, then scans selected Quarter-owned
-home and runtime roots before spawning the child. The runtime `bin` subtree is
-excluded because Quarters itself prepares it. After the direct child exits, a
-second scan produces a path-free classified delta. The child stdout and stderr
-remain attached unchanged; the human report goes to stderr and an optional
-stable JSON envelope goes to a caller-provided descriptor.
+home and runtime roots before spawning the child. Runtime launch state is
+prepared first, so application writes beneath runtime `bin` remain observable.
+After the direct child exits, a second scan produces a path-free classified
+delta. The child stdout and stderr remain attached unchanged; the human report
+goes to stderr and an optional stable JSON envelope goes to a caller-provided
+descriptor.
 
 The scanner retains directory descriptors and uses no-follow relative metadata
 operations. It never opens regular files or FIFOs and never calls `readlink`.
 Entry paths exist only as transient byte components used to compute a
 domain-separated BLAKE3 key and a semantic class. Snapshots are opaque and
-in-memory; output contains only counts. Each phase is bounded to 65,536 entries,
-depth 64, 4,096 relative-path bytes and five seconds. Exceeding any bound,
-encountering an unreadable directory or losing an entry during observation
-marks the scan incomplete and suppresses the entire delta. Selected root
-device/inode identity is bound across phases, and an opened nested directory is
-matched back to its no-follow metadata before traversal. Runtime `bin` contents
-are deliberately excluded and disclosed because Quarters prepares them.
+in-memory; output contains only counts. Each selected root has an independent
+per-phase budget of 262,144 entries, depth 64, 4,096 relative-path bytes,
+16 MiB of pending directory-entry names and five seconds. Exceeding any bound,
+encountering an unreadable directory or observing an unstable entry
+marks the scan incomplete and suppresses the entire delta. Per-root reports
+identify completeness and bounds without paths; unreadable directories are
+grouped only by semantic class. Selected root device/inode identity is bound
+across phases, and an opened nested directory is matched back to its no-follow
+metadata before traversal.
+
+Both roots must already satisfy the ordinary Quarters private-root invariant:
+current UID, directory type and exact mode `0700`. Discovery refuses a damaged
+root rather than silently repairing permissions or weakening that invariant.
+
+`discover --preview` is a non-mutating plan disclosure. It takes no activity
+lease, prepares no runtime state and performs no scan; it prints the selected
+roots, every fixed bound and the exact credential-shaped pattern set. Execution
+validates the profile options and prepares its launch state after acquiring the
+exclusive lease.
+
+The caller transfers ownership of `--report-fd` to Quarters. It is validated
+after the pre-scan, reopened close-on-exec and the inherited number is closed
+before the child starts. macOS uses `/dev/fd`. Linux requires `/proc/self/fd`;
+regular-file position and append mode are restored, pipes are supported, and
+sockets fail explicitly because this no-unsafe implementation cannot own a raw
+inherited descriptor directly. The report sink is written only after the
+post-scan and is outside the observed delta.
 
 The exclusive lease excludes cooperating Quarters launches and lifecycle
 mutations, not detached descendants or direct same-UID writers. Metadata deltas

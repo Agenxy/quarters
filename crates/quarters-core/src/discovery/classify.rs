@@ -4,20 +4,29 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 pub(super) const CREDENTIAL_PATTERNS: &[&str] = &[
+    ".anthropic/**",
     ".aws/**",
     ".azure/**",
     ".cargo/credentials",
+    ".cargo/credentials/**",
     ".cargo/credentials.toml",
+    ".cargo/credentials.toml/**",
+    ".claude/**",
+    ".codex/**",
+    ".config/anthropic/**",
     ".config/gcloud/**",
     ".config/gh/**",
+    ".config/opencode/**",
     ".docker/**",
     ".env",
     ".env.*",
+    ".env/**",
     ".git-credentials",
     ".gnupg/**",
     ".kube/**",
     ".netrc",
     ".npmrc",
+    ".openai/**",
     ".pgpass",
     ".pypirc",
     ".ssh/**",
@@ -83,17 +92,25 @@ fn credential_shaped_components(path: &[OsString]) -> bool {
         .map(|value| ascii_lowercase(value.as_bytes()))
         .unwrap_or_default();
     let prefix = [
+        b".anthropic".as_slice(),
         b".aws".as_slice(),
         b".azure",
         b".cargo/credentials",
+        b".cargo/credentials.toml",
+        b".claude",
+        b".codex",
+        b".config/anthropic",
         b".config/gcloud",
         b".config/gh",
+        b".config/opencode",
         b".docker",
+        b".env",
         b".git-credentials",
         b".gnupg",
         b".kube",
         b".netrc",
         b".npmrc",
+        b".openai",
         b".pypirc",
         b".ssh",
     ]
@@ -102,7 +119,6 @@ fn credential_shaped_components(path: &[OsString]) -> bool {
     prefix
         || value == b".env"
         || value.starts_with(b".env.")
-        || value == b".cargo/credentials.toml"
         || matches!(
             basename.as_slice(),
             b"auth.json" | b"credentials" | b"credentials.json" | b"hosts.yml" | b"token" | b"token.json" | b".pgpass"

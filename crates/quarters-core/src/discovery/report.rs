@@ -1,6 +1,5 @@
 use super::{DiscoveryClass, DiscoveryLimits, DiscoverySelector, Snapshot};
 use serde::Serialize;
-use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +47,17 @@ impl DiscoveryClassCounts {
             .saturating_add(self.runtime_socket)
             .saturating_add(self.runtime)
             .saturating_add(self.unclassified)
+    }
+
+    pub(super) fn saturating_add_assign(&mut self, other: &Self) {
+        self.configuration = self.configuration.saturating_add(other.configuration);
+        self.data = self.data.saturating_add(other.data);
+        self.state = self.state.saturating_add(other.state);
+        self.cache = self.cache.saturating_add(other.cache);
+        self.credential_shaped = self.credential_shaped.saturating_add(other.credential_shaped);
+        self.runtime_socket = self.runtime_socket.saturating_add(other.runtime_socket);
+        self.runtime = self.runtime.saturating_add(other.runtime);
+        self.unclassified = self.unclassified.saturating_add(other.unclassified);
     }
 }
 
@@ -110,6 +120,14 @@ pub struct DiscoveryRootReport {
     pub entries_pre: u64,
     /// Entries retained afterward, absent when the post-scan failed.
     pub entries_post: Option<u64>,
+    /// Whether the pre-execution root scan completed without a gap.
+    pub complete_pre: bool,
+    /// Whether the post-execution root scan completed without a gap.
+    pub complete_post: Option<bool>,
+    /// Whether the pre-execution root scan exceeded a resource bound.
+    pub bounds_exceeded_pre: bool,
+    /// Whether the post-execution root scan exceeded a resource bound.
+    pub bounds_exceeded_post: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -140,8 +158,10 @@ pub struct DiscoveryObservation {
     pub scan: String,
     /// Directories that could not be traversed.
     pub unreadable_directories: u64,
-    /// Entries that vanished during metadata observation.
-    pub vanished_entries: u64,
+    /// Unreadable directories grouped without exposing their paths.
+    pub unreadable_classes: DiscoveryClassCounts,
+    /// Entries that vanished, changed, or were replaced during one scan phase.
+    pub unstable_entries: u64,
     /// Entries not owned by the current UID.
     pub foreign_owned: u64,
     /// Whether a selected root's filesystem identity changed between phases.
@@ -194,8 +214,6 @@ pub struct DiscoveryReport {
     pub host_state_access: HostStateAccess,
     /// Human-readable limits that prevent overclaiming.
     pub limitations: Vec<String>,
-    /// Scanner-owned path classes deliberately omitted from traversal.
-    pub exclusions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -208,8 +226,6 @@ pub struct DiscoveryPreview {
     pub state: String,
     /// Roots that were inspected.
     pub selectors: Vec<DiscoverySelector>,
-    /// Entry count for each selected root.
-    pub entries: BTreeMap<DiscoverySelector, u64>,
     /// Resource bounds used for the preview scan.
     pub limits: DiscoveryLimits,
     /// Version of the credential-shaped path rules.
@@ -222,23 +238,13 @@ pub struct DiscoveryPreview {
     pub host_writes_observed: String,
     /// Explicit boundary for host-state access observation.
     pub host_state_access: HostStateAccess,
-    /// Scanner-owned path classes deliberately omitted from traversal.
-    pub exclusions: Vec<String>,
 }
 
-pub(super) fn preview(space: &str, snapshot: &Snapshot, limits: DiscoveryLimits) -> DiscoveryPreview {
+pub(super) fn preview(space: &str, selectors: &[DiscoverySelector], limits: DiscoveryLimits) -> DiscoveryPreview {
     DiscoveryPreview {
         space: space.to_owned(),
-        state: if snapshot.bounds_exceeded {
-            "bounds-exceeded"
-        } else if !snapshot.complete {
-            "observation-gap"
-        } else {
-            "ready"
-        }
-        .to_owned(),
-        selectors: snapshot.roots.keys().copied().collect(),
-        entries: snapshot.roots.clone(),
+        state: "planned".to_owned(),
+        selectors: selectors.to_vec(),
         limits,
         credential_pattern_set_version: 1,
         credential_patterns: super::classify::CREDENTIAL_PATTERNS
@@ -248,7 +254,6 @@ pub(super) fn preview(space: &str, snapshot: &Snapshot, limits: DiscoveryLimits)
         contents_inspected: false,
         host_writes_observed: "not-measured".to_owned(),
         host_state_access: host_state_access(),
-        exclusions: exclusions(snapshot),
     }
 }
 
@@ -274,6 +279,10 @@ pub(super) fn report(
             selector: *selector,
             entries_pre: *count,
             entries_post: post.and_then(|value| value.roots.get(selector)).copied(),
+            complete_pre: pre.root_complete.get(selector).copied().unwrap_or(false),
+            complete_post: post.and_then(|value| value.root_complete.get(selector)).copied(),
+            bounds_exceeded_pre: pre.root_bounds_exceeded.get(selector).copied().unwrap_or(true),
+            bounds_exceeded_post: post.and_then(|value| value.root_bounds_exceeded.get(selector)).copied(),
         })
         .collect();
     let complete =
@@ -296,9 +305,16 @@ pub(super) fn report(
         unreadable_directories: pre
             .unreadable_directories
             .saturating_add(post.map_or(0, |value| value.unreadable_directories)),
-        vanished_entries: pre
-            .vanished_entries
-            .saturating_add(post.map_or(0, |value| value.vanished_entries)),
+        unreadable_classes: {
+            let mut classes = pre.unreadable_classes.clone();
+            if let Some(post) = post {
+                classes.saturating_add_assign(&post.unreadable_classes);
+            }
+            classes
+        },
+        unstable_entries: pre
+            .unstable_entries
+            .saturating_add(post.map_or(0, |value| value.unstable_entries)),
         foreign_owned: pre
             .foreign_owned
             .saturating_add(post.map_or(0, |value| value.foreign_owned)),
@@ -326,7 +342,6 @@ pub(super) fn report(
         host_writes_observed: "not-measured".to_owned(),
         host_state_access: host_state_access(),
         limitations: limitations(),
-        exclusions: exclusions(pre),
     }
 }
 
@@ -369,12 +384,4 @@ fn limitations() -> Vec<String> {
     .into_iter()
     .map(str::to_owned)
     .collect()
-}
-
-fn exclusions(snapshot: &Snapshot) -> Vec<String> {
-    if snapshot.roots.contains_key(&DiscoverySelector::Runtime) {
-        vec!["runtime/bin contents (Quarters-prepared launcher and managed links)".to_owned()]
-    } else {
-        Vec::new()
-    }
 }
