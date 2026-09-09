@@ -168,7 +168,10 @@ and blocking anonymous pipes; sockets, named FIFOs and nonblocking anonymous
 pipes fail explicitly. The report sink is written only after the post-scan and
 is outside the observed delta. macOS delegates duplication to `/dev/fd` and
 accepts any writable descriptor the kernel can duplicate, including sockets,
-pipes, named FIFOs and character devices.
+pipes, named FIFOs and character devices. That duplicate shares the caller's
+open-file description, so writing advances the caller's offset. The Linux
+`/proc/self/fd` reopen has a distinct open-file description initialized to the
+validated position; writing does not advance the caller's offset.
 
 The exclusive lease excludes cooperating Quarters launches and lifecycle
 mutations, not detached descendants or direct same-UID writers. Metadata deltas

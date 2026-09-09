@@ -32,7 +32,7 @@ current host. It does not read credentials.
 | Git credentials | B/D | empty per-space helper | macOS Keychain is host-bound if a user adds that helper |
 | OpenSSH | C | managed `ssh`, `scp` and `sftp` links force protected config, user-known-hosts path and no default identity files | passwd home is unchanged; explicit or absolute host paths remain intentional bypasses |
 | `ssh-add` | C | managed link permits explicit per-space keys and agent inspection; bare/default and host-keychain import are refused | explicit host import requires `quarters host -- ssh-add ...` |
-| SSH agent | C/D | explicit private lifecycle and narrow recovery; host socket stays blocked | agent keys remain same-UID state and are not a containment boundary |
+| SSH agent | C/D | explicit private lifecycle, atomic schema-2 ownership with process-generation binding and narrow recovery; host socket stays blocked | schema-1 state uses conservative PID-only liveness; agent keys remain same-UID state and are not a containment boundary |
 | GitHub CLI | B | `GH_CONFIG_DIR` | environment tokens require explicit `--inherit` |
 | tmux | B | `TMUX_TMPDIR` | host sessions are intentionally not visible |
 | GnuPG | B | `GNUPGHOME`, short runtime | external keychain or hardware identity remains host hardware |

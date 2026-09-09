@@ -42,7 +42,10 @@ Tested Linux sinks include regular files, character devices and blocking
 anonymous pipes; sockets, named FIFOs and nonblocking anonymous pipes fail
 explicitly. macOS delegates duplication to `/dev/fd` and accepts any writable
 descriptor the kernel can duplicate, including sockets, pipes, named FIFOs and
-character devices.
+character devices. It shares the caller's open-file description and therefore
+advances the caller's offset when the report is written. Linux reopens through
+`/proc/self/fd` into a distinct open-file description initialized to the
+validated position, so the caller's offset is not advanced.
 
 Quarters holds the lifecycle lease exclusively for the full invocation. It
 prepares the environment, runtime directory and any namespace launcher before

@@ -113,8 +113,12 @@ compatibility notes will be called out here.
   retain a separate startup-owner lease during bounded protocol readiness, and
   revalidate the record and socket when concurrent starters converge on one
   active process or a failed owner terminates its child.
-- Retry one private-agent launcher that exits before readiness through an
-  atomic reservation handoff, with deterministic six-caller fault injection.
+- Publish private-agent records atomically without replacement, advance new
+  records to schema 2 with native process-generation binding, and retain
+  schema-1 readability. Concurrent starters may re-reserve a proven-dead
+  failed launch within one absolute wall-clock deadline; success is returned
+  only for a protocol-verified active agent. Deterministic six-caller fault
+  injection and partial-record reader stress pin convergence and publication.
 - Add the inspected link change timestamp to shortcut removal's target,
   device and inode checks, narrowing immediate matching-identity reuse without
   claiming a portable same-UID security boundary.

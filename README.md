@@ -212,7 +212,10 @@ sinks include regular files, character devices and blocking anonymous pipes;
 sockets, named FIFOs and nonblocking anonymous pipes are rejected explicitly.
 macOS uses native `/dev/fd` duplication and accepts any writable descriptor that
 the kernel can duplicate, including sockets, pipes, named FIFOs and character
-devices. Report-write failure never replaces the child status.
+devices. Its duplicate shares and advances the caller's open-file-description
+offset. Linux reopens a distinct description at the validated position, so its
+write does not advance the caller's offset. Report-write failure never replaces
+the child status.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
 the computed environment. Neither starts a child or reads user content stored

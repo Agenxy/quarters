@@ -361,7 +361,10 @@ pipes; sockets, named FIFOs and nonblocking anonymous pipes are rejected.
 Quarters validates and consumes the descriptor before opening store state, so
 the number cannot alias an internal lock. On macOS, native `/dev/fd` duplication
 accepts any writable descriptor the kernel can duplicate, including sockets,
-pipes, named FIFOs and character devices.
+pipes, named FIFOs and character devices. That duplicate shares and advances
+the caller's open-file-description offset. Linux instead reopens a distinct
+description at the validated position, so it does not advance the caller's
+offset.
 The JSON contains only counts and semantic classes. Quarters does not open file
 contents, resolve link targets or emit entry paths. `credential-shaped` means a
 disclosed path pattern matched; it is neither content inspection nor a finding
