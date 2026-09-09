@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 use std::error::Error;
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -46,7 +46,7 @@ fn discover_with_launcher(
     options: &[&str],
     report_path: &Path,
 ) -> Result<Value, Box<dyn Error>> {
-    let report = File::create(report_path)?;
+    let report = OpenOptions::new().create_new(true).append(true).open(report_path)?;
     nix::fcntl::fcntl(&report, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()))?;
     let descriptor = report.as_raw_fd();
     let script =
@@ -101,8 +101,12 @@ fn discovery_crosses_confinement_and_home_view_launchers_without_leaking_report_
                     .as_u64()
                     .is_some_and(|count| count >= 1)
             );
-        } else if name == "confined" && std::env::var_os("QUARTERS_REQUIRE_LANDLOCK").is_some() {
-            return Err("hosted Linux requires discovery through the confinement launcher".into());
+        } else {
+            let required = (name == "confined" && std::env::var_os("QUARTERS_REQUIRE_LANDLOCK").is_some())
+                || (name == "home-view" && std::env::var_os("QUARTERS_REQUIRE_HOME_VIEW").is_some());
+            if required {
+                return Err(format!("hosted Linux requires discovery through the {name} launcher").into());
+            }
         }
         run(quarters(&root, &home).args(["rm", name, "--confirm", name]))?;
     }

@@ -21,8 +21,8 @@ compatibility notes will be called out here.
 - Consume and validate caller-transferred report descriptors before opening any
   Quarter or store state, preventing an absent descriptor number from aliasing
   an internal activity lock. Keep the reopened sink close-on-exec, preserve
-  regular-file append/position behavior, support blocking pipes, and reject
-  Linux sockets and nonblocking pipes explicitly.
+  regular-file append/position behavior, support blocking anonymous pipes and
+  FIFOs, and reject Linux sockets and nonblocking pipes explicitly.
 - Conservatively extend host-fork sensitive-path refusal to nested credential
   shapes shared with discovery, including common agent-state roots.
 - Keep discovery out of MCP, ordinary logs and persisted Quarter state. Report

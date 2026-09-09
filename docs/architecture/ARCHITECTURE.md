@@ -162,9 +162,10 @@ and reopened close-on-exec before Quarters opens any store or Quarter state;
 the inherited number is then closed. This ordering prevents an absent caller
 number from aliasing a later internal descriptor. macOS uses `/dev/fd`. Linux
 requires `/proc/self/fd`; regular-file position and append mode are restored,
-blocking pipes are supported, and sockets or nonblocking pipes fail explicitly.
-The report sink is written only after the post-scan and is outside the observed
-delta.
+and the matching `/proc/self/fdinfo` record must expose parseable `pos`, `flags`,
+and `ino` fields. Blocking anonymous pipes and FIFOs are supported; sockets and
+nonblocking pipes fail explicitly. The report sink is written only after the
+post-scan and is outside the observed delta.
 
 The exclusive lease excludes cooperating Quarters launches and lifecycle
 mutations, not detached descendants or direct same-UID writers. Metadata deltas

@@ -246,7 +246,7 @@ pub(super) fn preview(space: &str, selectors: &[DiscoverySelector], limits: Disc
         state: "planned".to_owned(),
         selectors: selectors.to_vec(),
         limits,
-        credential_pattern_set_version: 1,
+        credential_pattern_set_version: super::classify::CREDENTIAL_PATTERN_SET_VERSION,
         credential_patterns: super::classify::CREDENTIAL_PATTERNS
             .iter()
             .map(|value| (*value).to_owned())
@@ -351,7 +351,7 @@ fn credential_disclosure() -> CredentialShapeDisclosure {
         contents_inspected: false,
         false_positives_expected: true,
         false_negatives_expected: true,
-        pattern_set_version: 1,
+        pattern_set_version: super::classify::CREDENTIAL_PATTERN_SET_VERSION,
     }
 }
 

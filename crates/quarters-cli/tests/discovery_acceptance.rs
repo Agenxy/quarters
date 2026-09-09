@@ -5,8 +5,11 @@ use std::error::Error;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::{Child, Command, Output};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
+
+static INHERITED_FD_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
@@ -73,6 +76,7 @@ fn preview_discloses_scope_bounds_and_patterns_without_execution() -> Result<(),
     assert_eq!(value["result"]["host_writes_observed"], "not-measured");
     assert_eq!(value["result"]["limits"]["entries"], 262_144);
     assert_eq!(value["result"]["limits"]["pending_name_bytes"], 16_777_216);
+    assert_eq!(value["result"]["credential_pattern_set_version"], 2);
     assert!(
         value["result"]["credential_patterns"]
             .as_array()
@@ -230,6 +234,9 @@ fn unowned_report_number_cannot_collide_with_store_descriptors() -> Result<(), B
 
 #[test]
 fn broken_report_pipe_never_replaces_child_exit() -> Result<(), Box<dyn Error>> {
+    let _guard = INHERITED_FD_TEST_LOCK
+        .lock()
+        .map_err(|_| "inherited-fd test lock poisoned")?;
     let temporary = TempDir::new()?;
     create(temporary.path(), "demo")?;
     let (reader, writer) = nix::unistd::pipe()?;
@@ -255,13 +262,16 @@ fn broken_report_pipe_never_replaces_child_exit() -> Result<(), Box<dyn Error>> 
 
 #[test]
 fn report_descriptor_is_not_inherited_by_the_measured_child() -> Result<(), Box<dyn Error>> {
+    let _guard = INHERITED_FD_TEST_LOCK
+        .lock()
+        .map_err(|_| "inherited-fd test lock poisoned")?;
     let temporary = TempDir::new()?;
     create(temporary.path(), "demo")?;
     let report = temporary.path().join("report.json");
     let output = discover_with_report(
         temporary.path(),
         &report,
-        "if [ -e /dev/fd/3 ]; then exit 91; fi; exit 0",
+        "for path in /dev/fd/*; do [ -e \"$path\" ] || continue; number=${path##*/}; case $number in ''|*[!0-9]*) continue;; esac; if [ \"$number\" -ge 3 ]; then exit 91; fi; done; exit 0",
     )?;
     assert_eq!(
         output.status.code(),

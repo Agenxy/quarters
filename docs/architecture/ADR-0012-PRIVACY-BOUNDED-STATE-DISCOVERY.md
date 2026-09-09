@@ -37,7 +37,9 @@ and reopens it close-on-exec before opening any store or Quarter state, then
 closes the original number. This prevents an absent caller number from aliasing
 a later internal descriptor. macOS uses `/dev/fd`. Linux requires
 `/proc/self/fd`; regular files retain their observed position and append mode,
-blocking pipes are supported, and sockets or nonblocking pipes fail explicitly.
+and `/proc/self/fdinfo` must expose parseable `pos`, `flags`, and `ino` fields.
+Blocking anonymous pipes and FIFOs are supported; sockets or nonblocking pipes
+fail explicitly.
 
 Quarters holds the lifecycle lease exclusively for the full invocation. It
 prepares the environment, runtime directory and any namespace launcher before

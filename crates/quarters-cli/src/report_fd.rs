@@ -61,8 +61,17 @@ fn platform_open(descriptor: i32) -> Result<File> {
         )
         .with_hint("use a regular file, pipe, or the human stderr report"));
     }
+    let original = std::fs::metadata(&path).map_err(|error| invalid_descriptor(descriptor, error))?;
+    if original.ino() != info.inode {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "the Linux discovery report descriptor changed during validation",
+        ));
+    }
     let append = info.flags.contains(OFlag::O_APPEND);
-    let pipe = link.as_os_str().as_encoded_bytes().starts_with(b"pipe:");
+    let anonymous_pipe = link.as_os_str().as_encoded_bytes().starts_with(b"pipe:");
+    let named_pipe = original.mode() & nix::libc::S_IFMT == nix::libc::S_IFIFO;
+    let pipe = anonymous_pipe || named_pipe;
     let originally_nonblocking = info.flags.contains(OFlag::O_NONBLOCK);
     if pipe && originally_nonblocking {
         return Err(QuartersError::new(
@@ -70,13 +79,6 @@ fn platform_open(descriptor: i32) -> Result<File> {
             "Linux --report-fd requires a blocking pipe descriptor",
         )
         .with_hint("open a blocking pipe, use a regular file, or use the human stderr report"));
-    }
-    let original = std::fs::metadata(&path).map_err(|error| invalid_descriptor(descriptor, error))?;
-    if original.ino() != info.inode {
-        return Err(QuartersError::new(
-            ErrorKind::CorruptState,
-            "the Linux discovery report descriptor changed during validation",
-        ));
     }
     let mut file = writable_options(append, pipe || originally_nonblocking)
         .open(&path)
@@ -222,7 +224,9 @@ fn descriptor_system_error(operation: &str, source: nix::errno::Errno) -> Quarte
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::ReportWriter;
+    use std::fs::OpenOptions;
     use std::os::fd::IntoRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::net::UnixStream;
 
     #[test]
@@ -233,5 +237,29 @@ mod tests {
         assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
         nix::unistd::close(descriptor).expect("close rejected descriptor");
         drop(peer);
+    }
+
+    #[test]
+    fn nonblocking_named_pipe_descriptors_fail_explicitly() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("report-fifo");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR).expect("create fifo");
+        let reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_NONBLOCK)
+            .open(&path)
+            .expect("open fifo reader");
+        let writer = OpenOptions::new()
+            .write(true)
+            .custom_flags(nix::libc::O_NONBLOCK)
+            .open(&path)
+            .expect("open fifo writer");
+        let descriptor = writer.into_raw_fd();
+        let error = ReportWriter::open(descriptor)
+            .err()
+            .expect("nonblocking fifo must fail");
+        assert_eq!(error.kind(), quarters_core::ErrorKind::Unsupported);
+        nix::unistd::close(descriptor).expect("close rejected descriptor");
+        drop(reader);
     }
 }

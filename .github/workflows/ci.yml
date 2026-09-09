@@ -45,15 +45,22 @@ jobs:
           QUARTERS_REQUIRE_LANDLOCK: "1"
         run: |
           test_name="combined_home_view_and_landlock_work_with_a_store_below_passwd_home"
+          discovery_name="discovery_crosses_confinement_and_home_view_launchers_without_leaking_report_fd"
           cargo_bin="$(command -v cargo)"
           runner_uid="$(id -u)"
           runner_gid="$(id -g)"
           cargo test --locked --package quarters --test linux_runtime_acceptance -- --list \
             | grep -Fqx "${test_name}: test"
+          cargo test --locked --package quarters --test linux_discovery_acceptance -- --list \
+            | grep -Fqx "${discovery_name}: test"
           sudo /usr/bin/setpriv --reuid "${runner_uid}" --regid "${runner_gid}" --clear-groups -- \
             /usr/bin/env HOME="${HOME}" PATH="${PATH}" QUARTERS_REQUIRE_HOME_VIEW=1 QUARTERS_REQUIRE_LANDLOCK=1 \
             "${cargo_bin}" test --locked --package quarters --test linux_runtime_acceptance \
             "${test_name}" -- --exact
+          sudo /usr/bin/setpriv --reuid "${runner_uid}" --regid "${runner_gid}" --clear-groups -- \
+            /usr/bin/env HOME="${HOME}" PATH="${PATH}" QUARTERS_REQUIRE_HOME_VIEW=1 QUARTERS_REQUIRE_LANDLOCK=1 \
+            "${cargo_bin}" test --locked --package quarters --test linux_discovery_acceptance \
+            "${discovery_name}" -- --exact
       - name: Build release binary
         run: cargo build --locked --workspace --release
       - name: Smoke-test command

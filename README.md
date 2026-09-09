@@ -206,9 +206,10 @@ Management and inspection commands accept `--json`. Pass-through commands do
 not because child standard output must remain unchanged. Executing discovery
 uses `--report-fd 3` or higher for machine output; global `--json` is accepted
 only with `discover --preview`. The descriptor is caller-transferred and closed
-before child execution. On Linux this surface requires `/proc/self/fd`, supports
-regular files and blocking pipes, and rejects sockets and nonblocking pipes
-explicitly.
+before child execution. On Linux this surface requires `/proc/self/fd` plus
+readable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`; it supports
+regular files, blocking anonymous pipes and blocking FIFOs, and rejects sockets
+and nonblocking pipes explicitly.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
 the computed environment. Neither starts a child or reads user content stored
