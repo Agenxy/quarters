@@ -237,6 +237,49 @@ fn every_scan_resource_bound_suppresses_the_delta() -> Result<(), Box<dyn std::e
 }
 
 #[test]
+fn public_snapshot_rejects_an_unsafe_recursive_depth() -> Result<(), Box<dyn std::error::Error>> {
+    let (_temporary, home, runtime) = private_roots()?;
+    let mut deepest = home.clone();
+    for _level in 0..DiscoveryLimits::MAXIMUM_DEPTH {
+        deepest.push("d");
+        fs::create_dir(&deepest)?;
+    }
+    let accepted = snapshot(
+        &home,
+        &runtime,
+        &[DiscoverySelector::Home],
+        DiscoveryLimits {
+            depth: DiscoveryLimits::MAXIMUM_DEPTH,
+            ..DiscoveryLimits::ALPHA
+        },
+    )?;
+    let accepted_report = report(
+        "test",
+        &accepted,
+        Some(&accepted),
+        DiscoveryChild {
+            exit_code: Some(0),
+            signal: None,
+        },
+        DiscoveryLimits {
+            depth: DiscoveryLimits::MAXIMUM_DEPTH,
+            ..DiscoveryLimits::ALPHA
+        },
+    );
+    assert!(accepted_report.complete);
+    let limits = DiscoveryLimits {
+        depth: DiscoveryLimits::MAXIMUM_DEPTH + 1,
+        ..DiscoveryLimits::ALPHA
+    };
+    let error = match snapshot(&home, &runtime, &[DiscoverySelector::Home], limits) {
+        Ok(_snapshot) => return Err("over-limit discovery depth was accepted".into()),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), crate::ErrorKind::InvalidInput);
+    Ok(())
+}
+
+#[test]
 fn replacing_a_selected_root_suppresses_the_delta() -> Result<(), Box<dyn std::error::Error>> {
     let (temporary, home, runtime) = private_roots()?;
     fs::write(home.join("before"), b"before")?;

@@ -72,6 +72,9 @@ writes under runtime `bin` are measured rather than excluded.
 The alpha gives each selected root an independent per-phase budget of 262,144
 entries, depth 64, 4,096 relative-path bytes, 16 MiB of pending directory-entry
 names and five seconds. Each root reports its own completeness and bound state.
+Library callers are rejected before scanning when depth exceeds the supported
+recursive ceiling of 256; the relative-path byte bound independently limits
+practical depth.
 Any exceeded bound or observation gap suppresses the entire delta. Unreadable
 directories are counted by semantic class without exposing their paths.
 Credential classification uses disclosed path shapes only and explicitly

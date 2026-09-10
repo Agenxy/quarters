@@ -32,6 +32,9 @@ record. New records use schema 2 and bind the PID to its native process-start
 generation. Schema-1 records remain readable and conservatively retain the old
 PID-only liveness check. Record creation uses a synced temporary file followed
 by a native no-replace rename; unsupported filesystem semantics fail closed.
+On macOS, a libproc response that cannot identify the process is treated as
+not matching the stored generation. Recovery may then remove only an exact
+recorded socket without signaling; this favors signal safety over availability.
 The launcher uses the current Quarters executable only for an
 environment-carried token and PID handoff, then clears its environment and
 replaces itself with fixed `/usr/bin/ssh-agent -D`; no shell
@@ -58,9 +61,10 @@ socket and atomically replaces the old `starting` reservation with a fresh
 token, PID and process generation. Observers follow a validated replacement
 rather than treating it as corruption. A contender may re-reserve after a
 failed replacement only when the recorded process generation is no longer
-alive and the owner lease is free. Reservation-level retries remain bounded by
-one absolute wall-clock deadline, and `start` returns success only after the
-final record is protocol-verified `active`.
+alive and the owner lease is free. While the owner is finishing bounded
+cleanup, contenders wait without removing its record. Observation, launch and
+retry share one absolute wall-clock deadline, and `start` returns success only
+after the final record is protocol-verified `active`.
 
 Orphan observers serialize through the lifecycle lock before probing the
 startup-owner lease. Owner-lease acquisition is always nonblocking, which

@@ -128,9 +128,69 @@ fn a_dead_starting_record_requests_rereservation_instead_of_unset_success() {
     );
 }
 
+#[test]
+fn status_and_recovery_reject_a_recycled_starting_pid_generation() {
+    let fixture = Fixture::new("status-recycled-pid");
+    let mut unrelated = Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn unrelated process");
+    let generation = process::process_generation(unrelated.id()).expect("capture process generation");
+    let starting = fixture.record(StoredAgentState::Starting, unrelated.id(), Some(generation ^ 1), None);
+    registry::create(&fixture.runtime, &starting).expect("publish reused-PID startup");
+
+    let status = fixture
+        .store
+        .ssh_agent_status(&fixture.space, &fixture.host)
+        .expect("inspect reused-PID startup");
+    let recovered = fixture
+        .store
+        .recover_ssh_agent(&fixture.space, &fixture.host)
+        .expect("recover reused-PID startup");
+    let still_alive = unrelated.try_wait().expect("inspect unrelated process").is_none();
+    unrelated.kill().expect("stop unrelated process");
+    unrelated.wait().expect("reap unrelated process");
+
+    assert_eq!(status.state, crate::AgentState::Stale);
+    assert_eq!(recovered.state, crate::AgentState::Unset);
+    assert!(still_alive);
+}
+
+#[test]
+fn reservation_defers_while_a_failed_owner_finishes_cleanup() {
+    let fixture = Fixture::new("failed-owner-cleanup");
+    let failed = fixture.dead_record(StoredAgentState::Failed, Some(AgentFailure::LaunchExited));
+    registry::create(&fixture.runtime, &failed).expect("publish failed startup");
+    let owner_path = fixture.runtime.join(registry::STARTUP_OWNER_LOCK_FILE);
+    let owner = crate::store::open_or_create_private_lock(&owner_path).expect("open owner lock");
+    <std::fs::File as fs4::FileExt>::lock(&owner).expect("hold owner lock");
+
+    let pending = startup::reserve_waits_for_active_owner(&fixture.store, &fixture.space, &fixture.runtime)
+        .expect("inspect failed owner cleanup");
+
+    assert!(pending);
+    drop(owner);
+}
+
+#[test]
+fn reservation_defers_while_an_owner_has_not_published_a_record() {
+    let fixture = Fixture::new("unpublished-owner-cleanup");
+    let owner_path = fixture.runtime.join(registry::STARTUP_OWNER_LOCK_FILE);
+    let owner = crate::store::open_or_create_private_lock(&owner_path).expect("open owner lock");
+    <std::fs::File as fs4::FileExt>::lock(&owner).expect("hold owner lock");
+
+    let pending = startup::reserve_waits_for_active_owner(&fixture.store, &fixture.space, &fixture.runtime)
+        .expect("inspect unpublished owner cleanup");
+
+    assert!(pending);
+    drop(owner);
+}
+
 struct Fixture {
     _temporary: tempfile::TempDir,
+    store: Store,
     space: Space,
+    host: HostEnvironment,
     runtime: PathBuf,
 }
 
@@ -145,7 +205,9 @@ impl Fixture {
         let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
         Self {
             _temporary: temporary,
+            store,
             space,
+            host,
             runtime,
         }
     }

@@ -49,8 +49,9 @@ fn discover_with_launcher(
     let report = OpenOptions::new().create_new(true).append(true).open(report_path)?;
     nix::fcntl::fcntl(&report, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()))?;
     let descriptor = report.as_raw_fd();
-    let script =
-        format!("printf smuggle >&{descriptor} 2>/dev/null || :; printf child > \"$XDG_RUNTIME_DIR/bin/child-state\"");
+    let script = format!(
+        "printf smuggle >&{descriptor} 2>/dev/null || :; printf child > \"$HOME/child-state\"; printf child > \"$XDG_RUNTIME_DIR/bin/child-state\""
+    );
     let mut command = quarters(root, home);
     command.arg("discover").arg(name).args(options);
     let output = command
@@ -101,6 +102,7 @@ fn discovery_crosses_confinement_and_home_view_launchers_without_leaking_report_
                     .as_u64()
                     .is_some_and(|count| count >= 1)
             );
+            assert_eq!(report["result"]["delta"]["created"]["data"], 1);
         } else {
             let required = (name == "confined" && std::env::var_os("QUARTERS_REQUIRE_LANDLOCK").is_some())
                 || (name == "home-view" && std::env::var_os("QUARTERS_REQUIRE_HOME_VIEW").is_some());

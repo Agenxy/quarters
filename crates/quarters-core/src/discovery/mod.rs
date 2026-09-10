@@ -53,6 +53,9 @@ pub struct DiscoveryLimits {
 }
 
 impl DiscoveryLimits {
+    /// Largest supported recursive traversal depth for library callers.
+    pub const MAXIMUM_DEPTH: u32 = 256;
+
     /// Fixed limits for the alpha discovery contract.
     pub const ALPHA: Self = Self {
         entries: 262_144,
@@ -192,6 +195,16 @@ pub fn snapshot(
     selectors: &[DiscoverySelector],
     limits: DiscoveryLimits,
 ) -> crate::Result<DiscoverySnapshot> {
+    if limits.depth > DiscoveryLimits::MAXIMUM_DEPTH {
+        return Err(crate::QuartersError::new(
+            crate::ErrorKind::InvalidInput,
+            format!(
+                "discovery depth {} exceeds the supported maximum {}",
+                limits.depth,
+                DiscoveryLimits::MAXIMUM_DEPTH
+            ),
+        ));
+    }
     let mut unique = selectors.to_vec();
     unique.sort_unstable();
     unique.dedup();

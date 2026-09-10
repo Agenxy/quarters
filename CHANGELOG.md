@@ -119,6 +119,12 @@ compatibility notes will be called out here.
   failed launch within one absolute wall-clock deadline; success is returned
   only for a protocol-verified active agent. Deterministic six-caller fault
   injection and partial-record reader stress pin convergence and publication.
+- Apply process-generation checks to every private-agent status and recovery
+  state, wait for an active startup owner to finish failed-launch cleanup, and
+  keep observation, launch and retry under one absolute startup deadline.
+- Cap public discovery recursion at 256 levels and extend required Linux
+  launcher evidence to prove both home-root and runtime-root deltas through
+  Landlock and the bind-mounted home view.
 - Add the inspected link change timestamp to shortcut removal's target,
   device and inode checks, narrowing immediate matching-identity reuse without
   claiming a portable same-UID security boundary.

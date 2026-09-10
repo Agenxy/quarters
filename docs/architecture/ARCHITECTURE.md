@@ -146,6 +146,8 @@ metadata before traversal.
 Both roots must already satisfy the ordinary Quarters private-root invariant:
 current UID, directory type and exact mode `0700`. Discovery refuses a damaged
 root rather than silently repairing permissions or weakening that invariant.
+The shipped alpha scans to depth 64. Public library callers cannot request a
+recursive depth above 256; larger values fail before either root is opened.
 With both roots selected, the two retained snapshots can contain at most
 1,048,576 entry records in aggregate; only the scanner for the current root
 holds the additional 16 MiB pending-name budget. The time ceiling is per root

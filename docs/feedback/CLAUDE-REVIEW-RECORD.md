@@ -1018,13 +1018,40 @@ Evidence for the accepted source checkpoint:
   default user-namespace policy and required Landlock plus home-view execution
   with supplementary groups cleared
 
-Accepted low-severity follow-ups remain availability and diagnosability work:
-generation-aware explicit recovery/status for non-`starting` records, smoother
-contention while an owner finishes failed-launch cleanup, a home-root assertion
-in the Linux discovery composition test, a public discovery-depth ceiling and
-bounded launcher diagnostics. Discovery remains metadata-only and cooperative,
-report-sink failure remains subordinate to child status, and same-UID processes
-remain outside the containment claim.
+Subsequent hardening applied generation-aware status and explicit recovery to
+every stored state, made contenders wait while an owner finishes failed-launch
+cleanup, put spawned attempts under the same absolute deadline, added a
+home-root assertion to the required Linux launcher composition, and rejected
+public discovery depth above 256. The first read-only review of that follow-up
+returned `VERDICT: REVISE`: it caught one dead-process fixture that tried to
+capture generation after reaping and required direct recycled-PID coverage for
+non-`starting` states. The fixtures now capture real live generations where
+required and deliberately mismatch live unrelated generations for `active`
+and `stopping` recovery tests.
+
+Launcher stderr remains an accepted alpha diagnosability boundary, not an
+unresolved security or correctness defect. Exit status and a bounded failure
+class are already reported. Capturing an untrusted stream would require a
+nonblocking bounded drain, privacy filtering and terminal-safe presentation;
+that additional attack surface is not justified merely to enrich this error.
+Discovery remains metadata-only and cooperative, report-sink failure remains
+subordinate to child status, and same-UID processes remain outside the
+containment claim.
+
+The corrected follow-up received `VERDICT: ACCEPT` with no high or medium
+finding. Quarters then closed its remaining low-cost coverage observations:
+both live exact-generation disconnected states are exercised without signaling,
+the no-record owner window also defers, test names state only what they prove,
+and a real 256-directory traversal pins the public ceiling. A final read-only
+Opus maximum-effort review inspected the complete worktree and returned:
+
+> VERDICT: ACCEPT
+
+Its remaining notes are informational alpha boundaries: the public depth
+ceiling assumes enough process file descriptors while the shipped depth stays
+64, exact Linux home-delta evidence runs only on hosted Linux, and macOS libproc
+inspection errors fail closed. It found no high or medium security,
+correctness, portability, lock, cleanup or resource issue.
 
 The managed Codex deep security scan remains unavailable under this task's
 disabled filesystem permission profile and is still an external merge gate; no

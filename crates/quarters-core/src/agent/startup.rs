@@ -27,12 +27,19 @@ pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Res
     let runtime = crate::platform::runtime_directory(space, host)?;
     let absolute_deadline = Instant::now() + MAXIMUM_TOTAL_STARTUP_WAIT;
     loop {
+        ensure_startup_time_remains(absolute_deadline)?;
         let reservation = {
             let _lock = agent_lock(&runtime)?;
+            ensure_startup_time_remains(absolute_deadline)?;
             reserve(store, space, &runtime)?
         };
         let status = match reservation {
             Reservation::Active(status) => status,
+            Reservation::PendingCleanup => {
+                ensure_startup_time_remains(absolute_deadline)?;
+                thread::sleep(Duration::from_millis(20));
+                continue;
+            }
             Reservation::Observe(starting) => match reconcile(space, &runtime, &starting, absolute_deadline)? {
                 Reconciled::Active(status) => status,
                 Reconciled::Recovered => {
@@ -41,7 +48,7 @@ pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Res
                 }
             },
             Reservation::Spawned { child, starting, owner } => {
-                await_spawned(store, space, &runtime, child, starting, owner)?
+                await_spawned(store, space, &runtime, child, starting, owner, absolute_deadline)?
             }
             Reservation::Cleanup {
                 mut child,
@@ -72,7 +79,7 @@ pub(super) fn reconcile(
 ) -> Result<Reconciled> {
     validate_starting(starting)?;
     let mut current_starting = starting.clone();
-    let mut deadline = Instant::now() + STARTUP_TIMEOUT;
+    let mut deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
     loop {
         let observed = protocol::verified_socket_identity(&registry::socket_path(runtime), current_starting.pid).ok();
         let alive = process::process_matches_generation(current_starting.pid, current_starting.process_generation)?;
@@ -189,6 +196,9 @@ fn reserve(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> 
                     "private SSH-agent state is failed but its recorded process generation is alive",
                 ));
             }
+            if startup_owner_is_busy(runtime)? {
+                return Ok(Reservation::PendingCleanup);
+            }
             recover_inactive_record(space, runtime, &record)?;
         }
         AgentState::Unset => {}
@@ -215,7 +225,16 @@ fn reserve(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> 
     }
     reject_unowned_socket(runtime)?;
     process::validate_launch(runtime)?;
+    if startup_owner_is_busy(runtime)? {
+        return Ok(Reservation::PendingCleanup);
+    }
     reserve_new(store, space, runtime)
+}
+
+#[cfg(test)]
+pub(super) fn reserve_waits_for_active_owner(store: &Store, space: &Space, runtime: &Path) -> Result<bool> {
+    let _lock = agent_lock(runtime)?;
+    Ok(matches!(reserve(store, space, runtime)?, Reservation::PendingCleanup))
 }
 
 fn reserve_new(store: &Store, space: &Space, runtime: &Path) -> Result<Reservation> {
@@ -253,9 +272,10 @@ fn await_spawned(
     mut child: Child,
     mut starting: AgentRecord,
     _owner: File,
+    absolute_deadline: Instant,
 ) -> Result<AgentStatus> {
     let mut attempts = 1_usize;
-    let mut deadline = Instant::now() + STARTUP_TIMEOUT;
+    let mut deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
     loop {
         if let Ok(identity) = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid) {
             return match commit_activation(space, runtime, &starting, identity) {
@@ -266,7 +286,7 @@ fn await_spawned(
         if let Some(exit) = child.try_wait().map_err(|error| {
             QuartersError::new(ErrorKind::System, "could not inspect agent startup").with_source(error)
         })? {
-            if attempts < MAXIMUM_LAUNCH_ATTEMPTS {
+            if attempts < MAXIMUM_LAUNCH_ATTEMPTS && Instant::now() < absolute_deadline {
                 cleanup_exited_socket(runtime)?;
                 match retry_exited_launch(store, space, runtime, &starting) {
                     Ok(RetryLaunch::Active(status)) => return Ok(status),
@@ -274,7 +294,7 @@ fn await_spawned(
                         child = replacement_child;
                         starting = replacement_starting;
                         attempts += 1;
-                        deadline = Instant::now() + STARTUP_TIMEOUT;
+                        deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
                         continue;
                     }
                     Err(error) => {
@@ -310,7 +330,7 @@ fn await_spawned(
             }
             return Err(QuartersError::new(
                 ErrorKind::ResourceLimit,
-                "the private SSH agent did not become ready within five seconds",
+                "the private SSH agent did not become ready before the startup deadline",
             ));
         }
         thread::sleep(Duration::from_millis(20));
@@ -569,8 +589,15 @@ fn orphan_startup_guard(runtime: &Path) -> Result<Option<File>> {
     }
 }
 
+fn startup_owner_is_busy(runtime: &Path) -> Result<bool> {
+    // The returned option is consumed here so a successful shared probe is
+    // dropped before reserve_new opens a fresh description for exclusive use.
+    Ok(orphan_startup_guard(runtime)?.is_none())
+}
+
 enum Reservation {
     Active(AgentStatus),
+    PendingCleanup,
     Observe(AgentRecord),
     Spawned {
         child: Child,
