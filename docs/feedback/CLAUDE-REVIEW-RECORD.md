@@ -861,3 +861,64 @@ capabilities, then implements invocation-local Linux data grants, default-policy
 CI evidence, storage-contract cleanup and privacy-bounded CLI discovery.
 Seatbelt, App Sandbox, idmapped mounts, per-space encryption and LaunchServices
 GUI capture are not represented as weaker features under stronger names.
+
+## Alpha 5 Linux grants and home-view composition, 2026-09-01
+
+Claude Code used Claude Opus at maximum effort in read-only mode throughout
+the Alpha 5 implementation. An early complete checkpoint at `524823c` returned
+`VERDICT: ACCEPT` with three nonblocking observations: complete the TIOCSTI
+JSON binding, split the Linux acceptance file before its structural ceiling and
+centralize duplicated home-view working-directory mapping. Those changes landed
+in `7eacab3`, whose hosted matrix appeared green in run `33584150117`.
+
+An exact re-review rejected that checkpoint. The centralized resolver had
+revalidated a mapped Quarter-home workdir at its post-mount passwd path before
+the mount existed, and GitHub runner supplementary groups caused every real
+home-view execution to skip. Quarters repaired the resolver and added a
+dedicated `setpriv --clear-groups` acceptance step that requires both home view
+and Landlock and fails if the exact composition test is absent or skipped.
+
+Making the hidden path executable exposed the real kernel behavior rather than
+producing another cosmetic green gate. Hosted runs rejected, in order, a
+post-mount identity mismatch at `53a3f49`, a proc-descriptor bind target at
+`15f3ec1`, `open_tree(OPEN_TREE_CLONE)` at `ec7b8f5`, a proc-descriptor bind
+source at `ed19920`, and `move_mount` of the attached staging mount at
+`ae071a8`. The accepted implementation uses only namespace-owned recursive
+binds: it stages the source below the private runtime, verifies the mounted
+device and inode against a pre-opened descriptor, revalidates the passwd-home
+target, attaches the verified staging mount inside the private namespace,
+detaches staging and verifies the final home view before process replacement.
+
+Opus returned `VERDICT: ACCEPT` on `5442ec9` and identified additional
+nonblocking hardening. Quarters then detached the staging path, proved its known
+Quarter-only child is absent after attach, required Landlock and home-view
+capabilities independently, and documented both the residual same-UID
+passwd-parent target race and the fact that home view is reversible path
+compatibility rather than confinement. The first broad capability assertion at
+`ab1549c` correctly failed ordinary hosted CI because supplementary groups make
+home view unavailable there; `bc5ec6b` corrected the test contract while the
+dedicated cleared-group step continued to require both capabilities.
+
+The final exact-head, clean-worktree Opus maximum-effort review of `bc5ec6b`
+re-derived mount propagation, detach lifetime, inode checks, Landlock ordering,
+test non-vacuity and documented boundaries and returned:
+
+> VERDICT: ACCEPT
+
+Final evidence on the accepted source checkpoint:
+
+- local `make check`: Bun launcher checks and audit, formatting, host Clippy,
+  all unit and acceptance suites, structural ceilings and warning-free rustdoc
+  pass
+- `x86_64-unknown-linux-musl` workspace, all-target, all-feature Clippy with
+  explicit `-D warnings`: pass
+- hosted push run `33588714585` and pull-request run `33588716967`: all six
+  jobs pass, including the non-skipping home-view plus Landlock composition,
+  default-policy refusal, macOS, static musl, release smoke, RustSec and
+  dependency licence/source policy
+- `git diff --check`: pass
+
+The managed Codex deep security scan remains unavailable because this host
+session exposes an unmanaged/disabled filesystem permission profile, so no
+deep-scan result is claimed and pull request 8 remains unmerged. Dibs was known
+to be unavailable during this phase and was not treated as an acceptance gate.

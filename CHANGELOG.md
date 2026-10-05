@@ -23,6 +23,26 @@ compatibility notes will be called out here.
   available in restricted contexts while shortcut mutation remains refused.
 - Keep the private Linux runtime outside both environment and passwd homes so
   an alternate `HOME` cannot place the launcher beneath a later home-view mount.
+- Add invocation-local Linux `--grant-path PATH:ro|rw` data grants and portable
+  `--workdir`; reject executable authority, reserved-state overlap and changed
+  rule-anchor identity, and report the host's legacy TIOCSTI policy.
+- Add hosted Ubuntu evidence that the distribution-default unprivileged user
+  namespace policy makes optional home-view fail closed without a sysctl override.
+- Hold each confined executable by verified device and inode across Landlock
+  enforcement, replace the process through `execveat(AT_EMPTY_PATH)`, report
+  non-disabled or unreadable legacy TIOCSTI state as an explicit limitation,
+  and reject explicit grants that overlap any built-in policy root.
+- Disclose that descriptor-bound interpreter scripts can observe `/dev/fd` as
+  their source path and inherit one readless `O_PATH` handle required by the
+  kernel retry.
+- Map a passwd-home `--workdir` through home view only when its Quarter
+  counterpart exists; otherwise fail before mounting instead of silently
+  changing its meaning.
+- Stage and verify the Linux home view below the private runtime, revalidate the
+  passwd-home target before its private-namespace attach, verify the mounted
+  result, detach the staging mount, and require the composed home-view plus
+  Landlock path to run rather than skip in hosted acceptance whenever either
+  capability is mandatory.
 
 - Add identity-bound cooperative freeze/unfreeze, immediate stationery capture
   from a current Quarter holding a cooperative lease, and explicit

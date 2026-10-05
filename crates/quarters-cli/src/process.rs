@@ -1,10 +1,17 @@
 //! Native child-process launch and host escape behavior.
 
 use quarters_core::platform;
-use quarters_core::{EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, Result, Space, Store};
+use quarters_core::{
+    ConfinementRequest, EnvironmentPlan, ErrorKind, HostEnvironment, QuartersError, Result, Space, Store,
+    UserConfinementGrant,
+};
+#[cfg(target_os = "linux")]
+use std::ffi::CString;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+#[cfg(target_os = "linux")]
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -19,12 +26,15 @@ pub(crate) struct ProfileLaunch<'a> {
     pub(crate) home_view: bool,
     pub(crate) confinement: bool,
     pub(crate) inherited_names: &'a [String],
+    pub(crate) user_grants: &'a [crate::cli::GrantPathArg],
+    pub(crate) working_directory: Option<&'a Path>,
 }
 
 impl ProfileLaunch<'_> {
     pub(crate) fn environment_and_confinement(
         &self,
     ) -> Result<(EnvironmentPlan, Option<quarters_core::ConfinementPlan>)> {
+        self.validate_options()?;
         if self.confinement {
             let status = platform::capabilities().confinement;
             if !status.available {
@@ -56,7 +66,21 @@ impl ProfileLaunch<'_> {
         }
         let effective_home = self.effective_home()?;
         let runtime = required_environment_path(environment, "XDG_RUNTIME_DIR")?;
-        platform::confinement_plan(&self.space.home(), &effective_home, &runtime, self.host.get("PATH")).map(Some)
+        let current_executable = current_executable()?;
+        let user_grants = self.user_confinement_grants();
+        platform::confinement_plan(&ConfinementRequest {
+            space_home: &self.space.home(),
+            effective_home: &effective_home,
+            runtime: &runtime,
+            store_root: self.store.root(),
+            current_executable: &current_executable,
+            request_executable: None,
+            host_path: self.host.get("PATH"),
+            user_grants: &user_grants,
+            working_directory: self.working_directory,
+            home_view: self.home_view,
+        })
+        .map(Some)
     }
 
     pub(crate) fn run(&self, raw_command: &[OsString]) -> Result<i32> {
@@ -66,7 +90,12 @@ impl ProfileLaunch<'_> {
         let status = if self.home_view || self.confinement {
             self.run_linux_launcher(program, arguments, &environment, confinement.as_ref())?
         } else {
-            run_direct(program, arguments, &environment)?
+            run_direct(
+                program,
+                arguments,
+                &environment,
+                self.resolved_baseline_workdir()?.as_deref(),
+            )?
         };
         Ok(status_code(status))
     }
@@ -96,18 +125,20 @@ impl ProfileLaunch<'_> {
         environment: &EnvironmentPlan,
         confinement: Option<&quarters_core::ConfinementPlan>,
     ) -> Result<ExitStatus> {
-        let current_executable = std::env::current_exe().map_err(|error| {
-            QuartersError::new(ErrorKind::System, "could not locate the Quarters executable").with_source(error)
-        })?;
+        let current_executable = current_executable()?;
         install_runtime_binary(&current_executable, environment)?;
         let runtime = required_environment_path(environment, "XDG_RUNTIME_DIR")?;
-        let mut command = Command::new(current_executable);
+        let mut command = Command::new(&current_executable);
         command
             .arg("__linux-launch")
             .arg("--space-home")
             .arg(self.space.home())
             .arg("--runtime-dir")
-            .arg(runtime);
+            .arg(runtime)
+            .arg("--store-root")
+            .arg(self.store.root())
+            .arg("--request-executable")
+            .arg(&current_executable);
         if self.home_view {
             command.arg("--host-home").arg(Self::host_home()?);
         }
@@ -127,6 +158,15 @@ impl ProfileLaunch<'_> {
                     self.space.manifest().name
                 );
             }
+        }
+        for grant in self.user_grants {
+            let mut encoded = grant.path.as_os_str().to_owned();
+            encoded.push(":");
+            encoded.push(grant.access.as_str());
+            command.arg("--grant-path").arg(encoded);
+        }
+        if let Some(workdir) = self.working_directory {
+            command.arg("--workdir").arg(workdir);
         }
         command.arg("--").arg(program).args(arguments);
         environment.apply(&mut command);
@@ -148,6 +188,39 @@ impl ProfileLaunch<'_> {
             ErrorKind::CorruptState,
             "the current account passwd home is not absolute",
         ))
+    }
+
+    fn validate_options(&self) -> Result<()> {
+        if !self.user_grants.is_empty() && !cfg!(target_os = "linux") {
+            return Err(QuartersError::new(
+                ErrorKind::Unsupported,
+                "--grant-path is available only with Linux filesystem confinement",
+            )
+            .with_hint("omit --grant-path on macOS; --workdir remains portable"));
+        }
+        if !self.user_grants.is_empty() && !self.confinement {
+            return Err(QuartersError::new(
+                ErrorKind::InvalidInput,
+                "--grant-path requires --confinement filesystem on Linux",
+            ));
+        }
+        self.resolved_baseline_workdir().map(|_path| ())
+    }
+
+    fn resolved_baseline_workdir(&self) -> Result<Option<PathBuf>> {
+        self.working_directory
+            .map(platform::resolve_existing_working_directory)
+            .transpose()
+    }
+
+    fn user_confinement_grants(&self) -> Vec<UserConfinementGrant> {
+        self.user_grants
+            .iter()
+            .map(|grant| UserConfinementGrant {
+                path: grant.path.clone(),
+                access: grant.access,
+            })
+            .collect()
     }
 }
 
@@ -202,17 +275,49 @@ pub(crate) fn run_host(raw_command: &[OsString]) -> Result<i32> {
     Ok(status_code(status))
 }
 
-pub(crate) fn linux_launch(
-    space_home: &Path,
-    host_home: Option<&Path>,
-    runtime: &Path,
-    confinement: bool,
-    raw_command: &[OsString],
-) -> Result<i32> {
-    let (program, arguments) = split_command(raw_command)?;
-    let effective_home = host_home.unwrap_or(space_home);
-    let confinement_plan = if confinement {
-        Some(platform::confinement_plan(space_home, effective_home, runtime, None)?)
+pub(crate) struct LinuxLaunchRequest<'a> {
+    pub(crate) space_home: &'a Path,
+    pub(crate) host_home: Option<&'a Path>,
+    pub(crate) runtime: &'a Path,
+    pub(crate) store_root: &'a Path,
+    pub(crate) request_executable: &'a Path,
+    pub(crate) confinement: bool,
+    pub(crate) user_grants: &'a [crate::cli::GrantPathArg],
+    pub(crate) working_directory: Option<&'a Path>,
+    pub(crate) raw_command: &'a [OsString],
+}
+
+pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
+    let (program, arguments) = split_command(request.raw_command)?;
+    let effective_home = request.host_home.unwrap_or(request.space_home);
+    if !request.user_grants.is_empty() && !request.confinement {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "internal user grants require filesystem confinement",
+        ));
+    }
+    let user_grants = request
+        .user_grants
+        .iter()
+        .map(|grant| UserConfinementGrant {
+            path: grant.path.clone(),
+            access: grant.access,
+        })
+        .collect::<Vec<_>>();
+    let launcher_executable = current_executable()?;
+    let confinement_plan = if request.confinement {
+        Some(platform::confinement_plan(&ConfinementRequest {
+            space_home: request.space_home,
+            effective_home,
+            runtime: request.runtime,
+            store_root: request.store_root,
+            current_executable: &launcher_executable,
+            request_executable: Some(request.request_executable),
+            host_path: None,
+            user_grants: &user_grants,
+            working_directory: request.working_directory,
+            home_view: request.host_home.is_some(),
+        })?)
     } else {
         None
     };
@@ -220,29 +325,128 @@ pub(crate) fn linux_launch(
         .as_ref()
         .map(platform::prepare_filesystem_confinement)
         .transpose()?;
-    if let Some(host_home) = host_home {
-        platform::enter_home_view(space_home, host_home)?;
-    } else if confinement {
-        std::env::set_current_dir(space_home)
-            .map_err(|error| QuartersError::io("enter the confined Quarter home", space_home, error))?;
+    let baseline_workdir = if confinement_plan.is_none() {
+        request
+            .working_directory
+            .map(|path| platform::resolve_home_view_working_directory(path, request.space_home, effective_home))
+            .transpose()?
+    } else {
+        None
+    };
+    if let Some(host_home) = request.host_home {
+        platform::enter_home_view(request.space_home, host_home, request.runtime)?;
     }
-    let program = if let Some(plan) = confinement_plan.as_ref() {
-        let mapped = map_home_view_program(program, space_home, effective_home);
+    if let Some(plan) = confinement_plan.as_ref() {
+        std::env::set_current_dir(&plan.working_directory).map_err(|error| {
+            QuartersError::io("enter the confined working directory", &plan.working_directory, error)
+        })?;
+    } else if let Some(workdir) = baseline_workdir {
+        std::env::set_current_dir(&workdir)
+            .map_err(|error| QuartersError::io("enter requested working directory", &workdir, error))?;
+    }
+    let confined_executable = if let Some(plan) = confinement_plan.as_ref() {
+        let mapped = map_home_view_program(program, request.space_home, effective_home);
         let path = std::env::var_os("PATH")
             .ok_or_else(|| QuartersError::new(ErrorKind::CorruptState, "confined launcher has no executable PATH"))?;
-        platform::resolve_confined_executable(&mapped, &path, plan)?
+        Some(platform::resolve_confined_executable(&mapped, &path, plan)?)
     } else {
-        PathBuf::from(program)
+        None
     };
     if let Some(prepared) = prepared_confinement {
         platform::enter_filesystem_confinement(prepared)?;
     }
+    if let Some(executable) = confined_executable {
+        let (program, descriptor) = executable.into_parts();
+        return exec_confined_descriptor(&descriptor, &program, arguments);
+    }
+    let program = PathBuf::from(program);
     let error = std::os::unix::process::CommandExt::exec(Command::new(&program).args(arguments));
     Err(process_error(
         "replace the namespace launcher",
         program.as_os_str(),
         error,
     ))
+}
+
+#[cfg(target_os = "linux")]
+fn exec_confined_descriptor(descriptor: &File, program: &Path, arguments: &[OsString]) -> Result<i32> {
+    use nix::errno::Errno;
+    use nix::fcntl::{AtFlags, FcntlArg, FdFlag, fcntl};
+    use nix::unistd::execveat;
+
+    let argument_storage = std::iter::once(program.as_os_str())
+        .chain(arguments.iter().map(OsString::as_os_str))
+        .map(execution_c_string)
+        .collect::<Result<Vec<_>>>()?;
+    let argument_refs = argument_storage.iter().map(CString::as_c_str).collect::<Vec<_>>();
+    let environment_storage = std::env::vars_os()
+        .map(|(name, value)| {
+            let mut entry = name.into_vec();
+            entry.push(b'=');
+            entry.extend(value.into_vec());
+            CString::new(entry).map_err(|error| {
+                QuartersError::new(
+                    ErrorKind::CorruptState,
+                    "process environment contains an invalid NUL byte",
+                )
+                .with_source(error)
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let environment_refs = environment_storage.iter().map(CString::as_c_str).collect::<Vec<_>>();
+    match execveat(
+        descriptor,
+        c"",
+        &argument_refs,
+        &environment_refs,
+        AtFlags::AT_EMPTY_PATH,
+    ) {
+        Ok(never) => match never {},
+        Err(Errno::ENOENT) => {
+            fcntl(descriptor, FcntlArg::F_SETFD(FdFlag::empty())).map_err(|error| {
+                QuartersError::new(ErrorKind::System, "could not prepare a script executable descriptor")
+                    .with_source(error)
+            })?;
+            match execveat(
+                descriptor,
+                c"",
+                &argument_refs,
+                &environment_refs,
+                AtFlags::AT_EMPTY_PATH,
+            ) {
+                Ok(never) => match never {},
+                Err(error) => Err(executable_descriptor_error(program, error)),
+            }
+        }
+        Err(error) => Err(executable_descriptor_error(program, error)),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn exec_confined_descriptor(_descriptor: &File, program: &Path, _arguments: &[OsString]) -> Result<i32> {
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        format!(
+            "descriptor-bound confinement execution is unavailable for {}",
+            program.display()
+        ),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn execution_c_string(value: &OsStr) -> Result<CString> {
+    CString::new(value.as_bytes()).map_err(|error| {
+        QuartersError::new(ErrorKind::InvalidInput, "command arguments contain an invalid NUL byte").with_source(error)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn executable_descriptor_error(program: &Path, error: nix::errno::Errno) -> QuartersError {
+    process_error(
+        "replace the namespace launcher through its stable descriptor",
+        program.as_os_str(),
+        std::io::Error::from_raw_os_error(error as i32),
+    )
 }
 
 fn map_home_view_program(program: &OsStr, space_home: &Path, effective_home: &Path) -> OsString {
@@ -253,13 +457,27 @@ fn map_home_view_program(program: &OsStr, space_home: &Path, effective_home: &Pa
     )
 }
 
-fn run_direct(program: &OsStr, arguments: &[OsString], environment: &EnvironmentPlan) -> Result<ExitStatus> {
+fn run_direct(
+    program: &OsStr,
+    arguments: &[OsString],
+    environment: &EnvironmentPlan,
+    working_directory: Option<&Path>,
+) -> Result<ExitStatus> {
     let mut command = Command::new(program);
     command.args(arguments);
+    if let Some(directory) = working_directory {
+        command.current_dir(directory);
+    }
     environment.apply(&mut command);
     command
         .status()
         .map_err(|error| process_error("start profile command", program, error))
+}
+
+fn current_executable() -> Result<PathBuf> {
+    std::env::current_exe().map_err(|error| {
+        QuartersError::new(ErrorKind::System, "could not locate the Quarters executable").with_source(error)
+    })
 }
 
 fn required_environment_path(environment: &EnvironmentPlan, name: &str) -> Result<PathBuf> {

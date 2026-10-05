@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn test_store() -> (TempDir, Store) {
-    let temporary = TempDir::new().expect("temporary directory");
+    // A short base keeps fixture sockets within SUN_LEN even when TMPDIR is a
+    // long per-Quarter runtime path.
+    let temporary = TempDir::new_in("/tmp").expect("temporary directory");
     let store = Store::new(temporary.path().join("root")).expect("valid store");
     (temporary, store)
 }

@@ -2,7 +2,8 @@
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 /// Give native processes a persistent alternate user-state profile.
 #[derive(Debug, Parser)]
@@ -455,13 +456,49 @@ pub(crate) struct ProfileArgs {
     #[arg(long)]
     pub(crate) home_view: bool,
 
-    /// Enforce the named native filesystem policy; starts in the Quarter home.
+    /// Enforce the named native filesystem policy; defaults to the Quarter home.
     #[arg(long, value_enum)]
     pub(crate) confinement: Option<ConfinementArg>,
 
     /// Explicitly inherit one otherwise-blocked host environment variable.
     #[arg(long = "inherit", value_name = "NAME")]
     pub(crate) inherit: Vec<String>,
+
+    /// Admit one existing absolute host data path to Linux confinement.
+    #[arg(long = "grant-path", value_name = "ABSOLUTE_PATH:ro|rw")]
+    pub(crate) grant_paths: Vec<GrantPathArg>,
+
+    /// Start the shell or command in this existing absolute directory.
+    #[arg(long, value_name = "ABSOLUTE_PATH")]
+    pub(crate) workdir: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GrantPathArg {
+    pub(crate) path: PathBuf,
+    pub(crate) access: quarters_core::UserGrantAccess,
+}
+
+impl FromStr for GrantPathArg {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        let (path, access) = value
+            .rsplit_once(':')
+            .ok_or_else(|| "expected an absolute path followed by :ro or :rw".to_owned())?;
+        let access = match access {
+            "ro" => quarters_core::UserGrantAccess::ReadOnly,
+            "rw" => quarters_core::UserGrantAccess::ReadWrite,
+            _ => return Err("grant access must be exactly ro or rw".to_owned()),
+        };
+        if path.is_empty() || !Path::new(path).is_absolute() {
+            return Err("grant path must be absolute".to_owned());
+        }
+        Ok(Self {
+            path: PathBuf::from(path),
+            access,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -627,8 +664,38 @@ pub(crate) struct LinuxLaunchArgs {
     pub(crate) runtime_dir: PathBuf,
     #[arg(long)]
     pub(crate) confinement: bool,
+    #[arg(long = "store-root")]
+    pub(crate) store_root: PathBuf,
+    #[arg(long = "request-executable")]
+    pub(crate) request_executable: PathBuf,
+    #[arg(long = "grant-path")]
+    pub(crate) grant_paths: Vec<GrantPathArg>,
+    #[arg(long)]
+    pub(crate) workdir: Option<PathBuf>,
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) command: Vec<OsString>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GrantPathArg;
+    use quarters_core::UserGrantAccess;
+    use std::path::PathBuf;
+    use std::str::FromStr;
+
+    #[test]
+    fn grant_path_uses_the_final_colon_as_the_access_separator() -> Result<(), String> {
+        let parsed = GrantPathArg::from_str("/tmp/project:variant:rw")?;
+        assert_eq!(parsed.path, PathBuf::from("/tmp/project:variant"));
+        assert_eq!(parsed.access, UserGrantAccess::ReadWrite);
+        Ok(())
+    }
+
+    #[test]
+    fn grant_path_rejects_relative_paths_and_unknown_access() {
+        assert!(GrantPathArg::from_str("relative:ro").is_err());
+        assert!(GrantPathArg::from_str("/tmp/project:execute").is_err());
+    }
 }
 
 #[derive(Debug, Args)]

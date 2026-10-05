@@ -75,13 +75,17 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         }
         Command::LinuxLaunch(arguments) => {
             passthrough_json_guard(cli.json)?;
-            process::linux_launch(
-                &arguments.space_home,
-                arguments.host_home.as_deref(),
-                &arguments.runtime_dir,
-                arguments.confinement,
-                &arguments.command,
-            )
+            process::linux_launch(&process::LinuxLaunchRequest {
+                space_home: &arguments.space_home,
+                host_home: arguments.host_home.as_deref(),
+                runtime: &arguments.runtime_dir,
+                store_root: &arguments.store_root,
+                request_executable: &arguments.request_executable,
+                confinement: arguments.confinement,
+                user_grants: &arguments.grant_paths,
+                working_directory: arguments.workdir.as_deref(),
+                raw_command: &arguments.command,
+            })
         }
         Command::AgentLaunch(arguments) => {
             passthrough_json_guard(cli.json)?;
@@ -863,6 +867,8 @@ fn profile_launch<'a>(
         home_view: profile.home_view,
         confinement: profile.confinement.is_some(),
         inherited_names: &profile.inherit,
+        user_grants: &profile.grant_paths,
+        working_directory: profile.workdir.as_deref(),
     }
 }
 

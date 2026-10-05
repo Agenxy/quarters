@@ -12,7 +12,7 @@ use nix::unistd::Uid;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fs::{self, DirBuilder};
+use std::fs::{self, DirBuilder, File};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
@@ -46,17 +46,103 @@ pub struct CapabilityStatus {
     pub detail: String,
 }
 
+/// Evidence for the Linux legacy TIOCSTI terminal-injection host policy.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct LegacyTiocstiStatus {
+    /// Whether the sysctl was read and interpreted.
+    pub probed: bool,
+    /// Stable state: `disabled`, `enabled`, `unknown` or `unreadable`.
+    pub state: String,
+    /// Human-readable evidence or limitation.
+    pub detail: String,
+}
+
 /// One filesystem hierarchy admitted by an opt-in confinement policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ConfinementGrant {
     /// Canonical path used to anchor the kernel rule.
     pub path: PathBuf,
-    /// Stable access class: `read-file`, `read`, `read-execute`, `read-write` or `device`.
+    /// Stable built-in or data-only access class.
     pub access: String,
     /// Stable reason for the grant, including derived resolver targets.
     pub source: String,
     /// Whether policy construction fails when this path is unavailable.
     pub required: bool,
+    /// Device recorded when this exact anchor was validated.
+    #[serde(skip)]
+    pub(crate) anchor_device: u64,
+    /// Inode recorded when this exact anchor was validated.
+    #[serde(skip)]
+    pub(crate) anchor_inode: u64,
+}
+
+/// An executable held stable between confinement review and process replacement.
+#[derive(Debug)]
+pub struct ConfinedExecutable {
+    path: PathBuf,
+    descriptor: File,
+}
+
+impl ConfinedExecutable {
+    /// Consume the stable executable into its diagnostic path and descriptor.
+    #[must_use]
+    pub fn into_parts(self) -> (PathBuf, File) {
+        (self.path, self.descriptor)
+    }
+}
+
+/// Access requested for one invocation-local host data grant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UserGrantAccess {
+    /// Permit data reads without executable authority.
+    ReadOnly,
+    /// Permit data reads and writes without executable authority.
+    ReadWrite,
+}
+
+impl UserGrantAccess {
+    /// Stable command-line spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "ro",
+            Self::ReadWrite => "rw",
+        }
+    }
+}
+
+/// One explicit invocation-local host data grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserConfinementGrant {
+    /// User-selected existing absolute path.
+    pub path: PathBuf,
+    /// Requested data access.
+    pub access: UserGrantAccess,
+}
+
+/// Inputs used to construct one filesystem-confinement policy.
+pub struct ConfinementRequest<'a> {
+    /// Stored Quarter home before an optional home-view mount.
+    pub space_home: &'a Path,
+    /// HOME visible to the launched process.
+    pub effective_home: &'a Path,
+    /// Private per-space runtime directory.
+    pub runtime: &'a Path,
+    /// Authoritative Quarters store root.
+    pub store_root: &'a Path,
+    /// Executable which accepted the user request.
+    pub current_executable: &'a Path,
+    /// Optional original executable retained when an internal launcher copy runs.
+    pub request_executable: Option<&'a Path>,
+    /// Captured host PATH used only to retain reviewed executable roots.
+    pub host_path: Option<&'a OsString>,
+    /// Explicit invocation-local data grants.
+    pub user_grants: &'a [UserConfinementGrant],
+    /// Optional requested initial directory.
+    pub working_directory: Option<&'a Path>,
+    /// Whether the passwd-home bind view was requested.
+    pub home_view: bool,
 }
 
 /// Non-mutating description of the Linux filesystem-confinement policy.
@@ -68,6 +154,8 @@ pub struct ConfinementPlan {
     pub minimum_abi: u32,
     /// Directory selected as the launched process working directory.
     pub working_directory: PathBuf,
+    /// Quarter-visible home that remains eligible to supply executables.
+    pub quarter_command_root: PathBuf,
     /// Exact rules that would be applied.
     pub grants: Vec<ConfinementGrant>,
     /// Optional fixed paths absent or unavailable on this host.
@@ -76,6 +164,8 @@ pub struct ConfinementPlan {
     pub executable_path: Vec<PathBuf>,
     /// Number of resolvable host PATH entries intentionally excluded.
     pub omitted_host_path_entries: usize,
+    /// Linux legacy terminal-injection sysctl evidence for this launch plan.
+    pub legacy_tiocsti: LegacyTiocstiStatus,
     /// Stable, explicit limitations on the protection claim.
     pub limitations: Vec<String>,
 }
@@ -118,6 +208,7 @@ pub(crate) fn runtime_directory(space: &Space, host: &HostEnvironment) -> Result
     for directory in [
         &runtime,
         &runtime.join("bin"),
+        &runtime.join("mount"),
         &runtime.join("tmp"),
         &runtime.join("tmux"),
     ] {
@@ -304,8 +395,67 @@ fn runtime_namespace(host: &HostEnvironment, uid: u32) -> PathBuf {
 ///
 /// Returns an error on unsupported platforms, blocked namespace policy,
 /// invalid paths, identity-map failure or mount failure.
-pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
-    platform_enter_home_view(space_home, host_home)
+pub fn enter_home_view(space_home: &Path, host_home: &Path, runtime: &Path) -> Result<()> {
+    platform_enter_home_view(space_home, host_home, runtime)
+}
+
+/// Resolve and validate an existing absolute working directory.
+///
+/// # Errors
+///
+/// Returns an error when the path is not absolute, cannot be resolved, or is
+/// not a directory.
+pub fn resolve_existing_working_directory(path: &Path) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(QuartersError::new(
+            ErrorKind::InvalidInput,
+            "--workdir requires an existing absolute directory",
+        ));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve requested working directory", path, error))?;
+    if canonical.is_dir() {
+        return Ok(canonical);
+    }
+    Err(QuartersError::new(
+        ErrorKind::InvalidInput,
+        "--workdir must identify an existing directory",
+    ))
+}
+
+/// Resolve a requested working directory against the Linux home-view mapping.
+///
+/// Paths inside the stored Quarter home map to the passwd-home mount target.
+/// Paths already below the passwd home require a matching directory in the
+/// Quarter home, while paths outside both trees remain unchanged.
+///
+/// # Errors
+///
+/// Returns an error for a non-absolute or missing directory, an invalid home
+/// root, or a passwd-home path without a Quarter counterpart.
+pub fn resolve_home_view_working_directory(path: &Path, space_home: &Path, effective_home: &Path) -> Result<PathBuf> {
+    let canonical = resolve_existing_working_directory(path)?;
+    let space = space_home
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve Quarter home for working directory", space_home, error))?;
+    let host = effective_home
+        .canonicalize()
+        .map_err(|error| QuartersError::io("resolve passwd home for working directory", effective_home, error))?;
+    if let Ok(relative) = canonical.strip_prefix(&space) {
+        return Ok(host.join(relative));
+    }
+    let Ok(relative) = canonical.strip_prefix(&host) else {
+        return Ok(canonical);
+    };
+    if space.join(relative).is_dir() {
+        return Ok(host.join(relative));
+    }
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        "--workdir is hidden by --home-view and has no Quarter counterpart",
+    )
+    .with_hint("create the directory inside the Quarter home or choose a path outside the passwd home"))
 }
 
 /// Describe a requested Linux Landlock filesystem policy without applying it.
@@ -314,13 +464,8 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path) -> Result<()> {
 ///
 /// Returns an error when the platform, kernel ABI or required path cannot
 /// support the complete policy.
-pub fn confinement_plan(
-    space_home: &Path,
-    effective_home: &Path,
-    runtime: &Path,
-    host_path: Option<&OsString>,
-) -> Result<ConfinementPlan> {
-    platform_confinement_plan(space_home, effective_home, runtime, host_path)
+pub fn confinement_plan(request: &ConfinementRequest<'_>) -> Result<ConfinementPlan> {
+    platform_confinement_plan(request)
 }
 
 /// Open every anchor and prepare the complete Linux filesystem policy.
@@ -351,7 +496,7 @@ pub fn resolve_confined_executable(
     program: &std::ffi::OsStr,
     search_path: &std::ffi::OsStr,
     plan: &ConfinementPlan,
-) -> Result<PathBuf> {
+) -> Result<ConfinedExecutable> {
     platform_resolve_confined_executable(program, search_path, plan)
 }
 
@@ -385,7 +530,7 @@ mod tests {
 
     use nix::unistd::Uid;
 
-    use super::ensure_owned_private_directory;
+    use super::{ensure_owned_private_directory, resolve_home_view_working_directory};
 
     #[test]
     fn existing_runtime_permissions_are_never_repaired() -> Result<(), Box<dyn std::error::Error>> {
@@ -403,6 +548,41 @@ mod tests {
         symlink(&target, &link)?;
         assert!(ensure_owned_private_directory(&link, Uid::current().as_raw()).is_err());
         assert_eq!(std::fs::symlink_metadata(&target)?.permissions().mode() & 0o777, 0o755);
+        Ok(())
+    }
+
+    #[test]
+    fn home_view_workdir_maps_both_home_spellings_to_one_target() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let space = directory.path().join("space");
+        let host = directory.path().join("host");
+        std::fs::create_dir_all(space.join("project"))?;
+        std::fs::create_dir(&host)?;
+        let expected = host.canonicalize()?.join("project");
+        assert_eq!(
+            resolve_home_view_working_directory(&space.join("project"), &space, &host)?,
+            expected
+        );
+        std::fs::create_dir(host.join("project"))?;
+        assert_eq!(
+            resolve_home_view_working_directory(&host.join("project"), &space, &host)?,
+            expected
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn home_view_workdir_refuses_a_host_only_directory() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let space = directory.path().join("space");
+        let host = directory.path().join("host");
+        std::fs::create_dir(&space)?;
+        std::fs::create_dir_all(host.join("host-only"))?;
+        let error = match resolve_home_view_working_directory(&host.join("host-only"), &space, &host) {
+            Ok(path) => return Err(format!("host-only workdir unexpectedly mapped to {}", path.display()).into()),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("has no Quarter counterpart"));
         Ok(())
     }
 }
