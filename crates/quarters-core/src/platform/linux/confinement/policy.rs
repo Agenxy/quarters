@@ -31,6 +31,12 @@ pub(super) fn prepare(plan: &ConfinementPlan) -> Result<RulesetCreated> {
             )
             .with_hint("retry after ensuring no process is replacing the requested path"));
         }
+        if matches!(grant.access.as_str(), "data-read-file" | "data-read-write-file") && metadata.st_nlink != 1 {
+            return Err(QuartersError::new(
+                ErrorKind::Unsupported,
+                "a user file grant acquired a hard-link alias after validation",
+            ));
+        }
         ruleset = ruleset
             .add_rule(PathBeneath::new(descriptor, access))
             .map_err(|error| landlock_error("add a filesystem policy rule", error))?;

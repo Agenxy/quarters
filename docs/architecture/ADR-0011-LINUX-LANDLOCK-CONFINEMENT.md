@@ -69,6 +69,16 @@ directory must be covered by one of these data grants. With `--home-view`, a
 passwd-home path may instead map to the same relative directory already present
 inside the Quarter home; missing counterparts fail before namespace setup.
 
+Overlap validation also compares retained `O_PATH` descriptors by device and
+inode, walking directory parents in both directions. This detects aliases whose
+path names differ. File grants require one link at planning and enforcement.
+Subtree mounts hide their source ancestors from `openat("..")`, so a bounded
+read of `/proc/self/mountinfo` rejects grants inside or containing a mounted
+subtree. This conservative rule also refuses subvolume mounts. Use a distinct
+ordinary data directory instead. Ordinary filesystem roots remain supported.
+The plan does not freeze mount topology or prevent changes by an unconfined
+host process between validation and enforcement.
+
 The policy report also records the observed
 `/proc/sys/dev/tty/legacy_tiocsti` state. Landlock ABI 3 does not mediate that
 terminal ioctl, so an enabled legacy setting remains a host-policy limitation,

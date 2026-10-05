@@ -95,7 +95,7 @@ policy.
 | Unsupported stronger mode | Capability check and fail-closed error |
 | Requested Linux confinement silently degrades | ABI-3 hard requirement, `no_new_privs`, `FullyEnforced` check and required hosted-kernel gate |
 | Confined child reads or mutates host/store content | Fixed descriptor-anchored allowlist; exact Quarter home/runtime are writable while ungranted content reads, directory enumeration and mutation are denied |
-| User grant expands confinement unexpectedly | Invocation-local absolute path plus explicit `ro`/`rw`; canonical data-only rule, distinct bounded roots, JSON disclosure, validated device/inode match on the opened rule anchor and overlap rejection for store/runtime/current and request executables/executable-root/passwd credential/home-view roots |
+| User grant expands confinement unexpectedly | Invocation-local absolute path plus explicit `ro`/`rw`; data-only rules, distinct bounded roots, JSON disclosure, retained descriptor ancestry checked in both directions by device/inode, single-link file grants rechecked at enforcement, and overlap rejection for store/runtime/current and request executables/executable-root/passwd credential/home-view roots; subtree mount overlap fails closed because bind mounts and subvolumes can hide original ancestry |
 | Granted workspace supplies an executable | User grants omit Landlock execute rights, cannot overlap broader executable grants, and executable resolution uses the separate Quarter command root plus reviewed system roots rather than the selected workdir |
 | Executable changes between policy review and process replacement | Quarters verifies and holds an `O_PATH` descriptor, then uses descriptor-bound execution after Landlock is enforced; interpreter fallback retains the same reviewed descriptor |
 | External confined working directory is ambient | `--workdir` is canonicalized and must lie below the Quarter home, an explicit directory data grant, or a passwd-home path whose same relative directory is verified inside the Quarter home before `--home-view` mounts it |
@@ -173,6 +173,14 @@ entries are visible; Quarters makes no general process or credential-
 confidentiality claim. Network and IPC remain shared.
 
 ## Residual risks
+
+Confinement grant checks inspect current mount topology but do not freeze it.
+An unconfined host process can change mounts between planning and enforcement.
+Subtree mounts, including bind-mounted descendants and subvolumes, are refused
+when they contain a user grant or lie beneath it: descriptor parent walks cannot
+prove their original ancestry. The mount table is bounded to one MiB, 8,192
+entries and 16 KiB per line; missing, malformed or truncated input refuses the
+grant. Filesystem identity checks do not make the baseline a security boundary.
 
 Compatibility contracts can change between tool releases. `doctor` reports
 installed executables and Quarters' configured route, but the alpha does not

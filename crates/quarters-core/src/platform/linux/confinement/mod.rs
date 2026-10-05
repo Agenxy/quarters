@@ -1,5 +1,7 @@
 //! Fail-closed Linux Landlock filesystem policy.
 
+mod identity;
+mod mounts;
 mod paths;
 mod policy;
 

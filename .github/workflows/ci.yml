@@ -37,6 +37,7 @@ jobs:
       - name: Run repository gate
         env:
           QUARTERS_REQUIRE_LANDLOCK: ${{ runner.os == 'Linux' && '1' || '' }}
+          QUARTERS_REQUIRE_BIND_ALIASES: ${{ runner.os == 'Linux' && '1' || '' }}
         run: make check
       - name: Exercise the Linux home-view and confinement composition
         if: runner.os == 'Linux'

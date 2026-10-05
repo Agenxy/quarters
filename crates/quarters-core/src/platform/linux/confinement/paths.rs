@@ -1,5 +1,7 @@
 //! Policy path discovery, reporting and executable resolution.
 
+use super::identity::{Anchor, existing_anchors};
+use super::mounts::SubtreeMounts;
 use crate::platform::{ConfinedExecutable, ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess};
 use crate::{ErrorKind, QuartersError, Result};
 use nix::unistd::Uid;
@@ -275,8 +277,22 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
             format!("filesystem confinement accepts at most {MAX_USER_GRANTS} user grants"),
         ));
     }
+    if request.user_grants.is_empty() {
+        return Ok(());
+    }
     let reserved = reserved_paths(request)?;
+    let reserved_anchors = existing_anchors(&reserved)?;
+    let built_in_anchors = grants
+        .iter()
+        .map(|grant| {
+            let anchor = Anchor::open(&grant.path)?;
+            anchor.verify(&grant.path, grant.anchor_device, grant.anchor_inode)?;
+            Ok(anchor)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mounts = SubtreeMounts::read()?;
     let mut user_paths = BTreeSet::<PathBuf>::new();
+    let mut user_anchors = Vec::<Anchor>::new();
     for requested in request.user_grants {
         if !requested.path.is_absolute() {
             return Err(QuartersError::new(
@@ -295,7 +311,10 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
             )
             .with_hint("select one access level for each canonical data path"));
         }
-        if user_paths.iter().any(|path| paths_overlap(path, &canonical)) {
+        let anchor = Anchor::open(&canonical)?;
+        if user_paths.iter().any(|path| paths_overlap(path, &canonical))
+            || user_anchors.iter().any(|previous| previous.overlaps(&anchor))
+        {
             return Err(QuartersError::new(
                 ErrorKind::InvalidInput,
                 "overlapping --grant-path options are ambiguous",
@@ -304,24 +323,38 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
         }
         user_paths.insert(canonical.clone());
         reject_reserved_grant(&canonical, &reserved)?;
-        reject_built_in_grant_overlap(&canonical, grants)?;
-        let metadata = fs::metadata(&canonical)
-            .map_err(|error| QuartersError::io("inspect user-granted path", &canonical, error))?;
-        let access = user_access_class(requested.access, &metadata, &canonical)?;
+        if reserved_anchors.iter().any(|reserved| reserved.overlaps(&anchor)) {
+            return Err(QuartersError::new(
+                ErrorKind::Unsupported,
+                "user grant overlaps a protected filesystem identity",
+            )
+            .with_hint("select a data path outside Quarters management and credential state"));
+        }
+        reject_built_in_grant_overlap(&canonical, &anchor, grants, &built_in_anchors)?;
+        mounts.reject_overlap(&canonical)?;
+        let access = user_access_class(requested.access, &anchor.metadata, &canonical)?;
         grants.push(ConfinementGrant {
             path: canonical,
             access: access.to_owned(),
             source: "user-granted".to_owned(),
             required: true,
-            anchor_device: metadata.dev(),
-            anchor_inode: metadata.ino(),
+            anchor_device: anchor.metadata.dev(),
+            anchor_inode: anchor.metadata.ino(),
         });
+        user_anchors.push(anchor);
     }
     Ok(())
 }
 
-fn reject_built_in_grant_overlap(path: &Path, grants: &[ConfinementGrant]) -> Result<()> {
-    if grants.iter().all(|grant| !paths_overlap(path, &grant.path)) {
+fn reject_built_in_grant_overlap(
+    path: &Path,
+    anchor: &Anchor,
+    grants: &[ConfinementGrant],
+    built_in: &[Anchor],
+) -> Result<()> {
+    if grants.iter().all(|grant| !paths_overlap(path, &grant.path))
+        && built_in.iter().all(|grant| !anchor.overlaps(grant))
+    {
         return Ok(());
     }
     Err(QuartersError::new(
@@ -332,6 +365,12 @@ fn reject_built_in_grant_overlap(path: &Path, grants: &[ConfinementGrant]) -> Re
 }
 
 fn user_access_class(access: UserGrantAccess, metadata: &fs::Metadata, path: &Path) -> Result<&'static str> {
+    if metadata.is_file() && metadata.nlink() != 1 {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "user file grants require a single-link file; hard-link aliases are not permitted",
+        ));
+    }
     match (metadata.is_dir(), metadata.is_file(), access) {
         (true, _, UserGrantAccess::ReadOnly) => Ok("data-read"),
         (true, _, UserGrantAccess::ReadWrite) => Ok("data-read-write"),
@@ -446,7 +485,20 @@ fn ensure_store_disjoint(store_root: &Path, space_home: &Path, grants: &[Confine
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve confinement Quarter home", space_home, error))?;
     let overlaps = overlaps_executable_root(&store, &home, grants);
-    if !overlaps {
+    let store_anchor = Anchor::open(&store)?;
+    let home_anchor = Anchor::open(&home)?;
+    let mut identity_overlap = false;
+    for grant in grants.iter().filter(|grant| {
+        matches!(
+            grant.source.as_str(),
+            "system-executable-root" | "system-configuration" | "process-compatibility",
+        )
+    }) {
+        let anchor = Anchor::open(&grant.path)?;
+        anchor.verify(&grant.path, grant.anchor_device, grant.anchor_inode)?;
+        identity_overlap |= store_anchor.overlaps(&anchor) || home_anchor.overlaps(&anchor);
+    }
+    if !overlaps && !identity_overlap {
         return Ok(());
     }
     Err(QuartersError::new(
@@ -556,6 +608,12 @@ fn limitations(has_user_grants: bool, legacy_tiocsti: &crate::platform::LegacyTi
         );
         items.push(
             "Landlock combines overlapping rules by union; Quarters rejects overlap between explicit grants and all other explicit or built-in roots",
+        );
+        items.push(
+            "explicit grants require disjoint filesystem identities and single-link files; subtree mounts and subvolumes overlapping grants are refused",
+        );
+        items.push(
+            "mount topology is inspected, not frozen; unconfined host processes can change it between validation and enforcement",
         );
     }
     if legacy_tiocsti.state != "disabled" {
