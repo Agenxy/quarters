@@ -102,6 +102,9 @@ impl Store {
     /// Returns an error when an activity lock cannot be opened safely. Store
     /// observation contention yields `Unknown` for every requested space.
     pub fn lease_states(&self, spaces: &[&Space]) -> Result<Vec<LeaseState>> {
+        if spaces.is_empty() {
+            return Ok(Vec::new());
+        }
         let _observation = match self.observation_guard() {
             Ok(observation) => observation,
             Err(error) if error.kind() == ErrorKind::ResourceLimit => {

@@ -573,6 +573,17 @@ fn missing_store_keeps_the_named_not_found_contract() -> Result<(), Box<dyn Erro
 }
 
 #[test]
+fn unnamed_status_of_a_missing_store_is_empty_and_creates_nothing() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let missing_root = temporary.path().join("missing");
+    let output = run(quarters(&missing_root).args(["--json", "status"]))?;
+    let status: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(status["result"]["spaces"], serde_json::json!([]));
+    assert!(!missing_root.exists(), "inspection must not create the store");
+    Ok(())
+}
+
+#[test]
 fn stale_default_shell_does_not_block_inspection_exec_or_removal() -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt;
 
