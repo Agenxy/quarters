@@ -65,17 +65,20 @@ fn hard_link_grants_cannot_alias_reserved_or_unrelated_files() -> Result<(), Box
     if !setup(&root)? {
         return Ok(());
     }
-    let manifest = root.join("spaces/protected/.quarters.json");
-    let contents = fs::read(&manifest)?;
-    let alias = tree.path().join("manifest-alias");
-    fs::hard_link(&manifest, &alias)?;
+    // The store manifest is integrity-checked as single-link before grants are
+    // considered, so alias a Quarter-home file that only the grant policy guards.
+    let protected = root.join("spaces/protected/home/.gitconfig");
+    let contents = fs::read(&protected)?;
+    let alias = tree.path().join("home-file-alias");
+    fs::hard_link(&protected, &alias)?;
     reject(&root, &alias, "single-link")?;
     let ordinary = tree.path().join("ordinary");
     let second = tree.path().join("ordinary-link");
     fs::write(&ordinary, b"ordinary")?;
     fs::hard_link(&ordinary, &second)?;
     reject(&root, &second, "single-link")?;
-    assert_eq!(fs::read(&manifest)?, contents);
+    fs::remove_file(&alias)?;
+    assert_eq!(fs::read(&protected)?, contents);
     Ok(())
 }
 
@@ -107,6 +110,12 @@ fn bind_mount_aliases_are_rejected_in_a_private_namespace() -> Result<(), Box<dy
         .env("GRANT_ALIAS_FIXTURE", tree.path())
         .output();
     match output {
+        Ok(output) if output.status.success() && String::from_utf8_lossy(&output.stdout).contains(MOUNTS_REFUSED) => {
+            if required {
+                return Err("required bind-alias acceptance: the namespace refused bind mounts".into());
+            }
+            eprintln!("bind aliases untested: the private namespace refuses bind mounts");
+        }
         Ok(output) if output.status.success() => {
             assert!(String::from_utf8_lossy(&output.stdout).contains("bind-aliases verified"));
         }
@@ -129,6 +138,8 @@ fn bind_mount_aliases_are_rejected_in_a_private_namespace() -> Result<(), Box<dy
     Ok(())
 }
 
+const MOUNTS_REFUSED: &str = "bind-alias mounts refused by this namespace";
+
 fn namespace_unavailable(output: &Output) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr);
     stderr.contains("unshare failed: Operation not permitted")
@@ -147,10 +158,28 @@ fn bind_mount_namespace_probe() -> Result<(), Box<dyn Error>> {
     let nested = home.join("private-child");
     fs::create_dir(&nested)?;
     fs::write(nested.join("secret"), b"protected")?;
+    // Some hosts allow the namespace but deny mounts inside it; report that
+    // distinctly so only an optional run may treat it as untested.
+    let first = fixture.join("store-alias");
+    fs::create_dir(&first)?;
+    match mount(
+        Some(root.as_path()),
+        &first,
+        None::<&str>,
+        MsFlags::MS_BIND,
+        None::<&str>,
+    ) {
+        Ok(()) => {}
+        Err(nix::errno::Errno::EPERM | nix::errno::Errno::EACCES) => {
+            println!("{MOUNTS_REFUSED}");
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    }
+    reject(&root, &first, "protected filesystem identity")?;
     for (source, name, expected) in [
-        (root.as_path(), "store-alias", "protected filesystem identity"),
         (Path::new("/usr"), "executable-alias", "built-in confinement root"),
-        (nested.as_path(), "child-alias", "subtree mount"),
+        (nested.as_path(), "child-alias", "mounted alias"),
     ] {
         let target = fixture.join(name);
         fs::create_dir(&target)?;
@@ -162,7 +191,7 @@ fn bind_mount_namespace_probe() -> Result<(), Box<dyn Error>> {
     let target = containing.join("nested-alias");
     fs::create_dir(&target)?;
     mount(Some(&nested), &target, None::<&str>, MsFlags::MS_BIND, None::<&str>)?;
-    reject(&root, &containing, "subtree mount")?;
+    reject(&root, &containing, "mounted alias")?;
     println!("bind-aliases verified");
     Ok(())
 }

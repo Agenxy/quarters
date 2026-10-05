@@ -37,8 +37,20 @@ jobs:
       - name: Run repository gate
         env:
           QUARTERS_REQUIRE_LANDLOCK: ${{ runner.os == 'Linux' && '1' || '' }}
-          QUARTERS_REQUIRE_BIND_ALIASES: ${{ runner.os == 'Linux' && '1' || '' }}
         run: make check
+      - name: Exercise Linux grant bind-mount aliases
+        if: runner.os == 'Linux'
+        run: |
+          test_name="bind_mount_aliases_are_rejected_in_a_private_namespace"
+          cargo_bin="$(command -v cargo)"
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          cargo test --locked --package quarters --test linux_grant_aliases -- --list \
+            | grep -Fqx "${test_name}: test"
+          sudo /usr/bin/setpriv --reuid "${runner_uid}" --regid "${runner_gid}" --clear-groups -- \
+            /usr/bin/env HOME="${HOME}" PATH="${PATH}" QUARTERS_REQUIRE_BIND_ALIASES=1 QUARTERS_REQUIRE_LANDLOCK=1 \
+            "${cargo_bin}" test --locked --package quarters --test linux_grant_aliases \
+            "${test_name}" -- --exact
       - name: Exercise the Linux home-view and confinement composition
         if: runner.os == 'Linux'
         env:

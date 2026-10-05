@@ -72,12 +72,16 @@ inside the Quarter home; missing counterparts fail before namespace setup.
 Overlap validation also compares retained `O_PATH` descriptors by device and
 inode, walking directory parents in both directions. This detects aliases whose
 path names differ. File grants require one link at planning and enforcement.
-Subtree mounts hide their source ancestors from `openat("..")`, so a bounded
-read of `/proc/self/mountinfo` rejects grants inside or containing a mounted
-subtree. This conservative rule also refuses subvolume mounts. Use a distinct
-ordinary data directory instead. Ordinary filesystem roots remain supported.
-The plan does not freeze mount topology or prevent changes by an unconfined
-host process between validation and enforcement.
+Bind and subtree mounts hide their source ancestors from `openat("..")`, so a
+bounded read of `/proc/self/mountinfo` also locates every grant and every
+protected root as a filesystem region: the mount's device plus the path below
+that filesystem's root. A grant is refused when its own region, or the region
+exposed by any mount nested beneath it (including a second mount of a whole
+filesystem), overlaps a protected region on the same device. Subvolume roots
+such as btrfs `/@` or `/root`, namespace files and container workspace binds
+that expose no protected region remain grantable. Mount topology is located by
+the most recent mount at the longest matching mount point; it is neither frozen
+nor re-read at enforcement, and descriptor ancestry is not re-walked there.
 
 The policy report also records the observed
 `/proc/sys/dev/tty/legacy_tiocsti` state. Landlock ABI 3 does not mediate that

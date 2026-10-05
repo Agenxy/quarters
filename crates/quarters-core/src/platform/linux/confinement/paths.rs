@@ -1,7 +1,7 @@
 //! Policy path discovery, reporting and executable resolution.
 
 use super::identity::{Anchor, existing_anchors};
-use super::mounts::SubtreeMounts;
+use super::mounts::MountTopology;
 use crate::platform::{ConfinedExecutable, ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess};
 use crate::{ErrorKind, QuartersError, Result};
 use nix::unistd::Uid;
@@ -290,7 +290,12 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
             Ok(anchor)
         })
         .collect::<Result<Vec<_>>>()?;
-    let mounts = SubtreeMounts::read()?;
+    let mounts = MountTopology::read()?;
+    let protected: Vec<PathBuf> = reserved
+        .iter()
+        .cloned()
+        .chain(grants.iter().map(|grant| grant.path.clone()))
+        .collect();
     let mut user_paths = BTreeSet::<PathBuf>::new();
     let mut user_anchors = Vec::<Anchor>::new();
     for requested in request.user_grants {
@@ -331,7 +336,7 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
             .with_hint("select a data path outside Quarters management and credential state"));
         }
         reject_built_in_grant_overlap(&canonical, &anchor, grants, &built_in_anchors)?;
-        mounts.reject_overlap(&canonical)?;
+        mounts.reject_overlap(&canonical, &protected)?;
         let access = user_access_class(requested.access, &anchor.metadata, &canonical)?;
         grants.push(ConfinementGrant {
             path: canonical,
@@ -610,7 +615,7 @@ fn limitations(has_user_grants: bool, legacy_tiocsti: &crate::platform::LegacyTi
             "Landlock combines overlapping rules by union; Quarters rejects overlap between explicit grants and all other explicit or built-in roots",
         );
         items.push(
-            "explicit grants require disjoint filesystem identities and single-link files; subtree mounts and subvolumes overlapping grants are refused",
+            "explicit grants require disjoint filesystem identities and single-link files; a grant whose own or nested mounts expose protected filesystem regions is refused",
         );
         items.push(
             "mount topology is inspected, not frozen; unconfined host processes can change it between validation and enforcement",
