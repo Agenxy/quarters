@@ -131,7 +131,13 @@ fn process_generation_optional(pid: Pid) -> Result<Option<u128>> {
     let path = PathBuf::from(format!("/proc/{}/stat", pid.as_raw()));
     let stat = match fs::read_to_string(&path) {
         Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        // A process that exits between open and read reports ESRCH rather
+        // than ENOENT; both mean that generation no longer exists.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(Errno::ESRCH as i32) =>
+        {
+            return Ok(None);
+        }
         Err(error) => return Err(QuartersError::io("read private-agent process generation", &path, error)),
     };
     let fields = stat

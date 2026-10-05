@@ -6,6 +6,8 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Treat a Linux private-agent process that exits between opening and reading
+  its `/proc` stat (ESRCH) as gone instead of failing concurrent `agent start`.
 - Report an empty unnamed `status` for a store that does not exist yet instead
   failing to create its observation lock; inspection still creates nothing.
 - Move the pinned toolchain to Rust 1.99.0, Bun 1.4.2 and Node.js 26.10.0, and
