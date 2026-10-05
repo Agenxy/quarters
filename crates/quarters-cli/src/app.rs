@@ -2,7 +2,7 @@
 
 use crate::cli::{
     AdapterCommand, AgentCommand, AgentRecoverArgs, AgentTargetArgs, ArtifactCreateArgs, ArtifactRemoveArgs,
-    ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DoctorArgs, EnterArgs, ExecArgs, ExportArgs,
+    ArtifactRenameArgs, Cli, CloneArgs, Command, CreateArgs, DiscoverArgs, DoctorArgs, EnterArgs, ExecArgs, ExportArgs,
     ExportKeyCommand, FreezeArgs, ImportArgs, ProfileArgs, RecoverArgs, RemoveArgs, RenameArgs, RollbackArgs,
     SnapshotCommand, SnapshotCreateArgs, SnapshotListArgs, StatusArgs, TemplateCommand, TemplateUseArgs, UnfreezeArgs,
     UpgradeArgs,
@@ -17,6 +17,10 @@ use std::path::PathBuf;
 
 pub(crate) fn run(cli: Cli) -> Result<i32> {
     home_view_management_guard(&cli.command)?;
+    let discovery_writer = match &cli.command {
+        Command::Discover(arguments) => crate::discovery::prepare_report_writer(arguments, cli.json)?,
+        _ => None,
+    };
     if let Command::ShellInit(arguments) = &cli.command {
         passthrough_json_guard(cli.json)?;
         print!("{}", crate::shell_init::script(arguments.shell));
@@ -59,6 +63,7 @@ pub(crate) fn run(cli: Cli) -> Result<i32> {
         Command::Env(arguments) => environment(&store, &host, &arguments, cli.json),
         Command::Enter(arguments) => enter(&store, &host, arguments, cli.json),
         Command::Exec(arguments) => exec(&store, &host, &arguments, cli.json),
+        Command::Discover(arguments) => discover(&store, &host, &arguments, discovery_writer, cli.json),
         Command::Host(arguments) => {
             passthrough_json_guard(cli.json).and_then(|()| process::run_host(&arguments.command))
         }
@@ -685,6 +690,18 @@ fn exec(store: &Store, host: &HostEnvironment, arguments: &ExecArgs, json: bool)
     launch.run(&arguments.command)
 }
 
+fn discover(
+    store: &Store,
+    host: &HostEnvironment,
+    arguments: &DiscoverArgs,
+    writer: Option<crate::report_fd::ReportWriter>,
+    json: bool,
+) -> Result<i32> {
+    let space = open_space(store, &arguments.profile.name)?;
+    crate::adapter::warn_if_incomplete(&space);
+    crate::discovery::run(store, &space, host, arguments, writer, json)
+}
+
 fn doctor(store: &Store, host: &HostEnvironment, arguments: &DoctorArgs, json: bool) -> Result<i32> {
     let layout = store.layout_diagnosis();
     let space_result = arguments
@@ -854,7 +871,7 @@ fn strict_current_space(store: &Store) -> Result<Space> {
     Ok(space)
 }
 
-fn profile_launch<'a>(
+pub(crate) fn profile_launch<'a>(
     store: &'a Store,
     space: &'a Space,
     host: &'a HostEnvironment,

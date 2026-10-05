@@ -28,7 +28,14 @@ to a launch environment.
 
 The agent receives a runtime directory derived from the stable space identity,
 private mode, a bounded startup deadline and an atomic first-party ownership
-record. The launcher uses the current Quarters executable only for an
+record. New records use schema 2 and bind the PID to its native process-start
+generation. Schema-1 records remain readable and conservatively retain the old
+PID-only liveness check. Record creation uses a synced temporary file followed
+by a native no-replace rename; unsupported filesystem semantics fail closed.
+On macOS, a libproc response that cannot identify the process is treated as
+not matching the stored generation. Recovery may then remove only an exact
+recorded socket without signaling; this favors signal safety over availability.
+The launcher uses the current Quarters executable only for an
 environment-carried token and PID handoff, then clears its environment and
 replaces itself with fixed `/usr/bin/ssh-agent -D`; no shell
 or PATH lookup is involved. Liveness sends a bounded SSH identities request and
@@ -48,11 +55,16 @@ lock; observers retake it briefly before any recovery publication. Shutdown
 remains separately serialized, with bounded protocol checks and a three-second
 process-exit deadline.
 
-One launcher that exits before protocol readiness receives one bounded retry.
-The owner keeps its lease, removes only the exact leftover socket, and atomically
-replaces the old `starting` reservation with a fresh token and PID. Observers
-follow that validated replacement rather than treating it as corruption. A
-second exit remains a recorded failure; retry is not unbounded.
+A launcher that exits before protocol readiness receives one retry while its
+owner keeps the startup lease. The owner removes only the exact leftover
+socket and atomically replaces the old `starting` reservation with a fresh
+token, PID and process generation. Observers follow a validated replacement
+rather than treating it as corruption. A contender may re-reserve after a
+failed replacement only when the recorded process generation is no longer
+alive and the owner lease is free. While the owner is finishing bounded
+cleanup, contenders wait without removing its record. Observation, launch and
+retry share one absolute wall-clock deadline, and `start` returns success only
+after the final record is protocol-verified `active`.
 
 Orphan observers serialize through the lifecycle lock before probing the
 startup-owner lease. Owner-lease acquisition is always nonblocking, which

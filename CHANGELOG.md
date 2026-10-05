@@ -6,6 +6,41 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Treat a Linux private-agent process that exits between opening and reading
+  its `/proc` stat (ESRCH) as gone instead of failing concurrent `agent start`.
+- Report an empty unnamed `status` for a store that does not exist yet instead
+  failing to create its observation lock; inspection still creates nothing.
+- Move the pinned toolchain to Rust 1.99.0, Bun 1.4.2 and Node.js 26.10.0, and
+  refresh exact dependency pins to current stable releases, including rmcp
+  3.5.0 with its `ServerConfig`/`ClientConfig` names and jsonschema 0.58.5.
+- Add opt-in `quarters discover` for one directly supervised command: bounded
+  descriptor-relative metadata snapshots of selected Quarter home/runtime
+  roots, path-free classified deltas, explicit observation limits, and stable
+  JSON on a caller-supplied close-on-exec report descriptor.
+- Preserve child stdout, stderr and native termination status; hold an
+  exclusive cooperative lifecycle lease, prepare runtime launch state before
+  the first scan, observe later child writes beneath the runtime launcher
+  directory, and suppress the complete delta after any scan bound or
+  observation gap.
+- Make discovery previews non-mutating and non-locking; apply independent
+  per-root entry/time budgets, a bounded pending-name budget, per-root
+  completeness evidence and path-free unreadable-directory classes.
+- Consume and validate caller-transferred report descriptors before opening any
+  Quarter or store state, preventing an absent descriptor number from aliasing
+  an internal activity lock. Keep the reopened sink close-on-exec, preserve
+  regular-file append/position behavior, support blocking anonymous pipes, and
+  reject Linux sockets, named FIFOs and nonblocking pipes explicitly. Preserve
+  native `/dev/fd` duplication on macOS, document its broader writable
+  descriptor contract, and test named-FIFO delivery. Test that Linux restores
+  blocking mode on a reopened anonymous pipe.
+- Conservatively extend host-fork sensitive-path refusal to nested credential
+  shapes shared with discovery, including common agent-state roots and
+  descendants of basename- or suffix-matched directories.
+- Disclose ASCII case-insensitive credential-shape matching and publish one
+  `complete` observation signal instead of two synonymous booleans.
+- Keep discovery out of MCP, ordinary logs and persisted Quarter state. Report
+  host access/writes and detached writers as unmeasured instead of inferring
+  isolation from an unchanged Quarter tree.
 - Remove the unreleased `.quarters-store-migration.json` refusal, its
   `migration_marker` doctor/MCP field and the `active-migration` diagnosis
   state before first publication. No released Quarters version emitted them,
@@ -66,7 +101,7 @@ compatibility notes will be called out here.
   links and deepest leaves, release hostile path metadata at directory close,
   validate authenticated provenance before extraction, and report post-commit
   durability or cleanup failures without implying that publication vanished.
-- Pin Bun 1.3.14 as the typed npm launcher's development package manager and
+- Pin Bun 1.4.2 as the typed npm launcher's development package manager and
   lockfile owner, rename its local gate to `make launcher-check`, and retain
   npm as the consumer installation, artifact packaging and publication surface.
 - Add previewed, digest-confirmed host shell forking with descriptor-anchored
@@ -85,8 +120,18 @@ compatibility notes will be called out here.
   retain a separate startup-owner lease during bounded protocol readiness, and
   revalidate the record and socket when concurrent starters converge on one
   active process or a failed owner terminates its child.
-- Retry one private-agent launcher that exits before readiness through an
-  atomic reservation handoff, with deterministic six-caller fault injection.
+- Publish private-agent records atomically without replacement, advance new
+  records to schema 2 with native process-generation binding, and retain
+  schema-1 readability. Concurrent starters may re-reserve a proven-dead
+  failed launch within one absolute wall-clock deadline; success is returned
+  only for a protocol-verified active agent. Deterministic six-caller fault
+  injection and partial-record reader stress pin convergence and publication.
+- Apply process-generation checks to every private-agent status and recovery
+  state, wait for an active startup owner to finish failed-launch cleanup, and
+  keep observation, launch and retry under one absolute startup deadline.
+- Cap public discovery recursion at 256 levels and extend required Linux
+  launcher evidence to prove both home-root and runtime-root deltas through
+  Landlock and the bind-mounted home view.
 - Add the inspected link change timestamp to shortcut removal's target,
   device and inode checks, narrowing immediate matching-identity reuse without
   claiming a portable same-UID security boundary.

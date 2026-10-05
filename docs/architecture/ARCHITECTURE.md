@@ -117,6 +117,72 @@ final symlink and must retain their declared owner, type and private mode.
 Aggregate status holds one observation guard for the entire bounded listing,
 so contention has one deadline rather than one deadline per space.
 
+## Privacy-bounded state discovery
+
+`discover` is a CLI-only process supervisor layered over the ordinary launch
+plan. It takes the space lifecycle lease exclusively, prepares the complete
+environment and any private runtime launcher, then scans selected Quarter-owned
+home and runtime roots before spawning the child. Runtime launch state is
+prepared first, so application writes beneath runtime `bin` remain observable.
+After the direct child exits, a second scan produces a path-free classified
+delta. The child stdout and stderr remain attached unchanged; the human report
+goes to stderr and an optional stable JSON envelope goes to a caller-provided
+descriptor.
+
+The scanner retains directory descriptors and uses no-follow relative metadata
+operations. It never opens regular files or FIFOs and never calls `readlink`.
+Entry paths exist only as transient byte components used to compute a
+domain-separated BLAKE3 key and a semantic class. Snapshots are opaque and
+in-memory; output contains only counts. Each selected root has an independent
+per-phase budget of 262,144 entries, depth 64, 4,096 relative-path bytes,
+16 MiB of pending directory-entry names and five seconds. Exceeding any bound,
+encountering an unreadable directory or observing an unstable entry
+marks the scan incomplete and suppresses the entire delta. Per-root reports
+identify completeness and bounds without paths; unreadable directories are
+grouped only by semantic class. Selected root device/inode identity is bound
+across phases, and an opened nested directory is matched back to its no-follow
+metadata before traversal.
+
+Both roots must already satisfy the ordinary Quarters private-root invariant:
+current UID, directory type and exact mode `0700`. Discovery refuses a damaged
+root rather than silently repairing permissions or weakening that invariant.
+The shipped alpha scans to depth 64. Public library callers cannot request a
+recursive depth above 256; larger values fail before either root is opened.
+With both roots selected, the two retained snapshots can contain at most
+1,048,576 entry records in aggregate; only the scanner for the current root
+holds the additional 16 MiB pending-name budget. The time ceiling is per root
+and phase, so both roots can spend at most 20 seconds across both scans.
+
+`discover --preview` is a non-mutating plan disclosure. It takes no activity
+lease, prepares no runtime state and performs no scan; it prints the selected
+roots, every fixed bound and the exact ASCII case-insensitive credential-shaped
+pattern set. Execution validates the profile options and prepares its launch
+state after acquiring the exclusive lease.
+
+The caller transfers ownership of `--report-fd` to Quarters. It is validated
+and reopened close-on-exec before Quarters opens any store or Quarter state;
+the inherited number is then closed. This ordering prevents an absent caller
+number from aliasing a later internal descriptor. macOS uses `/dev/fd`. Linux
+requires `/proc/self/fd`; regular-file position and append mode are restored,
+and the matching `/proc/self/fdinfo` record must expose parseable `pos`, `flags`,
+and `ino` fields. Tested Linux sinks include regular files, character devices
+and blocking anonymous pipes; sockets, named FIFOs and nonblocking anonymous
+pipes fail explicitly. The report sink is written only after the post-scan and
+is outside the observed delta. macOS delegates duplication to `/dev/fd` and
+accepts any writable descriptor the kernel can duplicate, including sockets,
+pipes, named FIFOs and character devices. That duplicate shares the caller's
+open-file description, so writing advances the caller's offset. The Linux
+`/proc/self/fd` reopen has a distinct open-file description initialized to the
+validated position; writing does not advance the caller's offset.
+
+The exclusive lease excludes cooperating Quarters launches and lifecycle
+mutations, not detached descendants or direct same-UID writers. Metadata deltas
+cannot observe reads, file contents, host paths, granted external paths,
+network, IPC, devices, platform keychains or writes that preserve every
+compared field. These remain explicit unknowns in every report. No report is
+stored in the Quarter, captured by lifecycle artifacts or exposed through MCP.
+ADR 0012 defines this boundary.
+
 Directory inspection treats every published entry independently. A damaged
 home or manifest is reported as unhealthy without hiding valid siblings.
 Removal deliberately validates only the invariants it needs: the exact named

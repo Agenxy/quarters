@@ -30,6 +30,18 @@ pub(crate) struct ProfileLaunch<'a> {
     pub(crate) working_directory: Option<&'a Path>,
 }
 
+pub(crate) struct PreparedProfileLaunch {
+    environment: EnvironmentPlan,
+    confinement: Option<quarters_core::ConfinementPlan>,
+    baseline_workdir: Option<PathBuf>,
+}
+
+impl PreparedProfileLaunch {
+    pub(crate) fn runtime_directory(&self) -> Result<PathBuf> {
+        required_environment_path(&self.environment, "XDG_RUNTIME_DIR")
+    }
+}
+
 impl ProfileLaunch<'_> {
     pub(crate) fn environment_and_confinement(
         &self,
@@ -84,20 +96,45 @@ impl ProfileLaunch<'_> {
     }
 
     pub(crate) fn run(&self, raw_command: &[OsString]) -> Result<i32> {
-        let (program, arguments) = split_command(raw_command)?;
         let _lease = self.store.lease(self.space)?;
+        let prepared = self.prepare_process()?;
+        self.run_prepared(raw_command, &prepared).map(status_code)
+    }
+
+    pub(crate) fn prepare_process(&self) -> Result<PreparedProfileLaunch> {
         let (environment, confinement) = self.environment_and_confinement()?;
+        if self.home_view || self.confinement {
+            install_runtime_binary(&current_executable()?, &environment)?;
+        }
+        let baseline_workdir = if self.home_view || self.confinement {
+            None
+        } else {
+            self.resolved_baseline_workdir()?
+        };
+        Ok(PreparedProfileLaunch {
+            environment,
+            confinement,
+            baseline_workdir,
+        })
+    }
+
+    pub(crate) fn run_prepared(
+        &self,
+        raw_command: &[OsString],
+        prepared: &PreparedProfileLaunch,
+    ) -> Result<ExitStatus> {
+        let (program, arguments) = split_command(raw_command)?;
         let status = if self.home_view || self.confinement {
-            self.run_linux_launcher(program, arguments, &environment, confinement.as_ref())?
+            self.run_linux_launcher(program, arguments, &prepared.environment, prepared.confinement.as_ref())?
         } else {
             run_direct(
                 program,
                 arguments,
-                &environment,
-                self.resolved_baseline_workdir()?.as_deref(),
+                &prepared.environment,
+                prepared.baseline_workdir.as_deref(),
             )?
         };
-        Ok(status_code(status))
+        Ok(status)
     }
 
     fn effective_home(&self) -> Result<PathBuf> {
@@ -126,7 +163,6 @@ impl ProfileLaunch<'_> {
         confinement: Option<&quarters_core::ConfinementPlan>,
     ) -> Result<ExitStatus> {
         let current_executable = current_executable()?;
-        install_runtime_binary(&current_executable, environment)?;
         let runtime = required_environment_path(environment, "XDG_RUNTIME_DIR")?;
         let mut command = Command::new(&current_executable);
         command
@@ -591,11 +627,19 @@ fn split_command(raw_command: &[OsString]) -> Result<(&OsStr, &[OsString])> {
         })
 }
 
-fn status_code(status: ExitStatus) -> i32 {
+pub(crate) fn status_code(status: ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
     status
         .code()
         .unwrap_or_else(|| status.signal().map_or(1, |signal| 128 + signal))
+}
+
+pub(crate) fn discovery_child(status: ExitStatus) -> quarters_core::DiscoveryChild {
+    use std::os::unix::process::ExitStatusExt;
+    quarters_core::DiscoveryChild {
+        exit_code: status.code(),
+        signal: status.signal(),
+    }
 }
 
 fn process_error(operation: &str, program: &OsStr, source: std::io::Error) -> QuartersError {

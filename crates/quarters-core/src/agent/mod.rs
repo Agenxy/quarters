@@ -5,6 +5,8 @@ mod process;
 mod protocol;
 mod registry;
 mod startup;
+#[cfg(test)]
+mod startup_tests;
 
 pub use model::{AgentState, AgentStatus};
 
@@ -113,7 +115,15 @@ impl Store {
                 }
             }
         };
-        startup::reconcile(space, &runtime, &starting)
+        match startup::reconcile(
+            space,
+            &runtime,
+            &starting,
+            Instant::now() + startup::MAXIMUM_TOTAL_STARTUP_WAIT,
+        )? {
+            startup::Reconciled::Active(status) => Ok(status),
+            startup::Reconciled::Recovered => Ok(AgentStatus::unset(space)),
+        }
     }
 }
 
@@ -159,7 +169,7 @@ fn recover_inactive_state(space: &Space, runtime: &Path) -> Result<AgentStatus> 
     let Some(record) = registry::read(runtime, space)? else {
         return reject_unowned_socket(runtime).map(|()| AgentStatus::unset(space));
     };
-    let alive = process::process_is_alive(record.pid)?;
+    let alive = process::process_matches_generation(record.pid, record.process_generation)?;
     if alive && record.state == StoredAgentState::Stopping {
         let expected = recorded_socket_identity(&record)?;
         if protocol::recoverable_disconnected_socket(&registry::socket_path(runtime), expected)? {
@@ -273,7 +283,7 @@ fn inspect_at(space: &Space, runtime: &Path) -> Result<AgentStatus> {
             )),
         };
     };
-    let alive = process::process_is_alive(record.pid)?;
+    let alive = process::process_matches_generation(record.pid, record.process_generation)?;
     match record.state {
         StoredAgentState::Starting if alive => Ok(status(
             space,
@@ -489,6 +499,7 @@ mod tests {
             space_id: space.id().cloned().expect("stable ID"),
             token: "0123456789abcdef0123456789abcdef".to_owned(),
             pid,
+            process_generation: Some(1),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: None,
             socket_device: None,
@@ -554,6 +565,7 @@ mod tests {
             .spawn()
             .expect("spawn test agent");
         let pid = child.id();
+        let generation = process::process_generation(pid).expect("capture test agent generation");
         let identity = (0..100)
             .find_map(|_attempt| {
                 let identity = protocol::verified_socket_identity(&socket, pid).ok();
@@ -569,6 +581,7 @@ mod tests {
             space_id: space.id().cloned().expect("stable ID"),
             token: "abcdef0123456789abcdef0123456789".to_owned(),
             pid,
+            process_generation: Some(generation),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: Some(identity.inode),
             socket_device: Some(identity.device),
@@ -606,8 +619,9 @@ mod tests {
             .spawn()
             .expect("spawn completed process");
         let pid = child.id();
+        let generation = process::process_generation(pid).expect("capture completed process generation");
         child.wait().expect("reap completed process");
-        registry::create(&runtime, &active_record(&space, pid, identity)).expect("create active record");
+        registry::create(&runtime, &active_record(&space, pid, generation, identity)).expect("create active record");
 
         let recovered = store
             .recover_ssh_agent(&space, &host)
@@ -636,8 +650,12 @@ mod tests {
             .arg("30")
             .spawn()
             .expect("spawn unrelated process");
-        registry::create(&runtime, &active_record(&space, unrelated.id(), identity))
-            .expect("create recycled-pid record");
+        let generation = process::process_generation(unrelated.id()).expect("capture unrelated process generation");
+        registry::create(
+            &runtime,
+            &active_record(&space, unrelated.id(), generation ^ 1, identity),
+        )
+        .expect("create recycled-pid record");
 
         let recovered = store
             .recover_ssh_agent(&space, &host)
@@ -670,7 +688,8 @@ mod tests {
             .arg("30")
             .spawn()
             .expect("spawn unrelated process");
-        let mut record = active_record(&space, unrelated.id(), identity);
+        let generation = process::process_generation(unrelated.id()).expect("capture unrelated process generation");
+        let mut record = active_record(&space, unrelated.id(), generation ^ 1, identity);
         record.state = StoredAgentState::Stopping;
         registry::create(&runtime, &record).expect("create stopping record");
 
@@ -684,6 +703,44 @@ mod tests {
         assert_eq!(recovered.state, AgentState::Unset);
         assert!(still_alive);
         assert!(registry::read(&runtime, &space).expect("inspect registry").is_none());
+    }
+
+    #[test]
+    fn recovery_clears_live_disconnected_records_without_signalling() {
+        for (name, state) in [
+            ("live-disconnected-active", StoredAgentState::Active),
+            ("live-disconnected-stopping", StoredAgentState::Stopping),
+        ] {
+            let temporary = tempfile::TempDir::new().expect("temporary directory");
+            let store = Store::new(temporary.path().join("root")).expect("valid store");
+            let space = store
+                .create(SpaceName::parse(name).expect("space name"), PathBuf::from("/bin/sh"))
+                .expect("create space");
+            let host = HostEnvironment::capture();
+            let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+            let socket = registry::socket_path(&runtime);
+            let identity = disconnected_socket(&socket);
+            let mut unrelated = std::process::Command::new("/bin/sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn unrelated process");
+            let generation = process::process_generation(unrelated.id()).expect("capture unrelated process generation");
+            let mut record = active_record(&space, unrelated.id(), generation, identity);
+            record.state = state;
+            registry::create(&runtime, &record).expect("create disconnected record");
+
+            let recovered = store
+                .recover_ssh_agent(&space, &host)
+                .expect("recover disconnected record");
+            let still_alive = unrelated.try_wait().expect("inspect unrelated process").is_none();
+            unrelated.kill().expect("stop unrelated test process");
+            unrelated.wait().expect("reap unrelated test process");
+
+            assert_eq!(recovered.state, AgentState::Unset);
+            assert!(still_alive);
+            assert!(std::fs::symlink_metadata(&socket).is_err());
+            assert!(registry::read(&runtime, &space).expect("inspect registry").is_none());
+        }
     }
 
     #[test]
@@ -706,6 +763,7 @@ mod tests {
             .stderr(std::process::Stdio::null())
             .spawn()
             .expect("spawn test agent");
+        let generation = process::process_generation(child.id()).expect("capture test agent generation");
         let identity = (0..100)
             .find_map(|_attempt| {
                 let identity = protocol::verified_socket_identity(&socket, child.id()).ok();
@@ -715,7 +773,8 @@ mod tests {
                 identity
             })
             .expect("test agent protocol ready");
-        registry::create(&runtime, &active_record(&space, child.id(), identity)).expect("create active record");
+        registry::create(&runtime, &active_record(&space, child.id(), generation, identity))
+            .expect("create active record");
 
         let preserved_home = space.root().join("preserved-home");
         std::fs::rename(space.home(), &preserved_home).expect("move home");
@@ -755,13 +814,19 @@ mod tests {
         identity
     }
 
-    fn active_record(space: &Space, pid: u32, identity: protocol::SocketIdentity) -> AgentRecord {
+    fn active_record(
+        space: &Space,
+        pid: u32,
+        process_generation: u128,
+        identity: protocol::SocketIdentity,
+    ) -> AgentRecord {
         AgentRecord {
             schema_version: REGISTRY_SCHEMA_VERSION,
             state: StoredAgentState::Active,
             space_id: space.id().cloned().expect("stable ID"),
             token: "abcdef0123456789abcdef0123456789".to_owned(),
             pid,
+            process_generation: Some(process_generation),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: Some(identity.inode),
             socket_device: Some(identity.device),
@@ -776,6 +841,7 @@ mod tests {
             space_id: space.id().cloned().expect("stable ID"),
             token: "0123456789abcdef0123456789abcdef".to_owned(),
             pid,
+            process_generation: Some(1),
             created_unix_ms: epoch_millis().expect("clock"),
             socket_inode: None,
             socket_device: None,

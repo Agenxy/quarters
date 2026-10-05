@@ -141,7 +141,7 @@ fn mcp_stdio_serves_the_stateless_2026_path_end_to_end() -> Result<(), Box<dyn E
     drop(input);
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
-    assert!(completed.stderr.is_empty());
+    assert_eq!(String::from_utf8_lossy(&completed.stderr), "");
     for command in ["quarters", "ssh", "scp", "sftp", "ssh-add"] {
         assert!(
             std::fs::symlink_metadata(temporary.path().join("spaces/agent/home/.local/bin").join(command))?
@@ -219,7 +219,7 @@ fn mcp_stdio_serves_the_initialized_2025_path_end_to_end() -> Result<(), Box<dyn
     drop(input);
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
-    assert!(completed.stderr.is_empty());
+    assert_eq!(String::from_utf8_lossy(&completed.stderr), "");
     Ok(())
 }
 
@@ -573,6 +573,17 @@ fn missing_store_keeps_the_named_not_found_contract() -> Result<(), Box<dyn Erro
 }
 
 #[test]
+fn unnamed_status_of_a_missing_store_is_empty_and_creates_nothing() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let missing_root = temporary.path().join("missing");
+    let output = run(quarters(&missing_root).args(["--json", "status"]))?;
+    let status: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(status["result"]["spaces"], serde_json::json!([]));
+    assert!(!missing_root.exists(), "inspection must not create the store");
+    Ok(())
+}
+
+#[test]
 fn stale_default_shell_does_not_block_inspection_exec_or_removal() -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -756,6 +767,12 @@ fn child_json_flag_does_not_change_quarters_error_format() -> Result<(), Box<dyn
     Ok(())
 }
 
+/// The value `quarters host` restores: a test running inside a Quarter
+/// inherits the outermost host value, not the enclosing Quarter's.
+fn outermost_host_value(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(format!("QUARTERS_HOST_{name}")).or_else(|_| std::env::var(name))
+}
+
 #[test]
 fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
@@ -774,7 +791,7 @@ fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
         "/usr/bin/printenv",
         "HOME",
     ]))?;
-    assert_eq!(String::from_utf8(output.stdout)?.trim(), std::env::var("HOME")?);
+    assert_eq!(String::from_utf8(output.stdout)?.trim(), outermost_host_value("HOME")?);
 
     let output = run(quarters(temporary.path()).args([
         "exec",
@@ -788,7 +805,7 @@ fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
         "/usr/bin/printenv",
         "PATH",
     ]))?;
-    assert_eq!(String::from_utf8(output.stdout)?.trim(), std::env::var("PATH")?);
+    assert_eq!(String::from_utf8(output.stdout)?.trim(), outermost_host_value("PATH")?);
     Ok(())
 }
 

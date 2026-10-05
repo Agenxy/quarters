@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use quarters_core::{HostEnvironment, Store};
 use quarters_mcp::{SUPPORTED_PROTOCOL_VERSIONS, serve_duplex};
 use rmcp::model::{
-    CallToolRequestParams, ClientCapabilities, ClientInfo, ClientJsonRpcMessage, Implementation, ProtocolVersion,
+    CallToolRequestParams, ClientCapabilities, ClientConfig, ClientJsonRpcMessage, Implementation, ProtocolVersion,
     ReadResourceRequestParams, ServerJsonRpcMessage,
 };
 use rmcp::service::RoleClient;
@@ -20,8 +20,8 @@ use serde_json::{Value, json};
 struct TestClient;
 
 impl ClientHandler for TestClient {
-    fn get_info(&self) -> ClientInfo {
-        ClientInfo::new(
+    fn get_info(&self) -> ClientConfig {
+        ClientConfig::new(
             ClientCapabilities::default(),
             Implementation::new("quarters-compatibility-test", "1"),
         )

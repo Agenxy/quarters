@@ -2,6 +2,7 @@
 
 mod agent;
 mod command_links;
+pub mod discovery;
 mod environment;
 mod error;
 mod model;
@@ -19,6 +20,12 @@ pub mod platform;
 pub use agent::{AgentState, AgentStatus, run_ssh_agent_helper};
 pub use command_links::{
     CommandLinkEntry, CommandLinkReport, CommandLinkState, inspect_command_links, validate_command_launcher,
+};
+pub use discovery::{
+    CredentialShapeDisclosure, DiscoveryChild, DiscoveryClassCounts, DiscoveryDelta, DiscoveryLimits,
+    DiscoveryObservation, DiscoveryPreview, DiscoveryReport, DiscoveryRootReport, DiscoverySelector, DiscoverySnapshot,
+    DiscoveryTotals, HostStateAccess, preview as discovery_preview, report as discovery_report,
+    snapshot as discovery_snapshot,
 };
 pub use environment::{EnvironmentPlan, HostEnvironment, host_command_environment};
 pub use error::{ErrorKind, QuartersError, Result};
@@ -40,9 +47,9 @@ pub use store::artifact::{
 };
 pub use store::lifecycle::{CloneCounts, CloneExclusions, CloneLimits, CloneMode, ClonePolicy, CloneReport};
 pub use store::{
-    FreezeReport, FreezeState, HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy,
-    HostForkReport, LeaseState, SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport, Store,
-    StoreLayoutDiagnosis,
+    DiscoveryLease, FreezeReport, FreezeState, HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions,
+    HostForkPolicy, HostForkReport, LeaseState, SpaceInspection, SpaceLease, SpaceRenameReport, SpaceUpgradeReport,
+    Store, StoreLayoutDiagnosis,
 };
 pub use store_recovery::RecoverySummary;
 pub use text::{encode_untrusted_text_hex_bounded, escape_untrusted_text, escape_untrusted_text_bounded};

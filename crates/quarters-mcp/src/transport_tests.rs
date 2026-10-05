@@ -41,7 +41,7 @@ async fn oversized_output_is_rejected_before_writing() -> Result<(), Box<dyn Err
     drop(transport);
     let mut bytes = Vec::new();
     output.read_to_end(&mut bytes).await?;
-    assert!(bytes.is_empty());
+    assert_eq!(bytes, Vec::<u8>::new());
     Ok(())
 }
 

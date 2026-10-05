@@ -536,7 +536,7 @@ fn verify_policy(policy: &Value, home: &Path) -> Result<ToolCoverage, Box<dyn Er
     let executable_path = policy["result"]["confinement"]["executable_path"]
         .as_array()
         .ok_or("confinement executable_path is not a readable array")?;
-    assert!(!executable_path.is_empty());
+    assert_ne!(executable_path, &Vec::<Value>::new());
     assert!(executable_path.iter().all(Value::is_string));
     assert!(policy["result"]["environment"].get("QUARTERS_HOST_PATH").is_none());
     assert!(

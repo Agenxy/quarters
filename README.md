@@ -98,6 +98,19 @@ Inspect the complete policy first with
 Seatbelt and App Sandbox are not portable CLI foundations. The prebuilt macOS
 npm binaries are unsigned and unnotarized in this alpha.
 
+`quarters discover` is a deliberately narrower observability instrument. It
+captures bounded metadata before and after one directly supervised command and
+reports only aggregate created, modified, replaced and deleted counts grouped
+as configuration, data, state, cache, credential-shaped, runtime socket,
+runtime or unclassified. It never opens regular files, resolves symbolic links,
+or emits entry paths. Each selected root has independent fixed scan and memory
+bounds; incomplete observations suppress the whole delta. Preview is a
+non-mutating plan disclosure and does not acquire the activity lease or create
+runtime state. The command says `host_writes_observed: not-measured`
+because unchanged Quarter state is not evidence that the child left host state
+alone. Detached and direct same-UID writers remain unknown. Discovery is CLI
+only; MCP has no process-execution or discovery tool.
+
 ## Try it
 
 ```sh
@@ -110,6 +123,8 @@ target/release/quarters clone studio experiment --confirm-sensitive-state studio
 target/release/quarters template create clean-room --from studio --preview
 target/release/quarters snapshot create studio before-change --preview
 target/release/quarters exec work -- env
+target/release/quarters discover work --preview
+target/release/quarters discover work -- git config --global user.name "Work identity"
 target/release/quarters enter work
 ```
 
@@ -128,7 +143,7 @@ quarters unfreeze --confirm work
 Install the current checkout with `make install`. Building from source requires
 a current Rust toolchain plus a working C compiler and assembler for optimized
 BLAKE3. The complete repository gate and typed npm launcher development also
-require Bun 1.3.14 and Node.js 26.2.0. npm remains the package registry,
+require Bun 1.4.2 and Node.js 26.10.0. npm remains the package registry,
 artifact-publication tool and global-install surface. The command is placed
 under `~/.local/bin` by default. The checkout is the unreleased alpha.4
 development line. The latest public release is alpha.2, currently available
@@ -174,6 +189,8 @@ publication is not yet available and is not advertised as an install path.
 | `env NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH]` | Show the exact environment and optional non-mutating Landlock policy plan |
 | `enter NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH]` | Open the shell with an optional explicit initial directory |
 | `exec NAME [--confinement filesystem] [--grant-path PATH:ro\|rw] [--workdir PATH] -- COMMAND` | Run one command; requested confinement never degrades silently |
+| `discover NAME [--scan home\|runtime] [--report-fd FD] -- COMMAND` | Run one command and report bounded, path-free Quarter-owned metadata deltas to stderr and optionally JSON on a caller descriptor |
+| `discover NAME [--scan home\|runtime] --preview` | Show exact roots, bounds and ASCII case-insensitive credential-shaped patterns without launching a child; supports `--json` |
 | `host -- COMMAND` | Restore default host HOME and runtime paths from a baseline space |
 | `agent status\|start\|stop\|restart [NAME]` | Manage a protocol-verified private OpenSSH agent |
 | `agent recover NAME --confirm NAME` | Reconcile only dead or protocol-verified private-agent state |
@@ -186,7 +203,19 @@ publication is not yet available and is not advertised as an install path.
 | `mcp` | Serve the bounded local MCP adapter over standard input/output |
 
 Management and inspection commands accept `--json`. Pass-through commands do
-not because child standard output must remain unchanged.
+not because child standard output must remain unchanged. Executing discovery
+uses `--report-fd 3` or higher for machine output; global `--json` is accepted
+only with `discover --preview`. The descriptor is caller-transferred and closed
+before child execution. On Linux this surface requires `/proc/self/fd` plus
+readable `pos`, `flags`, and `ino` fields in `/proc/self/fdinfo`. Tested Linux
+sinks include regular files, character devices and blocking anonymous pipes;
+sockets, named FIFOs and nonblocking anonymous pipes are rejected explicitly.
+macOS uses native `/dev/fd` duplication and accepts any writable descriptor that
+the kernel can duplicate, including sockets, pipes, named FIFOs and character
+devices. Its duplicate shares and advances the caller's open-file-description
+offset. Linux reopens a distinct description at the validated position, so its
+write does not advance the caller's offset. Report-write failure never replaces
+the child status.
 
 `env` and `doctor NAME` prepare the private runtime directories referenced by
 the computed environment. Neither starts a child or reads user content stored

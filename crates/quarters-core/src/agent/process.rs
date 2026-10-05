@@ -12,6 +12,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -100,6 +102,62 @@ pub(super) fn process_is_alive(pid: u32) -> Result<bool> {
             Err(QuartersError::new(ErrorKind::System, "could not inspect the private-agent process").with_source(error))
         }
     }
+}
+
+pub(super) fn process_generation(pid: u32) -> Result<u128> {
+    let pid = validated_pid(pid)?;
+    process_generation_optional(pid)?
+        .ok_or_else(|| QuartersError::new(ErrorKind::NotFound, "the private-agent process no longer exists"))
+}
+
+pub(super) fn process_matches_generation(pid: u32, expected: Option<u128>) -> Result<bool> {
+    let pid = validated_pid(pid)?;
+    match expected {
+        Some(expected) => process_generation_optional(pid).map(|generation| generation == Some(expected)),
+        None => process_is_alive(u32::try_from(pid.as_raw()).map_err(|error| {
+            QuartersError::new(ErrorKind::CorruptState, "the private-agent PID is invalid").with_source(error)
+        })?),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn process_generation_optional(pid: Pid) -> Result<Option<u128>> {
+    macos_process_info_optional(pid)
+        .map(|info| info.map(|value| (u128::from(value.pbi_start_tvsec) << 64) | u128::from(value.pbi_start_tvusec)))
+}
+
+#[cfg(target_os = "linux")]
+fn process_generation_optional(pid: Pid) -> Result<Option<u128>> {
+    let path = PathBuf::from(format!("/proc/{}/stat", pid.as_raw()));
+    let stat = match fs::read_to_string(&path) {
+        Ok(value) => value,
+        // A process that exits between open and read reports ESRCH rather
+        // than ENOENT; both mean that generation no longer exists.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(Errno::ESRCH as i32) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(QuartersError::io("read private-agent process generation", &path, error)),
+    };
+    let fields = stat
+        .get(stat.rfind(')').ok_or_else(invalid_linux_process_stat)? + 1..)
+        .ok_or_else(invalid_linux_process_stat)?;
+    let started = fields
+        .split_ascii_whitespace()
+        .nth(19)
+        .ok_or_else(invalid_linux_process_stat)?
+        .parse::<u128>()
+        .map_err(|error| invalid_linux_process_stat().with_source(error))?;
+    Ok(Some(started))
+}
+
+#[cfg(target_os = "linux")]
+fn invalid_linux_process_stat() -> QuartersError {
+    QuartersError::new(
+        ErrorKind::CorruptState,
+        "the kernel returned an invalid private-agent process generation",
+    )
 }
 
 pub(super) fn terminate_unreaped_child(pid: u32) -> Result<()> {
@@ -315,6 +373,26 @@ fn validated_pid(pid: u32) -> Result<Pid> {
         ));
     }
     Ok(Pid::from_raw(raw))
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod generation_tests {
+    use super::*;
+
+    #[test]
+    fn process_generation_rejects_a_reaped_process() {
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn generation target");
+        let generation = process_generation(child.id()).expect("capture process generation");
+
+        assert!(process_matches_generation(child.id(), Some(generation)).expect("match live process generation"));
+        child.kill().expect("stop generation target");
+        child.wait().expect("reap generation target");
+        assert!(!process_matches_generation(child.id(), Some(generation)).expect("reject reaped process generation"));
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]

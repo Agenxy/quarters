@@ -179,24 +179,23 @@ ADR before code is written.
 
 ## Privacy-bounded application-state discovery
 
-The first discovery feature is opt-in, per invocation, CLI-focused, and a test
-instrument. It never records raw host paths or file contents. Results contain
-bounded counts and classifications such as configuration, cache, credential
-shaped, runtime socket, or unknown host-state access.
+Implemented on the Alpha 7 development branch as opt-in `quarters discover`.
+The CLI captures bounded before/after metadata for explicitly selected
+Quarter-owned roots around one directly supervised command. It records no raw
+paths or contents and emits only aggregate classifications. The complete delta
+is absent after any bound, unreadable directory, unstable-entry observation or
+post-scan failure.
 
-On Linux, Quarters will research Landlock audit evidence on kernels that expose
-the required ABI and log access, but it will not make audit-log availability a
-runtime correctness dependency. A portable bounded before/after delta of
-explicitly selected Quarter-owned roots provides the baseline instrument.
+Current Linux Landlock denial observability is privileged, system-wide audit or
+tracepoint infrastructure rather than an unprivileged per-Quarter correctness
+API. It is therefore research evidence, not a runtime dependency. The portable
+metadata delta remains the baseline on both platforms.
 
-On macOS, discovery is limited to directly exec'd processes and bounded state
-deltas. LaunchServices GUI applications do not reliably inherit Quarters'
-environment and are explicitly out of scope. Quarters will not bypass
-LaunchServices by launching arbitrary bundle executables directly.
-
-Discovery artifacts are excluded from templates, snapshots, portable bundles,
-and ordinary logs. Tests use synthetic secret-bearing names and prove output
-contains only classifications and bounded counts.
+macOS LaunchServices GUI applications remain out of scope because they do not
+reliably inherit the direct process environment. Quarters does not bypass
+LaunchServices by invoking arbitrary bundle executables. Discovery has no MCP
+tool, creates no report artifact, and is excluded from templates, snapshots,
+portable bundles and ordinary logs.
 
 ## Final acceptance
 
