@@ -290,6 +290,11 @@ fn add_user_grants(request: &ConfinementRequest<'_>, grants: &mut Vec<Confinemen
             Ok(anchor)
         })
         .collect::<Result<Vec<_>>>()?;
+    // Resolving each grant first triggers any automount on its path, so the
+    // topology read below already lists the mount the kernel will report.
+    for requested in request.user_grants {
+        let _resolved = requested.path.canonicalize();
+    }
     let mounts = MountTopology::read()?;
     let protected: Vec<PathBuf> = reserved
         .iter()
