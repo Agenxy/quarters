@@ -176,11 +176,15 @@ confidentiality claim. Network and IPC remain shared.
 
 Confinement grant checks inspect current mount topology but do not freeze it.
 An unconfined host process can change mounts between planning and enforcement.
-Mount regions are compared by device and filesystem-relative path, so a mount
-that is overmounted or hidden in this namespace is judged by its listed
-position. Descriptor ancestry is validated at planning; a host rename that
-later moves protected state beneath an already validated grant is outside the
-guarantee. Overlay lower layers are distinct devices and are not traced. The
+Mount regions are compared by device and filesystem-relative path after the
+kernel identifies each path's serving mount; mounts listed beneath a grant or
+protected root count even when hidden. Descriptor ancestry is validated at
+planning; a host rename that later moves protected state beneath an already
+validated grant is outside the guarantee. A directory grant can still contain a
+host-created hard link to a protected file, because only file grants are
+single-link checked; the confined child cannot create such links itself.
+Overlay upper, work and lower layers and FUSE relays such as bindfs or sshfs
+are separate devices and are not traced to their backing directories. The
 mount table is bounded to one MiB, 8,192 entries and 16 KiB per line; missing,
 malformed or truncated input refuses the grant. Filesystem identity checks do
 not make the baseline a security boundary.

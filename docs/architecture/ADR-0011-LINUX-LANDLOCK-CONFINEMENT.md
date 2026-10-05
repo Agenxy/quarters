@@ -72,16 +72,18 @@ inside the Quarter home; missing counterparts fail before namespace setup.
 Overlap validation also compares retained `O_PATH` descriptors by device and
 inode, walking directory parents in both directions. This detects aliases whose
 path names differ. File grants require one link at planning and enforcement.
-Bind and subtree mounts hide their source ancestors from `openat("..")`, so a
-bounded read of `/proc/self/mountinfo` also locates every grant and every
-protected root as a filesystem region: the mount's device plus the path below
-that filesystem's root. A grant is refused when its own region, or the region
-exposed by any mount nested beneath it (including a second mount of a whole
-filesystem), overlaps a protected region on the same device. Subvolume roots
-such as btrfs `/@` or `/root`, namespace files and container workspace binds
-that expose no protected region remain grantable. Mount topology is located by
-the most recent mount at the longest matching mount point; it is neither frozen
-nor re-read at enforcement, and descriptor ancestry is not re-walked there.
+Bind and subtree mounts hide their source ancestors from `openat("..")`. The
+kernel therefore names the mount actually serving each grant and protected
+path (`statx` with `STATX_MNT_ID`, available on every Landlock ABI-3 kernel),
+and a bounded read of `/proc/self/mountinfo` places it on its filesystem as the
+mount's device plus the path below that filesystem's root. Every mount listed
+beneath a grant or a protected path adds its own region. A grant is refused
+when any of its regions, including a second mount of a whole filesystem
+nested beneath it, overlaps any protected region on the same device.
+Subvolume roots such as btrfs `/@` or `/root`, namespace files and container
+workspace binds that expose no protected region remain grantable. Mount
+topology is neither frozen nor re-read at enforcement, and descriptor ancestry
+is not re-walked there.
 
 The policy report also records the observed
 `/proc/sys/dev/tty/legacy_tiocsti` state. Landlock ABI 3 does not mediate that

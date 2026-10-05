@@ -95,6 +95,9 @@ fn bind_mount_aliases_are_rejected_in_a_private_namespace() -> Result<(), Box<dy
         .args([
             "--user",
             "--map-current-user",
+            // A non-root mapped user loses namespace capabilities at exec, so
+            // keep them for the probe that performs the bind mounts.
+            "--keep-caps",
             "--mount",
             "--propagation",
             "private",
@@ -145,6 +148,7 @@ fn namespace_unavailable(output: &Output) -> bool {
     stderr.contains("unshare failed: Operation not permitted")
         || stderr.contains("unshare failed: Invalid argument")
         || stderr.contains("write failed /proc/self/uid_map: Operation not permitted")
+        || stderr.contains("unrecognized option")
 }
 
 #[test]

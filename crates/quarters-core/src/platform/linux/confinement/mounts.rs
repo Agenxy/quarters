@@ -1,11 +1,12 @@
 //! Refuse grants whose mounted filesystem regions alias protected state.
 //!
 //! Descriptor ancestry stops at a mount root, so a bind or subtree mount can
-//! expose protected inodes beneath a path that looks unrelated. Each grant and
-//! each protected path is located on its filesystem as `(device, root-relative
-//! path)` from mount topology. A grant is refused when its own region, or the
-//! region of any mount nested beneath it, overlaps a protected region on the
-//! same device.
+//! expose protected inodes beneath a path that looks unrelated. The kernel
+//! names the mount that actually serves each grant and protected path
+//! (`statx` `STATX_MNT_ID`); mountinfo then places it on its filesystem as
+//! `(device, root-relative path)`. Every mount nested beneath a grant or a
+//! protected path adds its own region. A grant is refused when any of its
+//! regions overlaps any protected region on the same device.
 
 use crate::{ErrorKind, QuartersError, Result};
 use std::fs::File;
@@ -18,6 +19,7 @@ const MAX_MOUNTS: usize = 8_192;
 const MAX_LINE_BYTES: usize = 16_384;
 
 struct Mount {
+    id: u64,
     device: (u32, u32),
     // `None` for pseudo filesystems whose root is not a path, such as nsfs.
     root: Option<PathBuf>,
@@ -86,28 +88,23 @@ impl MountTopology {
     /// # Errors
     ///
     /// Returns `Unsupported` when the grant, or any mount beneath it, exposes
-    /// a region overlapping a protected path on the same filesystem, and when
-    /// a path cannot be located in the mount topology.
+    /// a region overlapping a protected path or any mount beneath one, and
+    /// when a path cannot be located through the kernel's mount identity.
     pub(super) fn reject_overlap(&self, grant: &Path, protected: &[PathBuf]) -> Result<()> {
-        let protected = protected
-            .iter()
-            .map(|path| self.region(path))
-            .collect::<Result<Vec<_>>>()?;
-        let mut exposed = vec![self.region(grant)?];
-        exposed.extend(
-            self.0
-                .iter()
-                .filter(|mount| mount.point != grant && mount.point.starts_with(grant))
-                .filter_map(|mount| {
-                    mount.root.clone().map(|path| Region {
-                        device: mount.device,
-                        path,
-                    })
-                }),
-        );
+        self.reject_overlap_with(grant, protected, &kernel_mount)
+    }
+
+    fn reject_overlap_with(&self, grant: &Path, protected: &[PathBuf], locate: &Locator<'_>) -> Result<()> {
+        let mut reserved = Vec::new();
+        for path in protected {
+            reserved.push(self.region(path, locate)?);
+            reserved.extend(self.beneath(path));
+        }
+        let mut exposed = vec![self.region(grant, locate)?];
+        exposed.extend(self.beneath(grant));
         if exposed
             .iter()
-            .all(|region| protected.iter().all(|reserved| !region.overlaps(reserved)))
+            .all(|region| reserved.iter().all(|protected| !region.overlaps(protected)))
         {
             return Ok(());
         }
@@ -118,25 +115,59 @@ impl MountTopology {
         .with_hint("select a data path that no bind, subtree or nested mount connects to protected roots"))
     }
 
-    /// Locate an absolute path through the most recent mount containing it.
-    fn region(&self, path: &Path) -> Result<Region> {
-        // Later entries are mounted on top of earlier ones at the same point.
+    /// Regions of every listed mount strictly beneath a path, hidden or not.
+    fn beneath<'a>(&'a self, path: &'a Path) -> impl Iterator<Item = Region> + 'a {
+        self.0
+            .iter()
+            .filter(move |mount| mount.point != path && mount.point.starts_with(path))
+            .filter_map(|mount| {
+                mount.root.clone().map(|root| Region {
+                    device: mount.device,
+                    path: root,
+                })
+            })
+    }
+
+    /// Place a path on its filesystem through the mount the kernel reports.
+    fn region(&self, path: &Path, locate: &Locator<'_>) -> Result<Region> {
+        let (id, existing) = locate(path)?;
         let mount = self
             .0
             .iter()
-            .filter(|mount| path.starts_with(&mount.point))
-            .fold(None::<&Mount>, |best, mount| match best {
-                Some(best) if best.point.as_os_str().len() > mount.point.as_os_str().len() => Some(best),
-                _ => Some(mount),
-            })
+            .find(|mount| mount.id == id)
             .ok_or_else(|| unlocated(path))?;
         let root = mount.root.as_ref().ok_or_else(|| unlocated(path))?;
-        let relative = path.strip_prefix(&mount.point).map_err(|_error| unlocated(path))?;
+        let served = existing.strip_prefix(&mount.point).map_err(|_error| unlocated(path))?;
+        let missing = path.strip_prefix(&existing).map_err(|_error| unlocated(path))?;
         Ok(Region {
             device: mount.device,
-            path: root.join(relative),
+            path: root.join(served).join(missing),
         })
     }
+}
+
+/// Resolve a path to `(mount id, nearest existing ancestor-or-self)`.
+type Locator<'a> = dyn Fn(&Path) -> Result<(u64, PathBuf)> + 'a;
+
+fn kernel_mount(path: &Path) -> Result<(u64, PathBuf)> {
+    use rustix::fs::{AtFlags, CWD, StatxFlags, statx};
+    for candidate in path.ancestors() {
+        match statx(CWD, candidate, AtFlags::SYMLINK_NOFOLLOW, StatxFlags::MNT_ID) {
+            Ok(status) if status.stx_mask & StatxFlags::MNT_ID.bits() != 0 => {
+                return Ok((status.stx_mnt_id, candidate.to_path_buf()));
+            }
+            Ok(_) => break,
+            Err(rustix::io::Errno::NOENT) => {}
+            Err(error) => {
+                return Err(QuartersError::io(
+                    "identify the mount serving a filesystem policy path",
+                    candidate,
+                    error.into(),
+                ));
+            }
+        }
+    }
+    Err(unlocated(path))
 }
 
 fn parse_line(line: &[u8]) -> Result<Mount> {
@@ -150,9 +181,10 @@ fn parse_line(line: &[u8]) -> Result<Mount> {
     if separator < 6 || fields.len() != separator + 4 || fields[..5].iter().any(|field| field.is_empty()) {
         return Err(invalid_mountinfo());
     }
-    if !fields[0].iter().all(u8::is_ascii_digit) || !fields[1].iter().all(u8::is_ascii_digit) {
+    if !fields[1].iter().all(u8::is_ascii_digit) {
         return Err(invalid_mountinfo());
     }
+    let id = parse_number(fields[0])?;
     let device = parse_device(fields[2])?;
     let root = decode_path(fields[3])?;
     let point = decode_path(fields[4])?;
@@ -160,10 +192,21 @@ fn parse_line(line: &[u8]) -> Result<Mount> {
         return Err(invalid_mountinfo());
     }
     Ok(Mount {
+        id,
         device,
         root: root.is_absolute().then_some(root),
         point,
     })
+}
+
+fn parse_number(field: &[u8]) -> Result<u64> {
+    if field.is_empty() || !field.iter().all(u8::is_ascii_digit) {
+        return Err(invalid_mountinfo());
+    }
+    std::str::from_utf8(field)
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .ok_or_else(invalid_mountinfo)
 }
 
 fn parse_device(field: &[u8]) -> Result<(u32, u32)> {
@@ -219,6 +262,7 @@ fn decode_path(bytes: &[u8]) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::MountTopology;
+    use crate::Result;
     use std::error::Error;
     use std::path::{Path, PathBuf};
 
@@ -236,21 +280,41 @@ mod tests {
         ]
     }
 
-    fn with(extra: &[u8]) -> Result<MountTopology, Box<dyn Error>> {
+    fn with(extra: &[u8]) -> std::result::Result<MountTopology, Box<dyn Error>> {
         Ok(MountTopology::parse(&[HOST, extra].concat())?)
     }
 
+    /// Stand in for the kernel: the last-listed mount at the longest point.
+    fn listed(topology: &MountTopology) -> impl Fn(&Path) -> Result<(u64, PathBuf)> + '_ {
+        |path| {
+            let mount = topology
+                .0
+                .iter()
+                .filter(|mount| path.starts_with(&mount.point))
+                .fold(None::<&super::Mount>, |best, mount| match best {
+                    Some(best) if best.point.as_os_str().len() > mount.point.as_os_str().len() => Some(best),
+                    _ => Some(mount),
+                })
+                .ok_or_else(|| super::unlocated(path))?;
+            Ok((mount.id, path.to_path_buf()))
+        }
+    }
+
+    fn check(topology: &MountTopology, grant: &str, protected: &[PathBuf]) -> Result<()> {
+        topology.reject_overlap_with(Path::new(grant), protected, &listed(topology))
+    }
+
     #[test]
-    fn ordinary_grants_pass_beside_nsfs_and_empty_sources() -> Result<(), Box<dyn Error>> {
+    fn ordinary_grants_pass_beside_nsfs_and_empty_sources() -> std::result::Result<(), Box<dyn Error>> {
         let mounts = with(b"")?;
         for grant in ["/srv/data", "/home/u/projects", "/tmp", "/run/user/1000/work"] {
-            mounts.reject_overlap(Path::new(grant), &store())?;
+            check(&mounts, grant, &store())?;
         }
         Ok(())
     }
 
     #[test]
-    fn subtree_and_whole_filesystem_aliases_are_refused() -> Result<(), Box<dyn Error>> {
+    fn subtree_and_whole_filesystem_aliases_are_refused() -> std::result::Result<(), Box<dyn Error>> {
         let cases: [(&[u8], &[&str]); 3] = [
             // A bind of only the protected child, granted directly or by a container.
             (
@@ -269,34 +333,61 @@ mod tests {
             let mounts = with(extra)?;
             let protected = [store(), vec![PathBuf::from("/usr/bin")]].concat();
             for grant in grants {
-                assert!(mounts.reject_overlap(Path::new(grant), &protected).is_err(), "{grant}");
+                assert!(check(&mounts, grant, &protected).is_err(), "{grant}");
             }
-            mounts.reject_overlap(Path::new("/srv/alias-other"), &store())?;
+            check(&mounts, "/srv/alias-other", &store())?;
         }
         Ok(())
     }
 
     #[test]
-    fn btrfs_subvolume_roots_are_not_false_aliases() -> Result<(), Box<dyn Error>> {
-        let mounts = MountTopology::parse(
-            b"1 0 0:30 /root / rw - btrfs /dev/vda3 rw\n2 1 0:30 /home /home rw - btrfs /dev/vda3 rw\n",
-        )?;
-        mounts.reject_overlap(Path::new("/srv/data"), &store())?;
-        mounts.reject_overlap(Path::new("/home/u/projects"), &store())?;
-        assert!(mounts.reject_overlap(Path::new("/home/u"), &store()).is_err());
+    fn mounts_beneath_protected_roots_are_protected() -> std::result::Result<(), Box<dyn Error>> {
+        // The store keeps its spaces on a data disk bound beneath the store root.
+        let mounts = with(b"9 2 8:3 /qspaces /home/u/.local/share/quarters/spaces rw - ext4 /dev/sdb1 rw\n10 1 8:3 / /data rw - ext4 /dev/sdb1 rw\n")?;
+        assert!(check(&mounts, "/data/qspaces/other", &store()).is_err());
+        assert!(check(&mounts, "/data", &store()).is_err());
+        check(&mounts, "/data/unrelated", &store())?;
         Ok(())
     }
 
     #[test]
-    fn escapes_and_malformed_topology_fail_closed() -> Result<(), Box<dyn Error>> {
+    fn the_serving_mount_decides_even_when_listed_earlier() -> std::result::Result<(), Box<dyn Error>> {
+        // A tmpfs at /srv/protected is later covered by a bind of the spaces
+        // directory over /srv; the kernel serves /srv/protected from the bind.
+        let mounts = with(
+            b"9 1 0:9 / /srv/protected rw - tmpfs  rw\n10 1 8:2 /u/.local/share/quarters/spaces /srv rw - ext4 /dev/sda2 rw\n",
+        )?;
+        let serving_bind = |path: &Path| Ok((10, path.to_path_buf()));
+        assert!(
+            mounts
+                .reject_overlap_with(Path::new("/srv/protected"), &store(), &serving_bind)
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn btrfs_subvolume_roots_are_not_false_aliases() -> std::result::Result<(), Box<dyn Error>> {
+        let mounts = MountTopology::parse(
+            b"1 0 0:30 /root / rw - btrfs /dev/vda3 rw\n2 1 0:30 /home /home rw - btrfs /dev/vda3 rw\n",
+        )?;
+        check(&mounts, "/srv/data", &store())?;
+        check(&mounts, "/home/u/projects", &store())?;
+        assert!(check(&mounts, "/home/u", &store()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn escapes_and_malformed_topology_fail_closed() -> std::result::Result<(), Box<dyn Error>> {
         let mounts = with(b"9 1 8:2 /u/.ssh /srv/a\\040b rw - none none rw\n")?;
-        assert!(mounts.reject_overlap(Path::new("/srv/a b/nested"), &store()).is_err());
+        assert!(check(&mounts, "/srv/a b/nested", &store()).is_err());
         for malformed in [
             &b"invalid\n"[..],
             b"2 1 0:1 / /bad\\999 rw - none none rw\n",
             b"2 1 0:1 / /valid rw - none none rw",
             b"2 1 0:1 / /valid rw\n",
             b"2 1 0:x / /valid rw - none none rw\n",
+            b"x 1 0:1 / /valid rw - none none rw\n",
             b"2 1 0:1 / relative rw - none none rw\n",
             b"",
         ] {
