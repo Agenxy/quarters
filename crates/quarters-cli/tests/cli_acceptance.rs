@@ -756,6 +756,12 @@ fn child_json_flag_does_not_change_quarters_error_format() -> Result<(), Box<dyn
     Ok(())
 }
 
+/// The value `quarters host` restores: a test running inside a Quarter
+/// inherits the outermost host value, not the enclosing Quarter's.
+fn outermost_host_value(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(format!("QUARTERS_HOST_{name}")).or_else(|_| std::env::var(name))
+}
+
 #[test]
 fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
@@ -774,7 +780,7 @@ fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
         "/usr/bin/printenv",
         "HOME",
     ]))?;
-    assert_eq!(String::from_utf8(output.stdout)?.trim(), std::env::var("HOME")?);
+    assert_eq!(String::from_utf8(output.stdout)?.trim(), outermost_host_value("HOME")?);
 
     let output = run(quarters(temporary.path()).args([
         "exec",
@@ -788,7 +794,7 @@ fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
         "/usr/bin/printenv",
         "PATH",
     ]))?;
-    assert_eq!(String::from_utf8(output.stdout)?.trim(), std::env::var("PATH")?);
+    assert_eq!(String::from_utf8(output.stdout)?.trim(), outermost_host_value("PATH")?);
     Ok(())
 }
 
