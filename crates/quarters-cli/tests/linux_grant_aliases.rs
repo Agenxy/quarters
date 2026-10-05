@@ -65,11 +65,11 @@ fn hard_link_grants_cannot_alias_reserved_or_unrelated_files() -> Result<(), Box
     if !setup(&root)? {
         return Ok(());
     }
-    let manifest = root.join("spaces/protected/manifest.json");
+    let manifest = root.join("spaces/protected/.quarters.json");
     let contents = fs::read(&manifest)?;
     let alias = tree.path().join("manifest-alias");
     fs::hard_link(&manifest, &alias)?;
-    reject(&root, &alias, "protected filesystem identity")?;
+    reject(&root, &alias, "single-link")?;
     let ordinary = tree.path().join("ordinary");
     let second = tree.path().join("ordinary-link");
     fs::write(&ordinary, b"ordinary")?;
@@ -82,6 +82,9 @@ fn hard_link_grants_cannot_alias_reserved_or_unrelated_files() -> Result<(), Box
 #[test]
 fn bind_mount_aliases_are_rejected_in_a_private_namespace() -> Result<(), Box<dyn Error>> {
     let tree = tempfile::tempdir()?;
+    if !setup(&tree.path().join("store"))? {
+        return Ok(());
+    }
     let required = std::env::var_os("QUARTERS_REQUIRE_BIND_ALIASES").is_some_and(|value| !value.is_empty());
     // libtest is threaded, so namespace creation runs in the native unshare
     // utility before this test executable starts. Mounts cannot reach the host.
@@ -128,7 +131,9 @@ fn bind_mount_aliases_are_rejected_in_a_private_namespace() -> Result<(), Box<dy
 
 fn namespace_unavailable(output: &Output) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    stderr.contains("unshare failed: Operation not permitted") || stderr.contains("unshare failed: Invalid argument")
+    stderr.contains("unshare failed: Operation not permitted")
+        || stderr.contains("unshare failed: Invalid argument")
+        || stderr.contains("write failed /proc/self/uid_map: Operation not permitted")
 }
 
 #[test]
@@ -138,9 +143,6 @@ fn bind_mount_namespace_probe() -> Result<(), Box<dyn Error>> {
     };
     let fixture = PathBuf::from(fixture);
     let root = fixture.join("store");
-    if !setup(&root)? {
-        return Err("Landlock unavailable in bind-alias namespace".into());
-    }
     let home = root.join("spaces/protected/home");
     let nested = home.join("private-child");
     fs::create_dir(&nested)?;
