@@ -7,8 +7,14 @@ use std::path::Path;
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
+/// A host-context invocation, even when the test itself runs inside a Quarter.
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("QUARTERS_") {
+            command.env_remove(name);
+        }
+    }
     command.arg("--root").arg(root);
     command
 }

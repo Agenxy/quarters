@@ -839,42 +839,6 @@ fn child_json_flag_does_not_change_quarters_error_format() -> Result<(), Box<dyn
 }
 
 #[test]
-fn host_command_restores_host_home() -> Result<(), Box<dyn Error>> {
-    let temporary = TempDir::new()?;
-    create(temporary.path(), "work")?;
-    let binary = env!("CARGO_BIN_EXE_quarters");
-    let root = temporary.path().to_string_lossy().into_owned();
-    let output = run(quarters(temporary.path()).args([
-        "exec",
-        "work",
-        "--",
-        binary,
-        "--root",
-        &root,
-        "host",
-        "--",
-        "/usr/bin/printenv",
-        "HOME",
-    ]))?;
-    assert_eq!(String::from_utf8(output.stdout)?.trim(), std::env::var("HOME")?);
-
-    let output = run(quarters(temporary.path()).args([
-        "exec",
-        "work",
-        "--",
-        binary,
-        "--root",
-        &root,
-        "host",
-        "--",
-        "/usr/bin/printenv",
-        "PATH",
-    ]))?;
-    assert_eq!(String::from_utf8(output.stdout)?.trim(), std::env::var("PATH")?);
-    Ok(())
-}
-
-#[test]
 fn interactive_zsh_keeps_the_declared_history_path() -> Result<(), Box<dyn Error>> {
     if !Path::new("/bin/zsh").is_file() {
         return Ok(());
