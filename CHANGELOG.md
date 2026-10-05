@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Move the pinned toolchain to Rust 1.99.0, Bun 1.4.2 and Node.js 26.10.0, and
+  refresh exact dependency pins to current stable releases, including rmcp
+  3.5.0 with its `ServerConfig`/`ClientConfig` names and jsonschema 0.58.5.
 - Add opt-in `quarters discover` for one directly supervised command: bounded
   descriptor-relative metadata snapshots of selected Quarter home/runtime
   roots, path-free classified deltas, explicit observation limits, and stable
@@ -94,7 +97,7 @@ compatibility notes will be called out here.
   links and deepest leaves, release hostile path metadata at directory close,
   validate authenticated provenance before extraction, and report post-commit
   durability or cleanup failures without implying that publication vanished.
-- Pin Bun 1.3.14 as the typed npm launcher's development package manager and
+- Pin Bun 1.4.2 as the typed npm launcher's development package manager and
   lockfile owner, rename its local gate to `make launcher-check`, and retain
   npm as the consumer installation, artifact packaging and publication surface.
 - Add previewed, digest-confirmed host shell forking with descriptor-anchored

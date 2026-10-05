@@ -141,7 +141,7 @@ fn mcp_stdio_serves_the_stateless_2026_path_end_to_end() -> Result<(), Box<dyn E
     drop(input);
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
-    assert!(completed.stderr.is_empty());
+    assert_eq!(String::from_utf8_lossy(&completed.stderr), "");
     for command in ["quarters", "ssh", "scp", "sftp", "ssh-add"] {
         assert!(
             std::fs::symlink_metadata(temporary.path().join("spaces/agent/home/.local/bin").join(command))?
@@ -219,7 +219,7 @@ fn mcp_stdio_serves_the_initialized_2025_path_end_to_end() -> Result<(), Box<dyn
     drop(input);
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
-    assert!(completed.stderr.is_empty());
+    assert_eq!(String::from_utf8_lossy(&completed.stderr), "");
     Ok(())
 }
 
