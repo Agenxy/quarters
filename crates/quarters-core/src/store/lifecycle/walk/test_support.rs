@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Deterministic hostile-source mutations for lifecycle tests.
 
 use crate::{QuartersError, Result};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Retained filesystem identities for private lifecycle staging roots.
 
 use super::cleanup::remove_exact_tree_restoring_owner_access;

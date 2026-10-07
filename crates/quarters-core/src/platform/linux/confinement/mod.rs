@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Fail-closed Linux Landlock filesystem policy.
 
 mod paths;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Cross-thread creation and removal contracts.
 
 #![allow(clippy::expect_used)]

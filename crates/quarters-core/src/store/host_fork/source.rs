@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Descriptor-anchored, content-free host-fork planning.
 
 use super::model::{HostForkFile, HostForkIneligible, HostForkMode, HostForkPolicy, HostForkReport};

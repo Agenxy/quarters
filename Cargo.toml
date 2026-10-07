@@ -11,7 +11,7 @@ resolver = "3"
 version = "0.1.0-alpha.4"
 edition = "2024"
 rust-version = "1.99.0"
-license = "Apache-2.0"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/Agenxy/quarters"
 homepage = "https://github.com/Agenxy/quarters"
 

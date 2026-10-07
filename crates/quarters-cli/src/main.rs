@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Quarters command-line entry point.
 
 mod adapter;

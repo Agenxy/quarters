@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Stable-name safety for artifacts captured before space IDs existed.
 
 use super::{ArtifactInspection, ArtifactKind};

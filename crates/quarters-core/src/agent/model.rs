@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Public and persisted SSH-agent lifecycle models.
 
 use crate::{Space, SpaceId};

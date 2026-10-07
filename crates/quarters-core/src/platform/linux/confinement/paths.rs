@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Policy path discovery, reporting and executable resolution.
 
 use crate::platform::{ConfinedExecutable, ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess};

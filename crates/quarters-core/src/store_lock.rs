@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded advisory-lock acquisition for store coordination.
 
 use std::fs::File;

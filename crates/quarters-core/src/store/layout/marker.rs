@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Strict root-format marker parsing and publication.
 
 use super::{StoreLayout, StoreLayoutDiagnosis};

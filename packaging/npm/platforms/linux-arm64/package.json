@@ -2,7 +2,7 @@
   "name": "quarters-cli-linux-arm64",
   "version": "0.1.0-alpha.4",
   "description": "Quarters native binary for Linux arm64",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-or-later",
   "os": ["linux"],
   "cpu": ["arm64"],
   "files": ["bin/quarters", "README.md", "LICENSE", "NOTICE"],

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Private-agent startup convergence regression tests.
 
 #![allow(clippy::expect_used)]

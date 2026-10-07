@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Stable errors shared by the CLI and core.
 
 use std::error::Error;

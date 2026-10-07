@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Two-pass authenticated bundle import into a fresh template.
 
 use super::super::catalog::{ArtifactStaging, prepare_artifact_staging, write_artifact_manifest};

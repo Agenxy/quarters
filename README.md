@@ -503,4 +503,7 @@ encrypted-at-rest storage and supported macOS confinement remain unavailable.
 - [Registry publishing](docs/operations/REGISTRY-PUBLISHING.md)
 - [Changelog](CHANGELOG.md)
 
-Apache 2.0. No account, service, telemetry or proprietary dependency.
+GPL-3.0-or-later, with a commercial licence available from Agenxy; see
+[commercial licensing](COMMERCIAL-LICENSING.md). Releases up to
+0.1.0-alpha.2 remain Apache-2.0. No account, service, telemetry or proprietary
+dependency.

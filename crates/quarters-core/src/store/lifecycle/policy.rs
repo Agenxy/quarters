@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Stable clone policy, limits and result schema.
 
 use crate::SpaceLayout;

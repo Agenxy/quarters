@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Managed-agent and command-adapter output.
 
 use super::{escape_for_human, path_for_human, print_success};

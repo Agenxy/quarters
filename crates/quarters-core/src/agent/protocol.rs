@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded SSH-agent protocol liveness checks.
 
 use crate::{ErrorKind, QuartersError, Result};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Privacy-bounded metadata deltas for one directly executed process.
 
 mod classify;

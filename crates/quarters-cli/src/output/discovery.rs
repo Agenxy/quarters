@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use quarters_core::{DiscoveryClassCounts, DiscoveryPreview, DiscoveryReport, QuartersError, Result};
 use serde::Serialize;
 use serde_json::json;

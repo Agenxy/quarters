@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Process launch and identity checks for the managed OpenSSH agent.
 
 use super::model::StoredAgentState;

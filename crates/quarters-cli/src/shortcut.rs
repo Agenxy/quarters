@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Distribution-aware managed command shortcuts.
 
 use crate::cli::{ShortcutArgs, ShortcutCommand, ShortcutTargetArgs};

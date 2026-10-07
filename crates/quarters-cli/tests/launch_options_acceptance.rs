@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Portable working-directory and platform grant-option acceptance.
 
 #[cfg(target_os = "macos")]
