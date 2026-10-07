@@ -16,3 +16,12 @@ platform module, and capability requests fail rather than degrading silently.
 
 Changes to process authority, environment inheritance, filesystem mutation,
 stored schema or platform guarantees need tests and an architecture decision.
+
+## Licensing of contributions
+
+Quarters is licensed under GPL-3.0-or-later, and Agenxy also offers it under a
+commercial licence (see `COMMERCIAL-LICENSING.md`). So that both remain
+possible, outside contributions need a signed contributor licence agreement or
+copyright assignment to Agenxy before they can be merged. Open an issue first
+to arrange it. New source files start with
+`// SPDX-License-Identifier: GPL-3.0-or-later`.

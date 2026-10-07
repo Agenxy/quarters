@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded machine presentation for filesystem-confinement plans.
 
 use super::{bounded_path_for_human, escape_for_human, print_success, safe_json_path, safe_json_text};

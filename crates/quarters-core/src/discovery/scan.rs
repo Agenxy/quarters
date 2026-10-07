@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use super::{DiscoveryLimits, DiscoverySelector, EntryIdentity, EntryRecord, RootIdentity, Snapshot};
 use crate::{ErrorKind, QuartersError, Result};
 use nix::dir::Dir;

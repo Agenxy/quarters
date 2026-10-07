@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Repository discovery and non-code policy checks.
 
 use crate::limits::MAX_FILE_LINES;

@@ -19,4 +19,5 @@ Quarters redirects user-owned state for native process trees. It does not change
 your UID, permissions or machine identity, and its baseline is not a sandbox or
 security boundary.
 
-Apache-2.0. Source: <https://github.com/Agenxy/quarters>
+GPL-3.0-or-later; a commercial licence is available from Agenxy. Source:
+<https://github.com/Agenxy/quarters>

@@ -1,7 +1,14 @@
 Quarters
-Copyright 2026 Agenxy contributors
+Copyright 2026 Agenxy
 
-Licensed under the Apache License, Version 2.0.
+Licensed under the GNU General Public License, version 3 or (at your option)
+any later version. See LICENSE. A commercial licence for the Agenxy-authored
+parts is available; see COMMERCIAL-LICENSING.md.
+
+Releases published before this change (0.1.0-alpha.1 and 0.1.0-alpha.2)
+remain available under the Apache License, Version 2.0, as published.
 
 The MCP lifecycle, transport-admission and compatibility-test structure was
-informed by Agenxy Remap, also Apache-2.0 licensed.
+informed by Agenxy Remap, which is also authored by Agenxy.
+
+Third-party dependencies keep their own licences and notices.

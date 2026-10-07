@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded lifecycle-copy transactions.
 
 mod cleanup;

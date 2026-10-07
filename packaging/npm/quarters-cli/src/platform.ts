@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /** Resolve host platforms to Quarters' native npm packages. */
 
 const PACKAGES = new Map<string, string>([

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Linux-only runtime and mount-home acceptance.
 
 #![cfg(target_os = "linux")]

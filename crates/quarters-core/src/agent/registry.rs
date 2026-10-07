@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Private, atomic SSH-agent ownership records.
 
 use super::model::{AgentRecord, REGISTRY_SCHEMA_VERSION};

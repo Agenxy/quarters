@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Explicit, verified private SSH-agent lifecycle.
 
 mod model;

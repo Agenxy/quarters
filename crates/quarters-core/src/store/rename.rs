@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Recoverable stable-identity space rename transaction.
 
 use super::artifact::SourceIdentity;

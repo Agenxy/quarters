@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Stable MCP presentation types.
 
 use quarters_core::{

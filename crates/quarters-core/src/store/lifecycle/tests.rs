@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Lifecycle transaction tests.
 
 #![allow(clippy::expect_used)]

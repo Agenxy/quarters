@@ -26,6 +26,13 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.93
+# Quarters' own crates are GPL-3.0-or-later; dependencies stay on the list above.
+exceptions = [
+    { crate = "quarters", allow = ["GPL-3.0-or-later"] },
+    { crate = "quarters-core", allow = ["GPL-3.0-or-later"] },
+    { crate = "quarters-mcp", allow = ["GPL-3.0-or-later"] },
+    { crate = "quarters-quality", allow = ["GPL-3.0-or-later"] },
+]
 
 [licenses.private]
 ignore = false

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Human presentation for store-layout diagnosis.
 
 pub(super) fn print_store_layout(layout: &quarters_core::StoreLayoutDiagnosis) {

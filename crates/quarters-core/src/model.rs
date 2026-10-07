@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Stored space model and validated names.
 
 use crate::{ErrorKind, QuartersError, Result};

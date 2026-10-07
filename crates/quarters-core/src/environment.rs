@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Deterministic child environment policy.
 
 use crate::platform;

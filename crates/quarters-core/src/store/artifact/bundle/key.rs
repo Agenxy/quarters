@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Private bundle authentication-key creation and loading.
 
 use super::super::ArtifactId;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! End-to-end acceptance tests for non-mutating store diagnosis.
 
 use serde_json::Value;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Collision-safe managed command links placed inside a space.
 
 use crate::store::sync_directory;

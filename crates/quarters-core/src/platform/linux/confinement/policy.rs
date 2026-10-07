@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Landlock ruleset construction and enforcement.
 
 use super::{landlock_error, new_ruleset};

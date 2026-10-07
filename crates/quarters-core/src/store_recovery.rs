@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded inspection and cleanup of reserved recovery directories.
 
 use std::ffi::OsStr;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Cooperative freeze policy for stable-identity spaces.
 
 use super::{Store, epoch_millis, read_private_file, sync_directory, write_private_file};
