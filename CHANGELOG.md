@@ -13,7 +13,6 @@ compatibility notes will be called out here.
 - Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
   refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
   releases.
-  releases; rmcp stays at 3.5.0 pending its lifecycle migration.
 - Let `recover` read rollback state within the five-second management bound, so a
   concurrent recovery queues instead of failing at the 500 ms observer bound;
   read-only status keeps the short bound.
