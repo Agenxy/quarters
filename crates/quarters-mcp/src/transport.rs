@@ -34,6 +34,9 @@ pub(crate) struct BoundedStdioTransport<R, W> {
     error_sender: mpsc::Sender<ServerJsonRpcMessage>,
     error_writer_failed: Arc<AtomicBool>,
     pending_error: Option<PendingError>,
+    // Held here, not inside a receive future, so a dropped receive resumes
+    // the wait instead of losing the request.
+    awaiting_release: Option<AwaitingRelease>,
 }
 
 impl<R, W> BoundedStdioTransport<R, W>
@@ -66,6 +69,7 @@ where
             error_sender,
             error_writer_failed,
             pending_error: None,
+            awaiting_release: None,
         }
     }
 }
@@ -107,6 +111,25 @@ where
             if self.error_writer_failed.load(Ordering::Acquire) {
                 return None;
             }
+            if let Some(waiting) = self.awaiting_release.take() {
+                let released = self.admission.released();
+                let notified = released.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let deadline = waiting.deadline;
+                match try_admit(&self.admission, waiting) {
+                    Ok(Preparation::Deliver(message)) => return Some(message),
+                    Ok(Preparation::Reject(pending)) => self.pending_error = Some(pending),
+                    Ok(Preparation::Close) => return None,
+                    Ok(Preparation::Ignore | Preparation::AwaitRelease(..)) => {}
+                    Err(waiting) => {
+                        self.awaiting_release = Some(waiting);
+                        // Cancel-safe: dropping this wait leaves the request stored.
+                        let _elapsed = tokio::time::timeout_at(deadline, notified).await;
+                    }
+                }
+                continue;
+            }
             if self.pending_error.is_some() {
                 let permit = self.error_sender.reserve().await.ok()?;
                 let pending = self.pending_error.take()?;
@@ -123,6 +146,9 @@ where
                     Preparation::Ignore => {}
                     Preparation::Reject(pending) => self.pending_error = Some(pending),
                     Preparation::Close => return None,
+                    Preparation::AwaitRelease(message, id) => {
+                        self.awaiting_release = Some(AwaitingRelease::new(message, id));
+                    }
                 },
                 Ok(InboundFrame::ParseError) => {
                     self.pending_error = Some(PendingError::new(
@@ -166,6 +192,9 @@ fn prepare_message(
         if failure == AdmissionFailure::Duplicate {
             return Preparation::Close;
         }
+        if failure == AdmissionFailure::CancelledInFlight {
+            return Preparation::AwaitRelease(message, id);
+        }
         let terminal = failure != AdmissionFailure::Capacity;
         return Preparation::Reject(PendingError::new(failure.error(), Some(id), terminal));
     }
@@ -180,6 +209,53 @@ enum Preparation {
     Ignore,
     Reject(PendingError),
     Close,
+    /// A request reusing the id of a cancelled request that is still finishing.
+    AwaitRelease(Box<ClientJsonRpcMessage>, rmcp::model::RequestId),
+}
+
+/// How long a reused id waits for its cancelled predecessor to finish.
+const CANCELLED_ID_RELEASE_WAIT: Duration = Duration::from_secs(5);
+
+/// A request reusing the id of a cancelled request that is still finishing.
+struct AwaitingRelease {
+    message: Box<ClientJsonRpcMessage>,
+    id: rmcp::model::RequestId,
+    deadline: tokio::time::Instant,
+}
+
+impl AwaitingRelease {
+    fn new(message: Box<ClientJsonRpcMessage>, id: rmcp::model::RequestId) -> Self {
+        Self {
+            message,
+            id,
+            deadline: tokio::time::Instant::now() + CANCELLED_ID_RELEASE_WAIT,
+        }
+    }
+}
+
+/// Try to admit a waiting request; `Err` hands it back while its id is held.
+///
+/// Cancellation only suppresses the earlier response; its filesystem work
+/// still finishes, and the id is freed when it does. After the bounded wait a
+/// request still blocked gets a non-terminal error.
+fn try_admit(admission: &RequestAdmission, waiting: AwaitingRelease) -> Result<Preparation, AwaitingRelease> {
+    match admission.reserve(waiting.id.clone()) {
+        Ok(()) => Ok(Preparation::Deliver(*waiting.message)),
+        Err(AdmissionFailure::CancelledInFlight) if tokio::time::Instant::now() < waiting.deadline => Err(waiting),
+        Err(AdmissionFailure::CancelledInFlight) => {
+            let error = AdmissionFailure::CancelledInFlight.error();
+            Ok(Preparation::Reject(PendingError::new(error, Some(waiting.id), false)))
+        }
+        Err(AdmissionFailure::Duplicate) => Ok(Preparation::Close),
+        Err(failure) => {
+            let terminal = failure != AdmissionFailure::Capacity;
+            Ok(Preparation::Reject(PendingError::new(
+                failure.error(),
+                Some(waiting.id),
+                terminal,
+            )))
+        }
+    }
 }
 
 struct PendingError {
@@ -333,13 +409,19 @@ fn modern_metadata_error(
     let ClientJsonRpcMessage::Request(request) = message else {
         return None;
     };
-    if family.is_legacy()
-        || matches!(
-            request.request,
-            ClientRequest::InitializeRequest(_) | ClientRequest::PingRequest(_)
-        )
-    {
+    if family.is_legacy() || matches!(request.request, ClientRequest::InitializeRequest(_)) {
         return None;
+    }
+    if matches!(request.request, ClientRequest::PingRequest(_)) {
+        // A bare ping is a legacy pre-initialize ping. A ping carrying modern
+        // _meta asks for a method that 2026-07-28 removed (SEP-2575).
+        let modern = request.request.get_meta().protocol_version().is_some();
+        return modern.then(|| {
+            (
+                request.id.clone(),
+                ErrorData::method_not_found::<rmcp::model::PingRequestMethod>(),
+            )
+        });
     }
     let meta = request.request.get_meta();
     let mut missing = meta.missing_required_keys(&ProtocolVersion::V_2026_07_28);

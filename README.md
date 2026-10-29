@@ -143,7 +143,7 @@ quarters unfreeze --confirm work
 Install the current checkout with `make install`. Building from source requires
 a current Rust toolchain plus a working C compiler and assembler for optimized
 BLAKE3. The complete repository gate and typed npm launcher development also
-require Bun 1.4.2 and Node.js 26.10.0. npm remains the package registry,
+require Bun 1.4.4 and Node.js 26.13.0. npm remains the package registry,
 artifact-publication tool and global-install surface. The command is placed
 under `~/.local/bin` by default. The checkout is the unreleased alpha.4
 development line. The latest public release is alpha.2, currently available
@@ -491,6 +491,7 @@ encrypted-at-rest storage and supported macOS confinement remain unavailable.
 - [Private agent lifecycle](docs/architecture/ADR-0005-PRIVATE-AGENT-LIFECYCLE.md)
 - [Storage migration and runtime identity](docs/architecture/ADR-0006-STORAGE-MIGRATION-AND-RUNTIME-IDENTITY.md)
 - [Linux Landlock confinement](docs/architecture/ADR-0011-LINUX-LANDLOCK-CONFINEMENT.md)
+- [Quarter toolchain PATH precedence](docs/architecture/ADR-0013-QUARTER-TOOLCHAIN-PATH-PRECEDENCE.md)
 - [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
 - [Lifecycle artifacts and rollback](docs/architecture/ADR-0008-LIFECYCLE-ARTIFACTS-AND-ROLLBACK.md)
 - [Authenticated portable bundles](docs/architecture/ADR-0009-AUTHENTICATED-BUNDLES.md)

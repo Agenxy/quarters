@@ -154,8 +154,11 @@ fn representative_installed_tools_launch_with_space_state_and_leave_host_sentine
     }
 
     for (tool, arguments) in version_probes() {
-        if executable(tool).is_some() {
-            run(quarters(&store, &sentinels).args(["exec", "compatibility", "--", tool, arguments]))?;
+        if let Some(concrete) = executable(tool) {
+            run(quarters(&store, &sentinels)
+                .args(["exec", "compatibility", "--"])
+                .arg(&concrete)
+                .arg(arguments))?;
         }
     }
     sentinels.assert_unchanged()
@@ -332,10 +335,24 @@ fn version_probes() -> [(&'static str, &'static str); 12] {
     ]
 }
 
+/// The first concrete executable for `name` on PATH.
+///
+/// A multiplexing shim, such as a mise or rustup proxy that resolves to an
+/// executable with a different name, picks its tool from user-state
+/// configuration that a Quarter deliberately redirects, so it is skipped in
+/// favour of a later concrete install. Versioned names such as `python3.13`
+/// for `python3` count as concrete.
 fn executable(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .filter(|directory| directory.is_absolute())
         .map(|directory| directory.join(name))
-        .find(|candidate| candidate.is_file() && candidate.file_name() == Some(OsStr::new(name)))
+        .filter(|candidate| candidate.is_file() && candidate.file_name() == Some(OsStr::new(name)))
+        .find(|candidate| {
+            fs::canonicalize(candidate).is_ok_and(|target| {
+                target
+                    .file_name()
+                    .is_some_and(|file| file.to_string_lossy().starts_with(name))
+            })
+        })
 }

@@ -13,8 +13,6 @@ use rmcp::service::{RequestContext, RoleServer, Service};
 
 use crate::server::QuartersMcp;
 
-const INITIALIZE_PROTOCOL_VERSIONS: [ProtocolVersion; 1] = [ProtocolVersion::V_2025_11_25];
-
 /// Maximum requests retained until their responses finish writing.
 pub(crate) const MAX_IN_FLIGHT_REQUESTS: usize = 32;
 /// Maximum distinct request identifiers retained for one legacy session.
@@ -69,7 +67,10 @@ impl Service<RoleServer> for QuartersService {
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
-        Cow::Borrowed(&INITIALIZE_PROTOCOL_VERSIONS)
+        // rmcp checks every initialize-less request against this list, and its
+        // initialize negotiation only selects versions with an initialize
+        // handshake; family validation keeps the two eras disjoint.
+        Service::<RoleServer>::supported_protocol_versions(&self.inner)
     }
 }
 
@@ -103,6 +104,7 @@ fn request_id_length_error() -> ErrorData {
 #[derive(Debug, Clone)]
 pub(crate) struct RequestAdmission {
     state: Arc<Mutex<AdmissionState>>,
+    released: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Debug, Default)]
@@ -141,14 +143,22 @@ impl RequestAdmission {
     pub(crate) fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(AdmissionState::default())),
+            released: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
     pub(crate) fn reserve(&self, id: RequestId) -> Result<(), AdmissionFailure> {
         let mut state = self.lock();
         validate_request_id(&id).map_err(|()| AdmissionFailure::IdTooLong)?;
-        if state.requests.contains_key(&id) || (state.legacy && state.seen.contains(&id)) {
+        if state.legacy && state.seen.contains(&id) {
             return Err(AdmissionFailure::Duplicate);
+        }
+        if let Some(existing) = state.requests.get(&id) {
+            return Err(if existing.cancelled {
+                AdmissionFailure::CancelledInFlight
+            } else {
+                AdmissionFailure::Duplicate
+            });
         }
         if state.legacy && state.seen.len() >= MAX_SESSION_REQUEST_IDS {
             return Err(AdmissionFailure::SessionLimit);
@@ -163,7 +173,7 @@ impl RequestAdmission {
         Ok(())
     }
 
-    fn claim(&self, id: RequestId) -> Result<RequestGuard, ErrorData> {
+    pub(crate) fn claim(&self, id: RequestId) -> Result<RequestGuard, ErrorData> {
         let mut state = self.lock();
         if let Some(request) = state.requests.get_mut(&id) {
             if request.phase != RequestPhase::Reserved {
@@ -207,6 +217,12 @@ impl RequestAdmission {
 
     pub(crate) fn finish_response(&self, id: &RequestId) {
         self.lock().requests.remove(id);
+        self.released.notify_waiters();
+    }
+
+    /// Wait handle signalled whenever a request id is released.
+    pub(crate) fn released(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.released)
     }
 
     pub(crate) fn close(&self) {
@@ -214,16 +230,23 @@ impl RequestAdmission {
         state.requests.clear();
         state.seen.clear();
         state.legacy = false;
+        drop(state);
+        self.released.notify_waiters();
     }
 
     pub(crate) fn cancel(&self, id: &RequestId) {
         let mut state = self.lock();
-        let handler_done = state.requests.get_mut(id).is_some_and(|request| {
+        // A request whose handler never started will never finish or answer,
+        // so its reservation is released now; a running handler keeps its slot
+        // until it finishes, so capacity still bounds live work.
+        let release = state.requests.get_mut(id).is_some_and(|request| {
             request.cancelled = true;
-            request.phase == RequestPhase::HandlerDone
+            matches!(request.phase, RequestPhase::Reserved | RequestPhase::HandlerDone)
         });
-        if handler_done {
+        if release {
             state.requests.remove(id);
+            drop(state);
+            self.released.notify_waiters();
         }
     }
 
@@ -245,6 +268,8 @@ impl RequestAdmission {
         });
         if remove {
             state.requests.remove(id);
+            drop(state);
+            self.released.notify_waiters();
         }
     }
 
@@ -261,6 +286,8 @@ impl RequestAdmission {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum AdmissionFailure {
     Duplicate,
+    /// The id belongs to a cancelled request whose operation is still finishing.
+    CancelledInFlight,
     Capacity,
     SessionLimit,
     IdTooLong,
@@ -270,6 +297,10 @@ impl AdmissionFailure {
     pub(crate) fn error(self) -> ErrorData {
         match self {
             Self::Duplicate => duplicate_request_error(),
+            Self::CancelledInFlight => ErrorData::invalid_request(
+                "JSON-RPC request id still belongs to a cancelled operation that has not finished; retry with a new id",
+                None,
+            ),
             Self::Capacity => request_capacity_error(),
             Self::SessionLimit => request_id_limit_error(),
             Self::IdTooLong => request_id_length_error(),
@@ -285,7 +316,7 @@ fn validate_request_id(id: &RequestId) -> Result<(), ()> {
 }
 
 #[derive(Debug)]
-struct RequestGuard {
+pub(crate) struct RequestGuard {
     admission: RequestAdmission,
     id: Option<RequestId>,
 }
@@ -412,7 +443,30 @@ enum FamilyState {
 mod tests {
     use rmcp::model::RequestId;
 
-    use super::{AdmissionFailure, MAX_IN_FLIGHT_REQUESTS, RequestAdmission};
+    use super::{AdmissionFailure, MAX_IN_FLIGHT_REQUESTS, ProtocolFamily, QuartersService, RequestAdmission};
+
+    /// rmcp negotiates and validates against this list, so it must stay
+    /// exactly the two tested revisions whatever rmcp itself supports.
+    #[test]
+    fn the_reported_protocol_set_is_exactly_the_tested_revisions() -> Result<(), Box<dyn std::error::Error>> {
+        use rmcp::model::ProtocolVersion;
+        use rmcp::service::{RoleServer, Service};
+
+        let directory = tempfile::tempdir()?;
+        let store = quarters_core::Store::new(directory.path().join("quarters"))?;
+        let service = QuartersService::with_controls(
+            store,
+            quarters_core::HostEnvironment::capture(),
+            None,
+            ProtocolFamily::new(),
+            RequestAdmission::new(),
+        );
+        assert_eq!(
+            Service::<RoleServer>::supported_protocol_versions(&service).as_ref(),
+            [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25]
+        );
+        Ok(())
+    }
 
     #[test]
     fn response_lifetime_and_cancellation_release_capacity() -> Result<(), Box<dyn std::error::Error>> {
@@ -427,6 +481,55 @@ mod tests {
         admission.cancel(&id);
         assert_eq!(admission.active(), 1);
         admission.finish_response(&id);
+        assert_eq!(admission.active(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn cancelling_a_request_before_its_handler_starts_releases_its_id() -> Result<(), Box<dyn std::error::Error>> {
+        let admission = RequestAdmission::new();
+        let id = RequestId::Number(2);
+        admission
+            .reserve(id.clone())
+            .map_err(|failure| format!("{failure:?}"))?;
+        // The cancellation arrives before rmcp ever polls the handler, so no
+        // handler will finish and no response will be sent for this id.
+        admission.cancel(&id);
+        assert_eq!(admission.active(), 0);
+        admission
+            .reserve(id)
+            .map_err(|failure| format!("a cancelled, never-started id must be reusable: {failure:?}"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn cancelled_requests_that_never_start_cannot_exhaust_capacity() -> Result<(), Box<dyn std::error::Error>> {
+        let admission = RequestAdmission::new();
+        for round in 0..3 {
+            for number in 0..MAX_IN_FLIGHT_REQUESTS {
+                let id = RequestId::Number(i64::try_from(round * MAX_IN_FLIGHT_REQUESTS + number)?);
+                admission
+                    .reserve(id.clone())
+                    .map_err(|failure| format!("{failure:?}"))?;
+                admission.cancel(&id);
+            }
+        }
+        assert_eq!(admission.active(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn a_running_cancelled_handler_keeps_its_slot_until_it_finishes() -> Result<(), Box<dyn std::error::Error>> {
+        let admission = RequestAdmission::new();
+        let id = RequestId::Number(4);
+        admission
+            .reserve(id.clone())
+            .map_err(|failure| format!("{failure:?}"))?;
+        let request = admission.claim(id.clone())?;
+        admission.cancel(&id);
+        assert_eq!(admission.active(), 1);
+        assert_eq!(admission.reserve(id.clone()), Err(AdmissionFailure::CancelledInFlight));
+        drop(request);
         assert_eq!(admission.active(), 0);
         Ok(())
     }

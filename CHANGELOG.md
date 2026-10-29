@@ -9,6 +9,38 @@ compatibility notes will be called out here.
 - Relicense from Apache-2.0 to GPL-3.0-or-later from this release onward, with
   a commercial licence available from Agenxy. Releases through 0.1.0-alpha.2
   remain Apache-2.0.
+- Move rmcp to 3.8.0 and conform to MCP 2026-07-28 on it: a discover-only stdio
+  client now exits cleanly, a ping carrying modern `_meta` is refused as a
+  removed method while a bare pre-initialize ping is answered, and the
+  conformance audit is recorded in `docs/mcp/VERIFICATION.md`.
+- Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
+  refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
+  releases.
+- Search the Quarter's own `~/.local/bin`, `~/.cargo/bin`, `~/go/bin` and
+  `~/.bun/bin` before the host PATH, so a tool installed inside a Quarter is the
+  one that runs (ADR 0013).
+- Back off exponentially (1 to 128 ms, at most 255 ms) when a private file or
+  agent registry is caught mid replacement, still failing closed after the
+  bound, so a reader outlasts real writer churn on fast filesystems.
+- Document mise inside a Quarter: its config and trust state follow the Quarter
+  home, so host mise shims need tools configured in the Quarter or `quarters
+  host`. The tool compatibility test now probes concrete executables, not
+  multiplexing shims.
+- Treat a private file or SSH-agent registry that APFS reports with no remaining
+  link during an atomic replacement as a replacement in progress and re-read it,
+  instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
+  a real extra hard link still fails closed, and the error now names which.
+- Release a cancelled MCP request's ID and capacity at once when its handler
+  never started, and let a request reusing a cancelled ID wait boundedly for its
+  operation to finish instead of closing the session.
+- Let `recover` read rollback state within the five-second management bound, so a
+  concurrent recovery queues instead of failing at the 500 ms observer bound;
+  read-only status keeps the short bound.
+- Always give an exited private-agent launcher its single relaunch, with its own
+  five-second window, even after lock waits spent the shared startup budget, and
+  report an agent that exits on every attempt as such instead of implying one.
+- Refuse, in CI and npm publication, any release binary that still contains a
+  `QUARTERS_TEST_` hook, so a profile enabling debug assertions cannot ship.
 - Move tokio to 1.54.1, past the `AsyncFd` I/O-safety advisory RUSTSEC-2026-0386.
 - Treat a Linux private-agent process that exits between opening and reading
   its `/proc` stat (ESRCH) as gone instead of failing concurrent `agent start`.

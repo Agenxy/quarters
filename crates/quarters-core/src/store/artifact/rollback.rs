@@ -186,6 +186,16 @@ impl Store {
         self.rollback_inventory().map(|inventory| inventory.issues)
     }
 
+    /// Inspect rollback issues from inside `recover`, waiting within the
+    /// management bound for a concurrent management operation to finish.
+    pub(crate) fn rollback_issues_for_recovery(&self) -> Result<Vec<RollbackIssue>> {
+        let Some(spaces) = self.existing_spaces_root()? else {
+            return Ok(Vec::new());
+        };
+        let _observation = self.management_observation_guard()?;
+        Self::rollback_inventory_unlocked(&spaces).map(|inventory| inventory.issues)
+    }
+
     /// Find a durable rollback marker for one validated space name.
     ///
     /// # Errors

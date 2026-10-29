@@ -87,8 +87,9 @@ pub(super) fn reconcile(
         match reconcile_orphan(space, runtime, &current_starting, observed, alive)? {
             ReconcileStep::Ready(status) => return Ok(Reconciled::Active(status)),
             ReconcileStep::Follow(replacement) => {
+                // A replacement launch gets the same full window as its owner.
                 current_starting = replacement;
-                deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
+                deadline = Instant::now() + STARTUP_TIMEOUT;
             }
             ReconcileStep::Rereserve => return Ok(Reconciled::Recovered),
             ReconcileStep::Pending => {}
@@ -277,6 +278,8 @@ fn await_spawned(
 ) -> Result<AgentStatus> {
     let mut attempts = 1_usize;
     let mut deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
+    #[cfg(debug_assertions)]
+    stall_first_poll_for_test();
     loop {
         if let Ok(identity) = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid) {
             return match commit_activation(space, runtime, &starting, identity) {
@@ -287,7 +290,9 @@ fn await_spawned(
         if let Some(exit) = child.try_wait().map_err(|error| {
             QuartersError::new(ErrorKind::System, "could not inspect agent startup").with_source(error)
         })? {
-            if attempts < MAXIMUM_LAUNCH_ATTEMPTS && Instant::now() < absolute_deadline {
+            // The single retry always gets its own full window: the shared
+            // deadline may already be spent by lock waits or a late first poll.
+            if attempts < MAXIMUM_LAUNCH_ATTEMPTS {
                 cleanup_exited_socket(runtime)?;
                 match retry_exited_launch(store, space, runtime, &starting) {
                     Ok(RetryLaunch::Active(status)) => return Ok(status),
@@ -295,7 +300,7 @@ fn await_spawned(
                         child = replacement_child;
                         starting = replacement_starting;
                         attempts += 1;
-                        deadline = (Instant::now() + STARTUP_TIMEOUT).min(absolute_deadline);
+                        deadline = Instant::now() + STARTUP_TIMEOUT;
                         continue;
                     }
                     Err(error) => {
@@ -316,7 +321,9 @@ fn await_spawned(
             }
             return Err(QuartersError::new(
                 ErrorKind::System,
-                format!("the OpenSSH agent exited before its protocol became ready ({exit})"),
+                format!(
+                    "the OpenSSH agent exited before its protocol became ready on all {attempts} launch attempts ({exit})"
+                ),
             ));
         }
         if Instant::now() >= deadline {
@@ -335,6 +342,17 @@ fn await_spawned(
             ));
         }
         thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Reproduce a startup owner whose first poll runs late, as under host load.
+#[cfg(debug_assertions)]
+fn stall_first_poll_for_test() {
+    if let Some(milliseconds) = std::env::var("QUARTERS_TEST_AGENT_STALL_FIRST_POLL_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        thread::sleep(Duration::from_millis(milliseconds));
     }
 }
 

@@ -68,6 +68,8 @@ pub(crate) fn validate_private_file(path: &Path, metadata: &fs::Metadata) -> Res
         "it is not owned by the current user"
     } else if !private_mode {
         "its mode is not 0600"
+    } else if metadata.nlink() == 0 {
+        "it has no remaining link; it was removed or replaced while being inspected"
     } else {
         "it has more than one hard link"
     };

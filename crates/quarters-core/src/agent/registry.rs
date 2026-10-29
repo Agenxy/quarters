@@ -10,10 +10,8 @@ use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
 
 const MAXIMUM_REGISTRY_BYTES: u64 = 4 * 1_024;
-const MAXIMUM_REPLACEMENT_READS: usize = 8;
 
 pub(super) const REGISTRY_FILE: &str = "ssh-agent.json";
 pub(super) const LOCK_FILE: &str = "ssh-agent.lock";
@@ -180,10 +178,10 @@ fn serialize(record: &AgentRecord) -> Result<Vec<u8>> {
 }
 
 fn read_registry_file(path: &Path) -> Result<Vec<u8>> {
-    for _attempt in 0..MAXIMUM_REPLACEMENT_READS {
+    for attempt in 0..crate::store::REPLACED_FILE_READ_ATTEMPTS {
         match read_registry_once(path)? {
             RegistryRead::Stable(bytes) => return Ok(bytes),
-            RegistryRead::Replaced => thread::sleep(Duration::from_millis(1)),
+            RegistryRead::Replaced => thread::sleep(crate::store::replacement_backoff(attempt)),
         }
     }
     Err(QuartersError::new(
@@ -195,6 +193,11 @@ fn read_registry_file(path: &Path) -> Result<Vec<u8>> {
 fn read_registry_once(path: &Path) -> Result<RegistryRead> {
     let named = fs::symlink_metadata(path)
         .map_err(|error| QuartersError::io("inspect private SSH-agent registry", path, error))?;
+    // APFS can report a name that an atomic replacement is retiring with no
+    // remaining link; that is a replacement in progress, not corruption.
+    if named.nlink() == 0 {
+        return Ok(RegistryRead::Replaced);
+    }
     validate_private_file(path, &named)?;
     let file = OpenOptions::new()
         .read(true)
@@ -214,6 +217,9 @@ fn read_registry_once(path: &Path) -> Result<RegistryRead> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(RegistryRead::Replaced),
         Err(error) => return Err(QuartersError::io("reinspect private SSH-agent registry", path, error)),
     };
+    if current.nlink() == 0 {
+        return Ok(RegistryRead::Replaced);
+    }
     validate_private_file(path, &current)?;
     if same_file(&opened, &current) {
         Ok(RegistryRead::Stable(bytes))

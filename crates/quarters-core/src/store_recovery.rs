@@ -159,7 +159,7 @@ impl Store {
             .rename_recovery_issue_count()?
             .saturating_add(rename_recovery.issues);
         let rollbacks = self.recover_rollbacks()?;
-        let rollback_issues = self.rollback_issues()?;
+        let rollback_issues = self.rollback_issues_for_recovery()?;
         let artifacts = inspect_artifact_state(self)?;
         let (summary, reclaiming, trash_root) = {
             let mutation = self.begin_mutation()?;

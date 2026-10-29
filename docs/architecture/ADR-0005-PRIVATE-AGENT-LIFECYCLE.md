@@ -32,6 +32,11 @@ record. New records use schema 2 and bind the PID to its native process-start
 generation. Schema-1 records remain readable and conservatively retain the old
 PID-only liveness check. Record creation uses a synced temporary file followed
 by a native no-replace rename; unsupported filesystem semantics fail closed.
+Startup shares a ten-second budget across lock waits and the first launch. A
+launcher that exits before its protocol is ready is relaunched once, and that
+retry, and any observer following it, gets its own five-second window even if
+the shared budget is already spent. Startup is therefore bounded by the shared
+budget plus one launch window, and an error after both attempts exit says so.
 On macOS, a libproc response that cannot identify the process is treated as
 not matching the stored generation. Recovery may then remove only an exact
 recorded socket without signaling; this favors signal safety over availability.

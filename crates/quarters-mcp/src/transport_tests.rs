@@ -228,6 +228,65 @@ async fn duplicate_live_request_ids_close_the_transport() -> Result<(), Box<dyn 
     Ok(())
 }
 
+/// Admit request 7, mark its handler running, cancel it, then reuse its id.
+async fn reuse_cancelled_running_id(
+    input: &mut tokio::io::DuplexStream,
+    transport: &mut BoundedStdioTransport<tokio::io::DuplexStream, tokio::io::DuplexStream>,
+    admission: &RequestAdmission,
+) -> Result<crate::lifecycle::RequestGuard, Box<dyn Error>> {
+    write_line(input, &modern_request(7)).await?;
+    assert!(matches!(
+        transport.receive().await,
+        Some(ClientJsonRpcMessage::Request(_))
+    ));
+    let running = admission.claim(RequestId::Number(7))?;
+    // What the transport records on reading `notifications/cancelled` for 7;
+    // an unopened test transport ignores notifications themselves.
+    admission.cancel(&RequestId::Number(7));
+    write_line(input, &modern_request(7)).await?;
+    Ok(running)
+}
+
+#[tokio::test]
+async fn reusing_a_cancelled_running_id_waits_for_its_release() -> Result<(), Box<dyn Error>> {
+    let (mut input, reader) = duplex(8192);
+    let (_output, writer) = duplex(8192);
+    let admission = RequestAdmission::new();
+    let mut transport = BoundedStdioTransport::new(reader, writer, ProtocolFamily::new(), admission.clone());
+    let running = reuse_cancelled_running_id(&mut input, &mut transport, &admission).await?;
+    // The cancelled handler still runs, so the reuse waits; dropping the
+    // receive mid-wait must keep the request instead of losing it.
+    let early = tokio::time::timeout(std::time::Duration::from_millis(200), transport.receive()).await;
+    assert!(early.is_err(), "the reused id was admitted while its predecessor ran");
+    drop(running);
+    let admitted = transport.receive().await.ok_or("the reused request was lost")?;
+    let ClientJsonRpcMessage::Request(request) = admitted else {
+        return Err("expected the reused request".into());
+    };
+    assert_eq!(request.id, RequestId::Number(7));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_id_that_never_frees_gets_a_non_terminal_error() -> Result<(), Box<dyn Error>> {
+    let (mut input, reader) = duplex(8192);
+    let (mut output, writer) = duplex(8192);
+    let admission = RequestAdmission::new();
+    let mut transport = BoundedStdioTransport::new(reader, writer, ProtocolFamily::new(), admission.clone());
+    let _running = reuse_cancelled_running_id(&mut input, &mut transport, &admission).await?;
+    write_line(&mut input, &modern_request(8)).await?;
+    // Paused time advances past the bounded wait; the session keeps serving.
+    let next = transport.receive().await.ok_or("the session closed")?;
+    let ClientJsonRpcMessage::Request(request) = next else {
+        return Err("expected the following request".into());
+    };
+    assert_eq!(request.id, RequestId::Number(8));
+    let error = read_line(&mut output).await?;
+    assert_eq!(error["id"], 7);
+    assert_eq!(error["error"]["code"], -32600);
+    Ok(())
+}
+
 fn bounded<R, W>(reader: R, writer: W) -> BoundedStdioTransport<R, W>
 where
     R: tokio::io::AsyncRead,
