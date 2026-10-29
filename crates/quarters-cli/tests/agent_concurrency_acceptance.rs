@@ -65,3 +65,34 @@ fn concurrent_round(inject_exit: bool) -> Result<(), Box<dyn Error>> {
     run(quarters(temporary.path()).args(["rm", "concurrent-agent", "--confirm", "concurrent-agent"]))?;
     Ok(())
 }
+
+#[test]
+fn the_single_retry_runs_even_when_the_first_exit_is_seen_after_the_deadline() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    run(quarters(temporary.path()).args(["create", "late-poll"]))?;
+    // The launcher exits at once, but its owner first looks after the whole
+    // ten-second startup budget has passed, as a heavily loaded host can.
+    let output = run(quarters(temporary.path())
+        .args(["--json", "agent", "start", "late-poll"])
+        .env("QUARTERS_TEST_AGENT_EXIT_ONCE", "1")
+        .env("QUARTERS_TEST_AGENT_STALL_FIRST_POLL_MS", "10500"))?;
+    let report: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["result"]["state"], "active");
+    run(quarters(temporary.path()).args(["agent", "stop", "late-poll"]))?;
+    Ok(())
+}
+
+#[test]
+fn an_agent_that_exits_on_every_attempt_says_so() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    run(quarters(temporary.path()).args(["create", "always-exits"]))?;
+    let output = quarters(temporary.path())
+        .args(["--json", "agent", "start", "always-exits"])
+        .env("QUARTERS_TEST_AGENT_EXIT_ALWAYS", "1")
+        .output()?;
+    assert!(!output.status.success());
+    let error: Value = serde_json::from_slice(&output.stderr)?;
+    let message = error["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("on all 2 launch attempts"), "{message}");
+    Ok(())
+}

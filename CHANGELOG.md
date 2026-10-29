@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Always give an exited private-agent launcher its single relaunch, with its own
+  five-second window, even after lock waits spent the shared startup budget, and
+  report an agent that exits on every attempt as such instead of implying one.
 - Move tokio to 1.54.1, past the `AsyncFd` I/O-safety advisory RUSTSEC-2026-0386.
 - Treat a Linux private-agent process that exits between opening and reading
   its `/proc` stat (ESRCH) as gone instead of failing concurrent `agent start`.
