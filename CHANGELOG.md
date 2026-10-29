@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
+  refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
+  releases; rmcp stays at 3.5.0 pending its lifecycle migration.
 - Search the Quarter's own `~/.local/bin`, `~/.cargo/bin`, `~/go/bin` and
   `~/.bun/bin` before the host PATH, so a tool installed inside a Quarter is the
   one that runs (ADR 0013).
