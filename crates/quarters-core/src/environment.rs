@@ -113,7 +113,7 @@ impl EnvironmentPlan {
         insert_profile_values(&mut values, space, effective_home, &runtime, host)?;
         if effective_home != space.home() {
             values.insert("QUARTERS_NO_HOST_ESCAPE".into(), "home-view".into());
-            prepend_path(&mut values, &runtime.join("bin"))?;
+            prepend_paths(&mut values, &[runtime.join("bin")])?;
         }
         platform::extend_environment(&mut values, effective_home);
         Ok(Self {
@@ -285,12 +285,27 @@ fn insert_profile_values(
     prepend_profile_path(values, home)
 }
 
-fn prepend_profile_path(values: &mut BTreeMap<OsString, OsString>, home: &Path) -> Result<()> {
-    prepend_path(values, &home.join(".local/bin"))
+/// Quarter-owned executable directories, searched before the host PATH.
+///
+/// Each follows a tool home that Quarters redirects into the Quarter: user
+/// installs, `CARGO_HOME`, Go's default `GOPATH` and Bun's default install
+/// root. A tool installed inside the Quarter therefore shadows a same-named
+/// host copy, while host tools stay reachable after them.
+fn profile_executable_directories(home: &Path) -> [PathBuf; 4] {
+    [
+        home.join(".local/bin"),
+        home.join(".cargo/bin"),
+        home.join("go/bin"),
+        home.join(".bun/bin"),
+    ]
 }
 
-fn prepend_path(values: &mut BTreeMap<OsString, OsString>, prefix: &Path) -> Result<()> {
-    let mut paths = vec![prefix.to_path_buf()];
+fn prepend_profile_path(values: &mut BTreeMap<OsString, OsString>, home: &Path) -> Result<()> {
+    prepend_paths(values, &profile_executable_directories(home))
+}
+
+fn prepend_paths(values: &mut BTreeMap<OsString, OsString>, prefixes: &[PathBuf]) -> Result<()> {
+    let mut paths = prefixes.to_vec();
     if let Some(existing) = values.get(OsStr::new("PATH")) {
         paths.extend(env::split_paths(existing));
     }
