@@ -53,6 +53,16 @@ pub(crate) struct LifecycleLease {
 
 impl Store {
     pub(crate) fn observation_guard(&self) -> Result<ObservationGuard> {
+        self.observation_guard_within(OBSERVATION_LOCK_TIMEOUT)
+    }
+
+    /// Observe within the management bound, for steps of a mutating command
+    /// that may queue behind another management operation.
+    pub(crate) fn management_observation_guard(&self) -> Result<ObservationGuard> {
+        self.observation_guard_within(MANAGEMENT_LOCK_TIMEOUT)
+    }
+
+    fn observation_guard_within(&self, timeout: Duration) -> Result<ObservationGuard> {
         let path = self.root.join(OBSERVATION_LOCK_FILE);
         let layout = self.layout()?;
         let file = if layout.root_format() == RootFormat::Dotted {
@@ -60,13 +70,7 @@ impl Store {
         } else {
             open_or_create_private_lock(&path)?
         };
-        lock_bounded(
-            &file,
-            &path,
-            LockMode::Exclusive,
-            OBSERVATION_LOCK_TIMEOUT,
-            "store observation",
-        )?;
+        lock_bounded(&file, &path, LockMode::Exclusive, timeout, "store observation")?;
         Ok(ObservationGuard { _file: file })
     }
 
