@@ -332,13 +332,19 @@ fn modern_metadata_error(
     let ClientJsonRpcMessage::Request(request) = message else {
         return None;
     };
-    if family.is_legacy()
-        || matches!(
-            request.request,
-            ClientRequest::InitializeRequest(_) | ClientRequest::PingRequest(_)
-        )
-    {
+    if family.is_legacy() || matches!(request.request, ClientRequest::InitializeRequest(_)) {
         return None;
+    }
+    if matches!(request.request, ClientRequest::PingRequest(_)) {
+        // A bare ping is a legacy pre-initialize ping. A ping carrying modern
+        // _meta asks for a method that 2026-07-28 removed (SEP-2575).
+        let modern = request.request.get_meta().protocol_version().is_some();
+        return modern.then(|| {
+            (
+                request.id.clone(),
+                ErrorData::method_not_found::<rmcp::model::PingRequestMethod>(),
+            )
+        });
     }
     let meta = request.request.get_meta();
     let mut missing = meta.missing_required_keys(&ProtocolVersion::V_2026_07_28);

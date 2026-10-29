@@ -12,8 +12,6 @@ use rmcp::service::{RequestContext, RoleServer, Service};
 
 use crate::server::QuartersMcp;
 
-const INITIALIZE_PROTOCOL_VERSIONS: [ProtocolVersion; 1] = [ProtocolVersion::V_2025_11_25];
-
 /// Maximum requests retained until their responses finish writing.
 pub(crate) const MAX_IN_FLIGHT_REQUESTS: usize = 32;
 /// Maximum distinct request identifiers retained for one legacy session.
@@ -68,7 +66,10 @@ impl Service<RoleServer> for QuartersService {
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
-        Cow::Borrowed(&INITIALIZE_PROTOCOL_VERSIONS)
+        // rmcp checks every initialize-less request against this list, and its
+        // initialize negotiation only selects versions with an initialize
+        // handshake; family validation keeps the two eras disjoint.
+        Service::<RoleServer>::supported_protocol_versions(&self.inner)
     }
 }
 
