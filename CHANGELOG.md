@@ -9,6 +9,9 @@ compatibility notes will be called out here.
 - Search the Quarter's own `~/.local/bin`, `~/.cargo/bin`, `~/go/bin` and
   `~/.bun/bin` before the host PATH, so a tool installed inside a Quarter is the
   one that runs (ADR 0013).
+- Release a cancelled MCP request's ID and capacity at once when its handler
+  never started, and let a request reusing a cancelled ID wait boundedly for its
+  operation to finish instead of closing the session.
 - Let `recover` read rollback state within the five-second management bound, so a
   concurrent recovery queues instead of failing at the 500 ms observer bound;
   read-only status keeps the short bound.
