@@ -199,7 +199,8 @@ fn nested_spaces_keep_the_original_host_escape_and_do_not_recurse_adapters() -> 
     assert!(!environment.contains(&format!("HOME={}", outer_home.display())));
     assert_eq!(
         environment.lines().find(|line| line.starts_with("HOME=")),
-        std::env::var("HOME")
+        std::env::var("QUARTERS_HOST_HOME")
+            .or_else(|_| std::env::var("HOME"))
             .ok()
             .map(|value| format!("HOME={value}"))
             .as_deref()
