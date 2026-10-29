@@ -13,6 +13,11 @@ compatibility notes will be called out here.
 - Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
   refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
   releases.
+- Always give an exited private-agent launcher its single relaunch, with its own
+  five-second window, even after lock waits spent the shared startup budget, and
+  report an agent that exits on every attempt as such instead of implying one.
+- Refuse, in CI and npm publication, any release binary that still contains a
+  `QUARTERS_TEST_` hook, so a profile enabling debug assertions cannot ship.
 - Move tokio to 1.54.1, past the `AsyncFd` I/O-safety advisory RUSTSEC-2026-0386.
 - Treat a Linux private-agent process that exits between opening and reading
   its `/proc` stat (ESRCH) as gone instead of failing concurrent `agent start`.
