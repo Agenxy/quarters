@@ -14,5 +14,8 @@ proc-macro2 = { workspace = true, features = ["span-locations"] }
 serde_json.workspace = true
 syn.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true
