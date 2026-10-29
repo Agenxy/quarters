@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 pub(crate) use marker::RootFormat;
 
 /// Non-mutating diagnosis of the store's root-format control state.
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct StoreLayoutDiagnosis {
     /// Stable diagnosis state.
@@ -27,8 +28,6 @@ pub struct StoreLayoutDiagnosis {
     pub marker: String,
     /// Raw category families observed, each `visible` or `dotted`.
     pub category_entries: Vec<String>,
-    /// Whether the reserved migration marker exists.
-    pub migration_marker: bool,
     /// Bounded, presentation-safe reserved staging entry identifiers.
     pub staging_entries: Vec<String>,
     /// Lower bound on all reserved staging entries observed.

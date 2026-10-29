@@ -18,7 +18,6 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 const MARKER_FILE: &str = ".quarters-store.json";
-const MIGRATION_FILE: &str = ".quarters-store-migration.json";
 const STAGING_PREFIX: &str = ".quarters-store-staging-";
 const STAGING_SUFFIX: &str = ".tmp";
 const SCHEMA_VERSION: u32 = 1;
@@ -61,7 +60,6 @@ pub(super) fn resolve(root: &Path) -> Result<StoreLayout> {
         Err(error) => return Err(QuartersError::io("inspect Quarters root", root, error)),
     };
     validate_store_root(root, &metadata)?;
-    reject_active_migration(root)?;
     let visible = category_presence(root, "spaces", "trash")?;
     let dotted = category_presence(root, ".spaces", ".trash")?;
     let marker = read_marker(root)?;
@@ -91,25 +89,15 @@ pub(super) fn diagnose(root: &Path) -> StoreLayoutDiagnosis {
                 "unavailable",
                 false,
                 false,
-                false,
                 StagingDiagnosis::default(),
             );
         }
     };
     if let Err(error) = validate_store_root(root, &root_metadata) {
-        return failed_diagnosis(
-            &error,
-            root,
-            "unavailable",
-            false,
-            false,
-            false,
-            StagingDiagnosis::default(),
-        );
+        return failed_diagnosis(&error, root, "unavailable", false, false, StagingDiagnosis::default());
     }
     let visible_entries = raw_category_presence(root, "spaces", "trash");
     let dotted_entries = raw_category_presence(root, ".spaces", ".trash");
-    let migration_marker = fs::symlink_metadata(root.join(MIGRATION_FILE)).is_ok();
     let marker = match read_marker(root) {
         Ok(None) => "absent",
         Ok(Some(RootFormat::Visible)) => "visible",
@@ -149,7 +137,6 @@ pub(super) fn diagnose(root: &Path) -> StoreLayoutDiagnosis {
                 interrupted_publication: interrupted,
                 marker: marker.to_owned(),
                 category_entries: category_entries(visible_entries, dotted_entries),
-                migration_marker,
                 staging_entries: staging.entries,
                 staging_entries_at_least: staging.at_least,
                 staging_error_kind,
@@ -162,15 +149,7 @@ pub(super) fn diagnose(root: &Path) -> StoreLayoutDiagnosis {
                 }),
             }
         }
-        Err(error) => failed_diagnosis(
-            &error,
-            root,
-            marker,
-            visible_entries,
-            dotted_entries,
-            migration_marker,
-            staging,
-        ),
+        Err(error) => failed_diagnosis(&error, root, marker, visible_entries, dotted_entries, staging),
     }
 }
 
@@ -182,7 +161,6 @@ fn absent_diagnosis() -> StoreLayoutDiagnosis {
         interrupted_publication: false,
         marker: "absent".to_owned(),
         category_entries: Vec::new(),
-        migration_marker: false,
         staging_entries: Vec::new(),
         staging_entries_at_least: 0,
         staging_error_kind: None,
@@ -199,7 +177,6 @@ fn failed_diagnosis(
     marker: &str,
     visible_entries: bool,
     dotted_entries: bool,
-    migration_marker: bool,
     staging: StagingDiagnosis,
 ) -> StoreLayoutDiagnosis {
     let staging_error_kind = staging.error.as_ref().map(|error| error.kind().as_str().to_owned());
@@ -208,9 +185,7 @@ fn failed_diagnosis(
         .as_ref()
         .map(|error| diagnosis_text(error.message(), root));
     StoreLayoutDiagnosis {
-        state: if error.kind() == ErrorKind::SpaceActive {
-            "active-migration"
-        } else if error.kind() == ErrorKind::Unsupported {
+        state: if error.kind() == ErrorKind::Unsupported {
             "newer-format"
         } else if visible_entries && dotted_entries {
             "ambiguous-dual-layout"
@@ -223,7 +198,6 @@ fn failed_diagnosis(
         interrupted_publication: false,
         marker: marker.to_owned(),
         category_entries: category_entries(visible_entries, dotted_entries),
-        migration_marker,
         staging_entries: staging.entries,
         staging_entries_at_least: staging.at_least,
         staging_error_kind,
@@ -653,19 +627,6 @@ fn metadata_device_number(metadata: &fs::Metadata) -> u64 {
     #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     let native = metadata.dev() as nix::libc::dev_t;
     device_number(native)
-}
-
-fn reject_active_migration(root: &Path) -> Result<()> {
-    let path = root.join(MIGRATION_FILE);
-    match fs::symlink_metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Ok(_) => Err(QuartersError::new(
-            ErrorKind::SpaceActive,
-            "the store has an active root-format migration marker",
-        )
-        .with_hint("run 'quarters doctor' to inspect this unsupported marker; do not remove it by hand")),
-        Err(error) => Err(QuartersError::io("inspect root-format migration marker", &path, error)),
-    }
 }
 
 fn category_presence(root: &Path, first: &str, second: &str) -> Result<bool> {

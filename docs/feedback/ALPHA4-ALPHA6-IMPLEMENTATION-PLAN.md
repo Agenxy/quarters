@@ -135,12 +135,14 @@ reader recognizes the root marker and Quarters can prevent unsupported readers
 from mutating the store. Until then there is no `migrate` command and no claim
 that a store was converted.
 
-The unused `.quarters-store-migration.json` denial path will be removed before
-Alpha 6, so a same-UID process cannot plant a reserved marker that no released
-command can clear. Its serialized `doctor --json` field and `active-migration`
-state are removed in the same documented JSON-contract change, and ADR 0006 no
-longer claims that an active physical migration exists. Alpha 4 and Alpha 5 are
-explicitly dotted readers, not dotted writers.
+The unused `.quarters-store-migration.json` denial path is removed before first
+publication, so a same-UID process cannot plant a reserved marker that no
+command can clear. Its unreleased serialized `doctor --json`/MCP field and
+`active-migration` state are removed at the same time. No released Quarters
+version emitted them. ADR 0006 records that any future physical migration must
+first publish a newer root-marker schema and must not reuse the retired
+sidecar name. Alpha 4 through Alpha 6 are explicitly dotted readers, not dotted
+writers.
 
 ## macOS confinement decision
 

@@ -32,6 +32,12 @@ releases:
    then all new stores and all writers remain visible inside the already-hidden
    `.quarters` root. There is no migration command or active migration state.
 
+The unreleased `.quarters-store-migration.json` sidecar refusal is removed
+before first publication. No released Quarters version emitted its doctor/MCP
+field or `active-migration` state, and no command ever created or cleared the
+file. Builds in this series ignore that filename and leave it untouched, just
+as they do other unknown root entries.
+
 Schema-3 spaces use their random stable ID for runtime identity. Legacy
 schema-1 spaces derive a deterministic transition identity from the validated
 name and `created_unix_ms`, domain-separated by the schema version. It is an
@@ -60,6 +66,12 @@ or malformed markers are retained and do not block unrelated spaces.
 - one authoritative store layout at a time
 - no dotted writer or physical migration before incompatible readers can be
   prevented from mutating the store
+- any future physical migration publishes a `.quarters-store.json` with a
+  higher `schema_version` before creating, renaming or removing any category
+  directory, so builds from this series fail closed as `newer-format`
+- a future migration must not rely on a sidecar refusal file and must not reuse
+  `.quarters-store-migration.json`, because stale copies may have been planted
+  while this series intentionally ignored that name
 - ordinary reads never create or repair the root-format marker
 - every mutation owns the bounded management lease and a resolved writable-layout token
 - current-schema markers are strict, protected files: steady state has one
@@ -75,6 +87,8 @@ or malformed markers are retained and do not block unrelated spaces.
 ## Acceptance gates
 
 - old-reader/new-reader matrix before any future dotted writer or migration
+- proof that any future migration announces itself through a newer root-marker
+  schema before its first category-directory change
 - dual-layout and malicious-marker fixtures
 - active lease and concurrent management refusal
 - runtime re-key tests for schema 1; schema-2 upgrade remains unsupported

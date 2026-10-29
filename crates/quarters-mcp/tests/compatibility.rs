@@ -440,6 +440,13 @@ async fn exercise_modern(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
         .ok_or_else(|| io::Error::other("result was not an object"))?
         .remove("data");
     assert!(!jsonschema::validator_for(&create_schema)?.is_valid(&incomplete));
+    let doctor_schema = output_schema(&tools, "quarters_doctor")?;
+    assert!(!schema_declares_property(&doctor_schema, "migration_marker"));
+    let doctor = call(&client, "quarters_doctor", json!({})).await?;
+    validate_output(&doctor_schema, structured(&doctor)?)?;
+    let failed_doctor = call(&client, "quarters_doctor", json!({"name": "../invalid"})).await?;
+    assert_eq!(failed_doctor.is_error, Some(true));
+    validate_output(&doctor_schema, structured(&failed_doctor)?)?;
     client.cancel().await?;
     server_task.await??;
     Ok(())
@@ -454,7 +461,8 @@ async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
         .peer_info()
         .ok_or_else(|| io::Error::other("legacy client retained no peer information"))?;
     assert_eq!(peer.protocol_version, ProtocolVersion::V_2025_11_25);
-    assert_catalog(&client.list_tools(None).await?, false)?;
+    let tools = client.list_tools(None).await?;
+    assert_catalog(&tools, false)?;
     let resources = client.list_resources(None).await?;
     assert_eq!(resources.resources.len(), 3);
     assert!(resources.result_type.is_none());
@@ -482,6 +490,13 @@ async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
     )
     .await?;
     assert_eq!(invalid_layout.is_error, Some(true));
+    let doctor_schema = output_schema(&tools, "quarters_doctor")?;
+    assert!(!schema_declares_property(&doctor_schema, "migration_marker"));
+    let doctor = call(&client, "quarters_doctor", json!({})).await?;
+    validate_output(&doctor_schema, structured(&doctor)?)?;
+    let failed_doctor = call(&client, "quarters_doctor", json!({"name": "../invalid"})).await?;
+    assert_eq!(failed_doctor.is_error, Some(true));
+    validate_output(&doctor_schema, structured(&failed_doctor)?)?;
     client.cancel().await?;
     server_task.await??;
     Ok(())
@@ -521,6 +536,20 @@ fn output_schema(tools: &rmcp::model::ListToolsResult, name: &str) -> Result<Val
         .as_ref()
         .ok_or_else(|| io::Error::other("tool had no output schema"))?;
     Ok(Value::Object(schema.as_ref().clone()))
+}
+
+fn schema_declares_property(schema: &Value, property: &str) -> bool {
+    match schema {
+        Value::Array(values) => values.iter().any(|value| schema_declares_property(value, property)),
+        Value::Object(object) => {
+            object
+                .get("properties")
+                .and_then(Value::as_object)
+                .is_some_and(|properties| properties.contains_key(property))
+                || object.values().any(|value| schema_declares_property(value, property))
+        }
+        _ => false,
+    }
 }
 
 fn validate_output(schema: &Value, instance: &Value) -> Result<(), Box<dyn Error>> {
