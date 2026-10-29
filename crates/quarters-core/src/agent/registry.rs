@@ -194,6 +194,11 @@ fn read_registry_file(path: &Path) -> Result<Vec<u8>> {
 fn read_registry_once(path: &Path) -> Result<RegistryRead> {
     let named = fs::symlink_metadata(path)
         .map_err(|error| QuartersError::io("inspect private SSH-agent registry", path, error))?;
+    // APFS can report a name that an atomic replacement is retiring with no
+    // remaining link; that is a replacement in progress, not corruption.
+    if named.nlink() == 0 {
+        return Ok(RegistryRead::Replaced);
+    }
     validate_private_file(path, &named)?;
     let file = OpenOptions::new()
         .read(true)
@@ -213,6 +218,9 @@ fn read_registry_once(path: &Path) -> Result<RegistryRead> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(RegistryRead::Replaced),
         Err(error) => return Err(QuartersError::io("reinspect private SSH-agent registry", path, error)),
     };
+    if current.nlink() == 0 {
+        return Ok(RegistryRead::Replaced);
+    }
     validate_private_file(path, &current)?;
     if same_file(&opened, &current) {
         Ok(RegistryRead::Stable(bytes))
