@@ -94,5 +94,6 @@ requests carrying `_meta` are served statelessly, and `initialize` opens the
 | `tools/list` order is deterministic (minor 3) | Holds | Tools are returned sorted by name |
 | Resource not found is `-32602` (minor 6) | Holds | An unknown `quarters://` URI returns `-32602` |
 | Legacy clients keep working through `initialize` (versioning, dual-era) | Holds | The legacy initialize and pipelining suites pass unchanged |
+| Only the two tested revisions are negotiable | Holds | The transport reports exactly `2026-07-28` and `2025-11-25` to rmcp whatever rmcp supports (`the_reported_protocol_set_is_exactly_the_tested_revisions`); initialize-less requests claiming `2025-06-18`, `2025-03-26` or `2024-11-05` are refused with `-32022` |
 | Sessions, `subscriptions/listen`, SSE resumability, HTTP headers (major 1, 4, 9; minor 4) | Not applicable | Quarters serves stdio only and offers no subscriptions |
 | Tasks extension, MRTR and elicitation changes (major 6, 7; minor 11) | Not applicable | Quarters issues no server-initiated requests or tasks |

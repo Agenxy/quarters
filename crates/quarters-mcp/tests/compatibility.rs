@@ -54,6 +54,36 @@ async fn legacy_initialize_offers_the_supported_revision() -> Result<(), Box<dyn
     Ok(())
 }
 
+/// Revisions older than 2025-11-25 are never served, whatever rmcp supports.
+#[tokio::test]
+async fn untested_older_revisions_are_refused_without_initialize() -> Result<(), Box<dyn Error>> {
+    for older in ["2025-06-18", "2025-03-26", "2024-11-05"] {
+        let directory = tempfile::tempdir()?;
+        let (server_io, client_io) = tokio::io::duplex(16 * 1_024);
+        let server_task = spawn_server(directory.path().join("quarters"), server_io)?;
+        let mut client = IntoTransport::<RoleClient, _, _>::into_transport(client_io);
+        client
+            .send(message(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": {
+                    "io.modelcontextprotocol/protocolVersion": older,
+                    "io.modelcontextprotocol/clientInfo": {"name": "older", "version": "1"},
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }}
+            }))?)
+            .await?;
+        let ServerJsonRpcMessage::Error(error) = receive(&mut client).await? else {
+            return Err(io::Error::other(format!("revision {older} was served")).into());
+        };
+        assert_eq!(error.error.code, rmcp::model::ErrorCode::UNSUPPORTED_PROTOCOL_VERSION);
+        drop(client);
+        server_task.await??;
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn stateless_discover_cannot_select_the_legacy_revision() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
