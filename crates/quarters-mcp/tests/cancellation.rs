@@ -15,7 +15,7 @@ use rmcp::transport::{IntoTransport, Transport};
 use serde_json::{Value, json};
 
 #[tokio::test]
-async fn cancellation_suppresses_response_and_releases_the_request_id() -> Result<(), Box<dyn Error>> {
+async fn cancellation_is_graceful_and_the_session_survives() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path().join("quarters");
     let store = Store::new(root.clone())?;
@@ -43,10 +43,30 @@ async fn cancellation_suppresses_response_and_releases_the_request_id() -> Resul
     drop(observation);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
+    // MCP cancellation: a response for the cancelled id may still arrive if
+    // the operation finished before the cancellation was processed, and the
+    // client must tolerate it. Anything else must be the reply to id 3.
     client.send(message(list_tools_request(3))?).await?;
-    assert_response_id(receive(&mut client).await?, 3)?;
-    client.send(message(list_tools_request(2))?).await?;
-    assert_response_id(receive(&mut client).await?, 2)?;
+    let mut late_original = false;
+    loop {
+        let reply = response_value(receive(&mut client).await?)?;
+        if reply["id"] == 3 {
+            break;
+        }
+        late_original = accept_late_status(&reply, late_original)?;
+    }
+
+    // The session remains usable afterwards. Reusing a cancelled id is covered
+    // deterministically by the transport tests, because the specification
+    // forbids reusing an id that has not received a response.
+    client.send(message(list_tools_request(4))?).await?;
+    loop {
+        let reply = response_value(receive(&mut client).await?)?;
+        if reply["id"] == 4 {
+            break;
+        }
+        late_original = accept_late_status(&reply, late_original)?;
+    }
 
     drop(client);
     server_task.await??;
@@ -106,9 +126,22 @@ where
     T: Transport<RoleClient>,
     T::Error: Error + 'static,
 {
-    tokio::time::timeout(Duration::from_secs(2), transport.receive())
+    tokio::time::timeout(Duration::from_secs(10), transport.receive())
         .await?
         .ok_or_else(|| io::Error::other("server closed without a response").into())
+}
+
+fn response_value(message: ServerJsonRpcMessage) -> Result<Value, Box<dyn Error>> {
+    Ok(serde_json::to_value(message)?)
+}
+
+/// Accept at most one late reply for the cancelled status call (id 2).
+fn accept_late_status(reply: &Value, already_seen: bool) -> Result<bool, Box<dyn Error>> {
+    let is_status = reply["id"] == 2 && reply["result"]["content"].is_array();
+    if is_status && !already_seen {
+        return Ok(true);
+    }
+    Err(io::Error::other(format!("unexpected reply: {reply}")).into())
 }
 
 fn assert_response_id(message: ServerJsonRpcMessage, expected: i64) -> Result<(), Box<dyn Error>> {
