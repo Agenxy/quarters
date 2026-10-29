@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Platform capability and environment adapters.
 
 #[cfg(target_os = "linux")]

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! End-to-end cancellation and admission proofs for the shipped transport.
 
 use std::error::Error;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Collision-safe OpenSSH invocation adapters.
 
 pub(crate) use quarters_core::CommandLinkReport as AdapterReport;

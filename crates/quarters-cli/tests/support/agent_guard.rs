@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stops private agents a test started, even when the test fails.
 
 use std::path::{Path, PathBuf};

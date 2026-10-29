@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Stable authenticated-bundle models and reports.
 
 use super::super::{ArtifactId, ArtifactKind, ArtifactName, ContentIntegrity, SourceIdentity};

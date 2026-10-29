@@ -9,4 +9,4 @@ It contains the native Rust executable built from
 state; it is not a sandbox or security boundary. The macOS executables are
 unsigned and unnotarized in this alpha.
 
-Apache-2.0.
+GPL-3.0-or-later.

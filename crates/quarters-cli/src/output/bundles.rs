@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Authenticated bundle output contracts.
 
 use super::{path_for_human, print_success, safe_json_path, safe_json_text};

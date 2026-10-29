@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Linux runtime-directory and private-agent boundary acceptance.
 
 #![cfg(target_os = "linux")]

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Public, content-free host-fork plan and result model.
 
 use crate::SpaceLayout;

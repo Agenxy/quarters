@@ -1,4 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic)]
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
 use crate::Store;

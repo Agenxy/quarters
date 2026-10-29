@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Artifact catalog inspection and atomic creation.
 
 use super::integrity::{digest_home, verify_home};

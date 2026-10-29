@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Shell integration emitted as code from the trusted Quarters binary.
 
 use crate::cli::ShellKind;

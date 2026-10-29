@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Official-SDK interoperability proofs for both supported MCP revisions.
 
 use std::collections::HashSet;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Linux launcher-path acceptance for privacy-bounded discovery.
 
 #![cfg(target_os = "linux")]

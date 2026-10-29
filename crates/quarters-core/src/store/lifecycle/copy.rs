@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Descriptor-relative lifecycle copy implementation.
 
 #[cfg(test)]

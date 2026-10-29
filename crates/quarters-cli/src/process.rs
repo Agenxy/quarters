@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Native child-process launch and host escape behavior.
 
 use quarters_core::platform;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Adversarial policy and resource-bound acceptance for host-state forks.
 
 use nix::sys::stat::Mode;

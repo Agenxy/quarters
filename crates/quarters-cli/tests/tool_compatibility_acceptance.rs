@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Installed-tool launch evidence without reading host credentials.
 
 use std::error::Error;

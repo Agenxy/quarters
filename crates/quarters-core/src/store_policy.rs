@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Security policy for store anchors and manifest semantics.
 
 use std::fs;

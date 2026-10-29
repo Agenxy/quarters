@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! End-to-end acceptance for privacy-bounded state discovery.
 
 use serde_json::Value;

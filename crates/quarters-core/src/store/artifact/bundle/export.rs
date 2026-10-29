@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Descriptor-relative authenticated bundle export.
 
 use super::super::{Artifact, ArtifactCounts, ArtifactId, ArtifactKind, ArtifactName, ContentIntegrity};

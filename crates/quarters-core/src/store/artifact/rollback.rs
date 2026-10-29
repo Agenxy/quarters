@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Guarded three-state rollback transaction.
 
 use super::catalog::SpaceStaging;

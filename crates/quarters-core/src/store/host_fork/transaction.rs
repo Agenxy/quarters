@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Atomic host-fork staging, copy and publication.
 
 use super::model::{HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport};

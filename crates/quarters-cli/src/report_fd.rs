@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Validated close-on-exec discovery report endpoint.
 
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};

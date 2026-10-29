@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Shared presentation safety for untrusted stored and caller-provided text.
 
 /// Escape control, bidirectional and invisible format characters while

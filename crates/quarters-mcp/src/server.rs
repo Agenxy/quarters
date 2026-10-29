@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! MCP tools and resources over the Quarters core authority.
 
 use std::borrow::Cow;

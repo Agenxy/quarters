@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Recovery-safe removal for private owner-controlled staging trees.
 
 use crate::store_policy::validate_private_dir;
