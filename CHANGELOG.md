@@ -9,6 +9,10 @@ compatibility notes will be called out here.
 - Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
   refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
   releases; rmcp stays at 3.5.0 pending its lifecycle migration.
+- Treat a private file or SSH-agent registry that APFS reports with no remaining
+  link during an atomic replacement as a replacement in progress and re-read it,
+  instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
+  a real extra hard link still fails closed, and the error now names which.
 - Release a cancelled MCP request's ID and capacity at once when its handler
   never started, and let a request reusing a cancelled ID wait boundedly for its
   operation to finish instead of closing the session.
