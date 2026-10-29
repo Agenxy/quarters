@@ -43,10 +43,7 @@ pub(super) fn read(runtime: &Path, space: &Space) -> Result<Option<AgentRecord>>
 }
 
 pub(super) fn create(runtime: &Path, record: &AgentRecord) -> Result<()> {
-    let path = registry_path(runtime);
-    let bytes = serialize(record)?;
-    write_private_file(&path, &bytes)?;
-    sync_directory(runtime)
+    publish(runtime, record, PublishMode::Create)
 }
 
 pub(super) fn replace(runtime: &Path, expected: &AgentRecord, replacement: &AgentRecord) -> Result<()> {
@@ -57,17 +54,49 @@ pub(super) fn replace(runtime: &Path, expected: &AgentRecord, replacement: &Agen
             "the private SSH-agent registry changed during an ownership transition",
         ));
     }
+    publish(runtime, replacement, PublishMode::Replace)
+}
+
+fn publish(runtime: &Path, record: &AgentRecord, mode: PublishMode) -> Result<()> {
     let temporary = runtime.join(format!(".ssh-agent-registry-{}.tmp", unique_suffix()?));
-    let bytes = serialize(replacement)?;
+    let bytes = serialize(record)?;
     if let Err(error) = write_private_file(&temporary, &bytes) {
         cleanup_private_temporary(&temporary);
         return Err(error);
     }
-    if let Err(error) = fs::rename(&temporary, registry_path(runtime)) {
+    let result = publish_temporary(&temporary, &registry_path(runtime), mode);
+    if let Err(error) = result {
         cleanup_private_temporary(&temporary);
-        return Err(QuartersError::io("replace private SSH-agent registry", runtime, error));
+        return Err(error);
     }
     sync_directory(runtime)
+}
+
+fn publish_temporary(temporary: &Path, destination: &Path, mode: PublishMode) -> Result<()> {
+    if mode == PublishMode::Replace {
+        return fs::rename(temporary, destination)
+            .map_err(|error| QuartersError::io("replace private SSH-agent registry", destination, error));
+    }
+    rustix::fs::renameat_with(
+        rustix::fs::CWD,
+        temporary,
+        rustix::fs::CWD,
+        destination,
+        rustix::fs::RenameFlags::NOREPLACE,
+    )
+    .map_err(|error| {
+        if error == rustix::io::Errno::EXIST {
+            return QuartersError::new(
+                ErrorKind::CorruptState,
+                "a private SSH-agent ownership record already exists",
+            );
+        }
+        QuartersError::io(
+            "publish new private SSH-agent registry without replacement",
+            destination,
+            std::io::Error::from_raw_os_error(error.raw_os_error()),
+        )
+    })
 }
 
 fn cleanup_private_temporary(path: &Path) {
@@ -124,18 +153,21 @@ fn validate(record: &AgentRecord, space: &Space) -> Result<()> {
             record.socket_inode.is_none() && record.socket_device.is_none() && record.failure.is_some()
         }
     };
-    if record.schema_version == REGISTRY_SCHEMA_VERSION
-        && record.space_id == *id
-        && token_is_valid
-        && record.pid > 1
-        && state_shape
-    {
+    if supported_schema_shape(record) && record.space_id == *id && token_is_valid && record.pid > 1 && state_shape {
         return Ok(());
     }
     Err(QuartersError::new(
         ErrorKind::CorruptState,
         "the private SSH-agent registry does not match this space",
     ))
+}
+
+fn supported_schema_shape(record: &AgentRecord) -> bool {
+    match (record.schema_version, record.process_generation) {
+        (1, None) => true,
+        (REGISTRY_SCHEMA_VERSION, Some(generation)) => generation > 0,
+        _ => false,
+    }
 }
 
 fn serialize(record: &AgentRecord) -> Result<Vec<u8>> {
@@ -223,12 +255,80 @@ enum RegistryRead {
     Replaced,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PublishMode {
+    Create,
+    Replace,
+}
+
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![allow(clippy::expect_used, clippy::panic)]
 
     use super::*;
+    use crate::SpaceId;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tempfile::TempDir;
+
+    #[test]
+    fn create_refuses_to_clobber_an_existing_record() {
+        let temporary = TempDir::new().expect("temporary directory");
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700)).expect("protect runtime");
+        let original = record(101, "0123456789abcdef0123456789abcdef");
+        let replacement = record(202, "abcdef0123456789abcdef0123456789");
+        create(temporary.path(), &original).expect("publish original record");
+
+        let error = create(temporary.path(), &replacement).expect_err("duplicate create must fail");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptState);
+        assert_eq!(
+            read_required(temporary.path()).expect("read preserved record"),
+            original
+        );
+    }
+
+    #[test]
+    fn schema_one_records_remain_readable_but_new_records_require_a_generation() {
+        let mut legacy = record(101, "0123456789abcdef0123456789abcdef");
+        legacy.schema_version = 1;
+        legacy.process_generation = None;
+        let mut incomplete_current = legacy.clone();
+        incomplete_current.schema_version = REGISTRY_SCHEMA_VERSION;
+
+        assert!(supported_schema_shape(&legacy));
+        assert!(!supported_schema_shape(&incomplete_current));
+    }
+
+    #[test]
+    fn concurrent_readers_never_observe_a_partial_create() {
+        let temporary = TempDir::new().expect("temporary directory");
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700)).expect("protect runtime");
+        let path = registry_path(temporary.path());
+        let reading = Arc::new(AtomicBool::new(true));
+        let reader_flag = Arc::clone(&reading);
+        let reader_path = path.clone();
+        let reader = thread::spawn(move || {
+            while reader_flag.load(Ordering::Acquire) {
+                match fs::read(&reader_path) {
+                    Ok(bytes) => {
+                        serde_json::from_slice::<AgentRecord>(&bytes).expect("published record must be complete");
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("read published record: {error}"),
+                }
+            }
+        });
+        let record = record(303, &"a".repeat(3_000));
+
+        for _attempt in 0..200 {
+            create(temporary.path(), &record).expect("publish record");
+            fs::remove_file(&path).expect("remove record");
+        }
+        reading.store(false, Ordering::Release);
+        reader.join().expect("join registry reader");
+    }
 
     #[test]
     fn an_open_inode_retired_by_atomic_replacement_is_retryable() {
@@ -255,5 +355,20 @@ mod tests {
         let error = read_registry_file(&path).expect_err("linked registry must fail");
 
         assert_eq!(error.kind(), ErrorKind::CorruptState);
+    }
+
+    fn record(pid: u32, token: &str) -> AgentRecord {
+        AgentRecord {
+            schema_version: REGISTRY_SCHEMA_VERSION,
+            state: super::super::model::StoredAgentState::Starting,
+            space_id: SpaceId::parse("0123456789abcdef0123456789abcdef").expect("space ID"),
+            token: token.to_owned(),
+            pid,
+            process_generation: Some(1),
+            created_unix_ms: 1,
+            socket_inode: None,
+            socket_device: None,
+            failure: None,
+        }
     }
 }

@@ -92,7 +92,7 @@ fn malformed_reserved_looking_names_are_unknown_and_do_not_block_recovery()
     write_private_file(&malformed_marker, b"not a marker")?;
     create_private_dir(&malformed_staging)?;
     assert!(store.open(&target).is_ok());
-    assert!(store.rollback_observations()?.is_empty());
+    assert_eq!(store.rollback_observations()?, Vec::new());
     store.recover_rollbacks()?;
     assert!(malformed_marker.is_file());
     assert!(malformed_staging.is_dir());
@@ -110,7 +110,7 @@ fn malformed_exact_marker_is_itemized_without_blocking_unrelated_work()
     create_private_dir(&retired)?;
     assert!(store.open(&healthy).is_ok());
     assert!(store.create(SpaceName::parse("new")?, PathBuf::from("/bin/sh")).is_ok());
-    assert!(store.rollback_observations()?.is_empty());
+    assert_eq!(store.rollback_observations()?, Vec::new());
     let issues = store.rollback_issues()?;
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].marker, format!(".rollback-{id}.json"));
@@ -144,7 +144,7 @@ fn ambiguous_marker_blocks_only_its_target_for_normal_operations() -> std::resul
     let id = ArtifactId::generate()?;
     let marker = test_marker(&blocked_space, &id, RollbackState::Prepared)?;
     write_marker_new(&rollback_marker_path(&store, &id)?, &marker)?;
-    assert!(store.rollback_observations()?.is_empty());
+    assert_eq!(store.rollback_observations()?, Vec::new());
     assert_eq!(store.rollback_issues()?.len(), 1);
     let Err(error) = store.open(&blocked) else {
         return Err("target did not fail closed".into());
@@ -170,7 +170,7 @@ fn duplicate_actionable_markers_are_retained_as_target_issues() -> std::result::
     }
 
     let inventory = store.rollback_inventory()?;
-    assert!(inventory.observations.is_empty());
+    assert_eq!(inventory.observations, Vec::new());
     assert_eq!(inventory.issues.len(), 2);
     assert!(
         inventory

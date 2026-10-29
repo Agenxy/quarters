@@ -59,6 +59,8 @@ pub(crate) enum Command {
     Enter(EnterArgs),
     /// Run one native command in a space.
     Exec(ExecArgs),
+    /// Measure privacy-bounded Quarter-owned state changes from one command.
+    Discover(DiscoverArgs),
     /// Run a command with host user-state paths from a baseline space.
     Host(RawCommand),
     /// Manage a verified private OpenSSH agent for one space.
@@ -528,6 +530,49 @@ pub(crate) struct ExecArgs {
 
     /// Command and arguments. Put `--` before options meant for the command.
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+    pub(crate) command: Vec<OsString>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum DiscoveryScanArg {
+    /// Scan the virtual home directory.
+    Home,
+    /// Scan the private XDG runtime directory.
+    Runtime,
+}
+
+impl From<DiscoveryScanArg> for quarters_core::DiscoverySelector {
+    fn from(value: DiscoveryScanArg) -> Self {
+        match value {
+            DiscoveryScanArg::Home => Self::Home,
+            DiscoveryScanArg::Runtime => Self::Runtime,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DiscoverArgs {
+    #[command(flatten)]
+    pub(crate) profile: ProfileArgs,
+
+    /// Quarter-owned root to scan; repeat to select both. Defaults to both.
+    #[arg(long = "scan", value_enum)]
+    pub(crate) scans: Vec<DiscoveryScanArg>,
+
+    /// Write the stable JSON report to an inherited writable descriptor (3 or higher).
+    #[arg(long, value_name = "FD", value_parser = clap::value_parser!(i32).range(3..), conflicts_with = "preview")]
+    pub(crate) report_fd: Option<i32>,
+
+    /// Inspect scope, limits, and credential-shaped patterns without running a command.
+    #[arg(long, conflicts_with = "command")]
+    pub(crate) preview: bool,
+
+    /// Command and arguments. Put `--` before options meant for the command.
+    #[arg(
+        required_unless_present = "preview",
+        trailing_var_arg = true,
+        allow_hyphen_values = true
+    )]
     pub(crate) command: Vec<OsString>,
 }
 

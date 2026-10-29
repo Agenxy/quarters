@@ -976,3 +976,85 @@ The managed Codex deep security scan remains unavailable under this host
 session's unmanaged/disabled filesystem permission profile. No deep-scan result
 is claimed. Pull request 9 remains unmerged and stacked on the likewise
 unmerged pull request 8.
+
+## Alpha 7 privacy-bounded state discovery, 2026-09-09
+
+Claude Code used Claude Opus at maximum effort before implementation and at
+the final source checkpoint. Earlier reviews drove descriptor ownership,
+bounded metadata-only scanning, credential-shape reuse, Linux launcher
+composition and truthful observation-gap reporting. Local and hosted evidence
+then exposed a pre-existing private SSH-agent concurrency failure unrelated to
+discovery: an unlocked observer could read an empty or partial ownership record
+while another starter wrote it in place.
+
+The read-only race review identified atomic publication as the root fix and
+also required observers to converge without returning success-shaped inactive
+state. Checkpoint `d8e8299` now publishes synced temporary records through a
+native no-replace rename, binds schema-2 PIDs to native process generations,
+keeps schema-1 records readable, serializes socket cleanup with lifecycle
+mutation, permits safe observer re-reservation within one absolute deadline,
+and returns success only for a verified active record. Tests cover partial-JSON
+readers, no-clobber publication, schema compatibility, reaped and recycled
+PIDs, live failed replacements, dead failed replacement recovery and dead
+`starting` reconciliation.
+
+The final exact-head, clean-worktree Opus review covered
+`ba33373..d8e8299`, independently reran the warning-denied build and all 324
+tests, performed 25 additional full concurrency rounds, traced the discovery
+and agent trust boundaries, and verified both hosted runs at the exact commit.
+It found no high or medium concern and returned:
+
+> VERDICT: ACCEPT
+
+Evidence for the accepted source checkpoint:
+
+- local `make check` and `make dependencies`: pass
+- local static-musl workspace, all-target, all-feature Clippy with explicit
+  `-D warnings`: pass
+- 400 consecutive injected concurrency rounds before review, plus 25
+  independent reviewer rounds: pass
+- hosted push run `34412460762` and pull-request run `34412466701`: all 12
+  jobs pass, including macOS, Ubuntu, static musl, RustSec, dependency policy,
+  default user-namespace policy and required Landlock plus home-view execution
+  with supplementary groups cleared
+
+Subsequent hardening applied generation-aware status and explicit recovery to
+every stored state, made contenders wait while an owner finishes failed-launch
+cleanup, put spawned attempts under the same absolute deadline, added a
+home-root assertion to the required Linux launcher composition, and rejected
+public discovery depth above 256. The first read-only review of that follow-up
+returned `VERDICT: REVISE`: it caught one dead-process fixture that tried to
+capture generation after reaping and required direct recycled-PID coverage for
+non-`starting` states. The fixtures now capture real live generations where
+required and deliberately mismatch live unrelated generations for `active`
+and `stopping` recovery tests.
+
+Launcher stderr remains an accepted alpha diagnosability boundary, not an
+unresolved security or correctness defect. Exit status and a bounded failure
+class are already reported. Capturing an untrusted stream would require a
+nonblocking bounded drain, privacy filtering and terminal-safe presentation;
+that additional attack surface is not justified merely to enrich this error.
+Discovery remains metadata-only and cooperative, report-sink failure remains
+subordinate to child status, and same-UID processes remain outside the
+containment claim.
+
+The corrected follow-up received `VERDICT: ACCEPT` with no high or medium
+finding. Quarters then closed its remaining low-cost coverage observations:
+both live exact-generation disconnected states are exercised without signaling,
+the no-record owner window also defers, test names state only what they prove,
+and a real 256-directory traversal pins the public ceiling. A final read-only
+Opus maximum-effort review inspected the complete worktree and returned:
+
+> VERDICT: ACCEPT
+
+Its remaining notes are informational alpha boundaries: the public depth
+ceiling assumes enough process file descriptors while the shipped depth stays
+64, exact Linux home-delta evidence runs only on hosted Linux, and macOS libproc
+inspection errors fail closed. It found no high or medium security,
+correctness, portability, lock, cleanup or resource issue.
+
+The managed Codex deep security scan remains unavailable under this task's
+disabled filesystem permission profile and is still an external merge gate; no
+managed-scan result is claimed. Pull request 10 remains unmerged and stacked on
+the likewise unmerged pull requests 8 and 9. Dibs was unavailable during this
+phase and was not treated as an acceptance gate.

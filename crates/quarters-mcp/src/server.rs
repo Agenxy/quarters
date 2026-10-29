@@ -14,7 +14,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CacheScope, DiscoverResult, Implementation, InitializeRequestParams, InitializeResult, ListResourceTemplatesResult,
     ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
-    ReadResourceResponse, ServerCapabilities, ServerInfo,
+    ReadResourceResponse, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
@@ -436,42 +436,42 @@ impl ServerHandler for QuartersMcp {
         Cow::Borrowed(&SUPPORTED_PROTOCOL_VERSIONS)
     }
 
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let capabilities = ServerCapabilities::builder().enable_resources().enable_tools().build();
-        ServerInfo::new(capabilities)
+        ServerConfig::new(capabilities)
             .with_server_info(server_implementation())
             .with_instructions(
                 "Read quarters://help and quarters://security first. Observe quarters_status before mutation. Quarters virtualizes user-owned state but preserves the host account's real authority.",
             )
     }
 
-    async fn list_tools(
+    fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<rmcp::RoleServer>,
-    ) -> Result<ListToolsResult, ErrorData> {
+    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
         let result = ListToolsResult::with_all_items(self.tool_router.list_all());
-        if supports_cache_hints(&context) {
-            Ok(result.with_ttl_ms(3_600_000).with_cache_scope(CacheScope::Public))
+        std::future::ready(Ok(if supports_cache_hints(&context) {
+            result.with_ttl_ms(3_600_000).with_cache_scope(CacheScope::Public)
         } else {
-            Ok(result)
-        }
+            result
+        }))
     }
 
-    async fn list_resources(
+    fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<rmcp::RoleServer>,
-    ) -> Result<ListResourcesResult, ErrorData> {
-        Ok(resources::list(supports_cache_hints(&context)))
+    ) -> impl Future<Output = Result<ListResourcesResult, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(resources::list(supports_cache_hints(&context))))
     }
 
-    async fn list_resource_templates(
+    fn list_resource_templates(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<rmcp::RoleServer>,
-    ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        Ok(ListResourceTemplatesResult::default())
+    ) -> impl Future<Output = Result<ListResourceTemplatesResult, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(ListResourceTemplatesResult::default()))
     }
 
     async fn read_resource(

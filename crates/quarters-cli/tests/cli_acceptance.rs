@@ -141,7 +141,7 @@ fn mcp_stdio_serves_the_stateless_2026_path_end_to_end() -> Result<(), Box<dyn E
     drop(input);
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
-    assert!(completed.stderr.is_empty());
+    assert_eq!(String::from_utf8_lossy(&completed.stderr), "");
     for command in ["quarters", "ssh", "scp", "sftp", "ssh-add"] {
         assert!(
             std::fs::symlink_metadata(temporary.path().join("spaces/agent/home/.local/bin").join(command))?
@@ -219,7 +219,7 @@ fn mcp_stdio_serves_the_initialized_2025_path_end_to_end() -> Result<(), Box<dyn
     drop(input);
     let completed = child.wait_with_output()?;
     assert!(completed.status.success());
-    assert!(completed.stderr.is_empty());
+    assert_eq!(String::from_utf8_lossy(&completed.stderr), "");
     Ok(())
 }
 
@@ -569,6 +569,17 @@ fn missing_store_keeps_the_named_not_found_contract() -> Result<(), Box<dyn Erro
     let error: Value = serde_json::from_slice(&output.stderr)?;
     assert_eq!(error["error"]["kind"], "not_found");
     assert_eq!(error["error"]["hint"], "run 'quarters list' to see available spaces");
+    Ok(())
+}
+
+#[test]
+fn unnamed_status_of_a_missing_store_is_empty_and_creates_nothing() -> Result<(), Box<dyn Error>> {
+    let temporary = TempDir::new()?;
+    let missing_root = temporary.path().join("missing");
+    let output = run(quarters(&missing_root).args(["--json", "status"]))?;
+    let status: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(status["result"]["spaces"], serde_json::json!([]));
+    assert!(!missing_root.exists(), "inspection must not create the store");
     Ok(())
 }
 

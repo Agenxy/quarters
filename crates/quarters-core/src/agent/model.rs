@@ -3,7 +3,7 @@
 use crate::{Space, SpaceId};
 use serde::{Deserialize, Serialize};
 
-pub(super) const REGISTRY_SCHEMA_VERSION: u32 = 1;
+pub(super) const REGISTRY_SCHEMA_VERSION: u32 = 2;
 
 /// Observable state of a private per-space SSH agent.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -75,6 +75,8 @@ pub(super) struct AgentRecord {
     pub space_id: SpaceId,
     pub token: String,
     pub pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_generation: Option<u128>,
     pub created_unix_ms: u128,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub socket_inode: Option<u64>,

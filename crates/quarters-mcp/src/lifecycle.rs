@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use quarters_core::{HostEnvironment, Store};
-use rmcp::model::{ClientRequest, ErrorData, ProtocolVersion, RequestId, ServerInfo, ServerResult};
+use rmcp::model::{ClientRequest, ErrorData, ProtocolVersion, RequestId, ServerConfig, ServerResult};
 use rmcp::service::{RequestContext, RoleServer, Service};
 
 use crate::server::QuartersMcp;
@@ -63,7 +63,7 @@ impl Service<RoleServer> for QuartersService {
         Service::<RoleServer>::handle_notification(&self.inner, notification, context)
     }
 
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         Service::<RoleServer>::get_info(&self.inner)
     }
 
