@@ -55,7 +55,7 @@ pub(super) fn run_helper(host: &HostEnvironment, space: &Space, token: &str) -> 
     let pid = std::process::id();
     wait_for_ownership(&runtime, space, token, pid)?;
     #[cfg(debug_assertions)]
-    if inject_one_test_exit(&runtime)? {
+    if inject_test_exit(&runtime)? {
         return Ok(75);
     }
     validate_agent_executable(Path::new(SSH_AGENT))?;
@@ -75,8 +75,12 @@ pub(super) fn run_helper(host: &HostEnvironment, space: &Space, token: &str) -> 
 }
 
 #[cfg(debug_assertions)]
-fn inject_one_test_exit(runtime: &Path) -> Result<bool> {
-    if std::env::var_os("QUARTERS_TEST_AGENT_EXIT_ONCE").as_deref() != Some(std::ffi::OsStr::new("1")) {
+fn inject_test_exit(runtime: &Path) -> Result<bool> {
+    let enabled = |name: &str| std::env::var_os(name).as_deref() == Some(std::ffi::OsStr::new("1"));
+    if enabled("QUARTERS_TEST_AGENT_EXIT_ALWAYS") {
+        return Ok(true);
+    }
+    if !enabled("QUARTERS_TEST_AGENT_EXIT_ONCE") {
         return Ok(false);
     }
     let marker = runtime.join(".test-agent-exit-once");
