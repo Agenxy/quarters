@@ -219,6 +219,31 @@ fn concurrent_recovery_tolerates_reclaiming_state() {
 }
 
 #[test]
+fn recovery_reads_rollback_state_within_the_management_bound() {
+    use fs4::FileExt;
+    use std::time::Duration;
+
+    let (_temporary, store) = test_store();
+    store.recover().expect("initialize store");
+    let observation_path = store.root.join(crate::store::OBSERVATION_LOCK_FILE);
+    let observation = crate::store::open_private_lock(&observation_path).expect("open observation lock");
+    <std::fs::File as FileExt>::lock(&observation).expect("hold observation lock");
+    // A concurrent management operation, such as another recovery, holds the
+    // store lock longer than the 500 ms observer bound.
+    let error = store.rollback_issues().expect_err("observers stay bounded");
+    assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(900));
+        drop(observation);
+    });
+    let issues = store
+        .rollback_issues_for_recovery()
+        .expect("recovery waits for the management holder");
+    assert_eq!(issues, Vec::new());
+    holder.join().expect("lock holder");
+}
+
+#[test]
 fn concurrent_same_destination_clones_publish_once_without_staging_leaks() {
     let (_temporary, store) = test_store();
     let source = store
