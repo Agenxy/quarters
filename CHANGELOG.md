@@ -6,6 +6,10 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Document mise inside a Quarter: its config and trust state follow the Quarter
+  home, so host mise shims need tools configured in the Quarter or `quarters
+  host`. The tool compatibility test now probes concrete executables, not
+  multiplexing shims.
 - Treat a private file or SSH-agent registry that APFS reports with no remaining
   link during an atomic replacement as a replacement in progress and re-read it,
   instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
