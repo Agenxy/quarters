@@ -6,10 +6,13 @@ mod freeze;
 mod host_fork;
 mod layout;
 pub(crate) mod lifecycle;
+mod private_read;
 mod remove;
 mod rename;
 pub(crate) mod scan;
 mod upgrade;
+
+pub(crate) use private_read::read_private_file;
 
 pub use freeze::{FreezeReport, FreezeState};
 pub use host_fork::{HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport};
@@ -25,14 +28,14 @@ use crate::{
     SpaceManifest, SpaceName,
 };
 use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MANIFEST_FILE: &str = ".quarters.json";
-const MAX_MANIFEST_BYTES: u64 = 16 * 1_024;
+pub(super) const MAX_MANIFEST_BYTES: u64 = 16 * 1_024;
 pub(crate) const OBSERVATION_LOCK_FILE: &str = ".observe";
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -398,48 +401,6 @@ pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|error| QuartersError::io("sync private file", path, error))
 }
 
-pub(crate) fn read_private_file(path: &Path) -> Result<Vec<u8>> {
-    let path_metadata = fs::symlink_metadata(path).map_err(|error| missing_private_file(path, error))?;
-    validate_private_file(path, &path_metadata)?;
-    let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .custom_flags(nix::libc::O_CLOEXEC | nix::libc::O_NOFOLLOW);
-    let file = options
-        .open(path)
-        .map_err(|error| QuartersError::io("open private file", path, error))?;
-    let file_metadata = file
-        .metadata()
-        .map_err(|error| QuartersError::io("inspect private file", path, error))?;
-    validate_private_file(path, &file_metadata)?;
-    if file_metadata.len() > MAX_MANIFEST_BYTES {
-        return Err(QuartersError::new(
-            ErrorKind::CorruptState,
-            format!(
-                "private metadata file is larger than {MAX_MANIFEST_BYTES} bytes: {}",
-                path.display()
-            ),
-        ));
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_MANIFEST_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| QuartersError::io("read private file", path, error))?;
-    let maximum_size = usize::try_from(MAX_MANIFEST_BYTES).map_err(|error| {
-        QuartersError::new(ErrorKind::System, "manifest size limit does not fit this platform").with_source(error)
-    })?;
-    if bytes.len() > maximum_size {
-        return Err(QuartersError::new(
-            ErrorKind::CorruptState,
-            format!(
-                "private metadata file grew beyond {MAX_MANIFEST_BYTES} bytes: {}",
-                path.display()
-            ),
-        ));
-    }
-    Ok(bytes)
-}
-
 pub(crate) fn open_private_lock(path: &Path) -> Result<File> {
     let path_metadata = fs::symlink_metadata(path).map_err(|error| missing_private_file(path, error))?;
     validate_private_file(path, &path_metadata)?;
@@ -481,7 +442,7 @@ pub(crate) fn open_or_create_private_lock(path: &Path) -> Result<File> {
     }
 }
 
-fn missing_private_file(path: &Path, error: std::io::Error) -> QuartersError {
+pub(super) fn missing_private_file(path: &Path, error: std::io::Error) -> QuartersError {
     if error.kind() == std::io::ErrorKind::NotFound {
         return QuartersError::new(
             ErrorKind::CorruptState,
