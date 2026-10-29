@@ -6,6 +6,7 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Move tokio to 1.54.1, past the `AsyncFd` I/O-safety advisory RUSTSEC-2026-0386.
 - Remove the unreleased `.quarters-store-migration.json` refusal, its
   `migration_marker` doctor/MCP field and the `active-migration` diagnosis
   state before first publication. No released Quarters version emitted them,
