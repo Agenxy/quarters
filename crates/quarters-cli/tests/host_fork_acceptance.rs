@@ -6,7 +6,9 @@ use std::error::Error;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 use std::process::{Command, Output};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 
 /// A host-context invocation, even when the test itself runs inside a Quarter.
 fn quarters(root: &Path) -> Command {

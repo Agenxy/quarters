@@ -5,7 +5,9 @@ use serde_json::Value;
 use std::error::Error;
 use std::path::Path;
 use std::process::{Command, Output};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 
 #[path = "support/agent_guard.rs"]
 mod agent_guard;
