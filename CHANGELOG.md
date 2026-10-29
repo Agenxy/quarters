@@ -6,6 +6,10 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Document mise inside a Quarter: its config and trust state follow the Quarter
+  home, so host mise shims need tools configured in the Quarter or `quarters
+  host`. The tool compatibility test now probes concrete executables, not
+  multiplexing shims.
 - Release a cancelled MCP request's ID and capacity at once when its handler
   never started, and let a request reusing a cancelled ID wait boundedly for its
   operation to finish instead of closing the session.

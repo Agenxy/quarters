@@ -38,6 +38,7 @@ current host. It does not read credentials.
 | GnuPG | B | `GNUPGHOME`, short runtime | external keychain or hardware identity remains host hardware |
 | Python | A | `HOME`, XDG | system and site packages remain shared |
 | uv | B | cache, Python and tool directory variables | host binaries remain shared |
+| mise | A/C | config, data and trust state follow the Quarter `HOME` and XDG paths | a Quarter starts with no mise tool versions, so host mise shims fail until tools are configured in the Quarter; from a directory under the passwd home, mise also discovers the host global config as an untrusted project config. Install or configure tools in the Quarter, or run host shims through `quarters host` |
 | Cargo | B | `CARGO_HOME`; confined mode also redirects `RUSTUP_HOME` and keeps Quarter Cargo bins on PATH | baseline system and rustup toolchains may remain shared |
 | npm | B | user config and cache; confined mode uses a Quarter-local prefix | baseline global system prefix remains shared |
 | Codex | B/D | `CODEX_HOME` | OS keychain, permissions and login session remain host-bound |
