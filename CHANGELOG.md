@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Let `recover` read rollback state within the five-second management bound, so a
+  concurrent recovery queues instead of failing at the 500 ms observer bound;
+  read-only status keeps the short bound.
 - Always give an exited private-agent launcher its single relaunch, with its own
   five-second window, even after lock waits spent the shared startup budget, and
   report an agent that exits on every attempt as such instead of implying one.
