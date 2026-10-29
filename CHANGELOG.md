@@ -9,6 +9,9 @@ compatibility notes will be called out here.
 - Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
   refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
   releases; rmcp stays at 3.5.0 pending its lifecycle migration.
+- Back off exponentially (1 to 128 ms, at most 255 ms) when a private file or
+  agent registry is caught mid replacement, still failing closed after the
+  bound, so a reader outlasts real writer churn on fast filesystems.
 - Document mise inside a Quarter: its config and trust state follow the Quarter
   home, so host mise shims need tools configured in the Quarter or `quarters
   host`. The tool compatibility test now probes concrete executables, not
