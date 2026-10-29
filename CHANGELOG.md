@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Release a cancelled MCP request's ID and capacity at once when its handler
+  never started, and let a request reusing a cancelled ID wait boundedly for its
+  operation to finish instead of closing the session.
 - Let `recover` read rollback state within the five-second management bound, so a
   concurrent recovery queues instead of failing at the 500 ms observer bound;
   read-only status keeps the short bound.
