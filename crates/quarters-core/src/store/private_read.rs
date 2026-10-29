@@ -46,7 +46,11 @@ fn read_private_file_once(path: &Path) -> Result<Option<Vec<u8>>> {
     let file_metadata = file
         .metadata()
         .map_err(|error| QuartersError::io("inspect private file", path, error))?;
-    if file_metadata.nlink() == 0 {
+    // The bytes trusted below come from this descriptor, so it must be the
+    // exact inode whose path inspection was accepted; anything else is a
+    // replacement in progress and the whole sequence is retried.
+    let same_inode = (path_metadata.dev(), path_metadata.ino()) == (file_metadata.dev(), file_metadata.ino());
+    if file_metadata.nlink() == 0 || !same_inode {
         return Ok(None);
     }
     validate_private_file(path, &file_metadata)?;
