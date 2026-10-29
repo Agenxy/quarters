@@ -38,6 +38,7 @@ current host. It does not read credentials.
 | GnuPG | B | `GNUPGHOME`, short runtime | external keychain or hardware identity remains host hardware |
 | Python | A | `HOME`, XDG | system and site packages remain shared |
 | uv | B | cache, Python and tool directory variables | host binaries remain shared |
+| mise | A/C | config, data and trust state follow the Quarter `HOME` and XDG paths | a Quarter starts with no mise tool versions, so host mise shims fail until tools are configured in the Quarter; from a directory under the passwd home, mise also discovers the host global config as an untrusted project config. Install or configure tools in the Quarter, or run host shims through `quarters host` |
 | Cargo | B | `CARGO_HOME`, with Quarter Cargo bins ahead of the host PATH; confined mode also redirects `RUSTUP_HOME` | baseline system and rustup toolchains may remain shared |
 | Go | A | default `GOPATH` under the Quarter `HOME`, with `~/go/bin` ahead of the host PATH | host Go toolchain and module proxy settings remain shared |
 | Bun | A | default install root under the Quarter `HOME`, with `~/.bun/bin` ahead of the host PATH | host Bun executable remains shared unless installed in the Quarter |

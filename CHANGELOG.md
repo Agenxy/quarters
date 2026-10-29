@@ -9,6 +9,10 @@ compatibility notes will be called out here.
 - Search the Quarter's own `~/.local/bin`, `~/.cargo/bin`, `~/go/bin` and
   `~/.bun/bin` before the host PATH, so a tool installed inside a Quarter is the
   one that runs (ADR 0013).
+- Document mise inside a Quarter: its config and trust state follow the Quarter
+  home, so host mise shims need tools configured in the Quarter or `quarters
+  host`. The tool compatibility test now probes concrete executables, not
+  multiplexing shims.
 - Treat a private file or SSH-agent registry that APFS reports with no remaining
   link during an atomic replacement as a replacement in progress and re-read it,
   instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
