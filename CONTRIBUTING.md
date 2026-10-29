@@ -16,3 +16,12 @@ platform module, and capability requests fail rather than degrading silently.
 
 Changes to process authority, environment inheritance, filesystem mutation,
 stored schema or platform guarantees need tests and an architecture decision.
+
+Acceptance tests that start a private agent hold an `AgentGuard`
+(`crates/quarters-cli/tests/support/agent_guard.rs`), declared before
+`agent start`, so a failing test still stops its `ssh-agent`. Tests do not
+remove their spaces before dropping the temporary store, so each leaves an
+empty, private `quarters-<uid>/<id>` runtime directory under the system
+temporary directory. That is deliberate: the tests exercise the real runtime
+location, `quarters remove` is the supported cleanup path, and the operating
+system clears those directories at reboot.

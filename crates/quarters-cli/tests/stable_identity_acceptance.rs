@@ -6,6 +6,10 @@ use std::path::Path;
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
+#[path = "support/agent_guard.rs"]
+mod agent_guard;
+use agent_guard::AgentGuard;
+
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
     command.arg("--root").arg(root);
@@ -39,6 +43,7 @@ fn rename_retains_identity_agent_adapters_and_snapshot_binding() -> Result<(), B
         "--confirm-sensitive-state",
         "before-name",
     ]))?;
+    let _agent = AgentGuard::new(temporary.path(), &["before-name", "after-name"]);
     run(quarters(temporary.path()).args(["agent", "start", "before-name"]))?;
     let before = run(quarters(temporary.path()).args(["--json", "status", "before-name"]))?;
     let before: Value = serde_json::from_slice(&before.stdout)?;

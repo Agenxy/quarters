@@ -6,6 +6,10 @@ use std::path::Path;
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
+#[path = "support/agent_guard.rs"]
+mod agent_guard;
+use agent_guard::AgentGuard;
+
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
     command.arg("--root").arg(root);
@@ -29,6 +33,7 @@ fn private_ssh_agent_loads_a_real_key_and_remains_scoped_to_one_space() -> Resul
     let unset: Value = serde_json::from_slice(&unset.stdout)?;
     assert_eq!(unset["result"]["state"], "unset");
 
+    let _agent = AgentGuard::new(temporary.path(), &["agentdemo"]);
     let active = run(quarters(temporary.path()).args(["--json", "agent", "start", "agentdemo"]))?;
     let active: Value = serde_json::from_slice(&active.stdout)?;
     assert_eq!(active["result"]["state"], "active");
