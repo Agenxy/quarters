@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Privacy-bounded state discovery orchestration.
 
 use crate::cli::{DiscoverArgs, DiscoveryScanArg};

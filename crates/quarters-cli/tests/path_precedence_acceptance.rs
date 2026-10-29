@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Quarter-owned toolchain directories shadow host executables on PATH.
 
 use std::error::Error;

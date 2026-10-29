@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Syntax-aware Rust metrics.
 
 use crate::limits::{MAX_COMPLEXITY, MAX_FUNCTION_LINES, MAX_NESTING, MAX_PARAMETERS, MAX_TYPE_LINES};

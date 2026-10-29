@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Linux confinement rejects inode aliases and hidden mount ancestry.
 
 #![cfg(target_os = "linux")]

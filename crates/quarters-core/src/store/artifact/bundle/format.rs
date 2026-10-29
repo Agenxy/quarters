@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Versioned authenticated bundle framing.
 
 use super::super::model::{valid_source_identity, validate_content_integrity};

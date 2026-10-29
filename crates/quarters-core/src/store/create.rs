@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Atomic space creation transaction and initial user-state files.
 
 use super::lifecycle::{StagingIdentity, remove_tree_restoring_owner_access};

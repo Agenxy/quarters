@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Descriptor-relative canonical artifact verification.
 
 use super::model::{ArtifactCounts, ContentIntegrity, INTEGRITY_ALGORITHM};

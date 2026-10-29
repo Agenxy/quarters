@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Shared acceptance-test compatibility helpers.
 
 use std::path::Path;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Adversarial tests for the bounded MCP transport.
 
 use std::error::Error;

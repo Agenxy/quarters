@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Parsed routing marker for modes that cannot reopen the host store.
 
 use std::ffi::OsStr;

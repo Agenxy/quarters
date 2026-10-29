@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use super::{DiscoveryClass, DiscoverySelector};
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;

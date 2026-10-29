@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Portable state-profile primitives for Quarters.
 
 mod agent;

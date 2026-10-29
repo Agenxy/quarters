@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded directory listing and relative-path validation.
 
 use super::{conversion_error, entry_limit_error, limit_error, nix_error};

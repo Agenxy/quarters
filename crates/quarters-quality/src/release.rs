@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Release-artifact guard: no test-only steering hook may ship.
 
 use std::fs;

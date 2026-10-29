@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use super::{DiscoveryChild, DiscoveryLimits, DiscoverySelector, report, snapshot};
 use std::fs::{self, OpenOptions};
 use std::io::Write;

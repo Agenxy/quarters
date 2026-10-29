@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Versioned store-layout resolution shared by every storage operation.
 
 mod marker;

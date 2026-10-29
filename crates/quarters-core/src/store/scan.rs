@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Shared work budgets for hostile or unexpectedly large directories.
 
 use crate::{ErrorKind, QuartersError, Result};

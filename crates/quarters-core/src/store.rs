@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Atomic private storage for spaces.
 
 pub(crate) mod artifact;

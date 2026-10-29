@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Atomic legacy-manifest upgrade to stable space identity.
 
 use super::create::replace_manifest;

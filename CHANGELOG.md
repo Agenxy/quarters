@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Relicense from Apache-2.0 to GPL-3.0-or-later from this release onward, with
+  a commercial licence available from Agenxy. Releases through 0.1.0-alpha.2
+  remain Apache-2.0.
 - Move rmcp to 3.8.0 and conform to MCP 2026-07-28 on it: a discover-only stdio
   client now exits cleanly, a ping carrying modern `_meta` is refused as a
   removed method while a bare pre-initialize ping is answered, and the

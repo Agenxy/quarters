@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Immediate artifact capture from an active, cooperatively frozen Quarter.
 
 use super::catalog::{ArtifactSetup, artifact_walk_control, prepare_artifact_staging, report_from_clone};

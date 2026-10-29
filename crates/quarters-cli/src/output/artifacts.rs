@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Lifecycle artifact human and JSON presentation.
 
 use super::{print_success, safe_json_path};

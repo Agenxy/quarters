@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! End-to-end stable-identity lifecycle acceptance.
 
 use serde_json::Value;

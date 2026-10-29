@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! MCP tools, resources and dual-version compatibility for Quarters.
 
 mod lifecycle;

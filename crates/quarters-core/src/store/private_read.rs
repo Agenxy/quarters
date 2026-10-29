@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded reads of private metadata files, tolerant of atomic replacement.
 
 use super::{MAX_MANIFEST_BYTES, missing_private_file};

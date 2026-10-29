@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Connection-family isolation, cancellation and bounded request admission.
 
 use std::borrow::Cow;

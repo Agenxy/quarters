@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Concurrent private-agent lifecycle acceptance.
 
 use serde_json::Value;

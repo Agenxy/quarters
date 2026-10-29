@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Fixed MCP resource catalog and revision-aware cache policy.
 
 use rmcp::ErrorData;
