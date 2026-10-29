@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Acceptance for the explicit `quarters host` escape from a Quarter.
 
 use std::error::Error;

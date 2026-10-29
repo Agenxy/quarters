@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Native errno probes run inside the confined acceptance process.
 
 use std::error::Error;

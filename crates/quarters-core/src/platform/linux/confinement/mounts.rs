@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Refuse grants whose mounted filesystem regions alias protected state.
 //!
 //! Descriptor ancestry stops at a mount root, so a bind or subtree mount can

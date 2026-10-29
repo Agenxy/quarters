@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Descriptor ancestry checks for policy aliases.
 
 use crate::{ErrorKind, QuartersError, Result};
