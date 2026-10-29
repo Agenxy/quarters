@@ -10,6 +10,9 @@ compatibility notes will be called out here.
   link during an atomic replacement as a replacement in progress and re-read it,
   instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
   a real extra hard link still fails closed, and the error now names which.
+- Release a cancelled MCP request's ID and capacity at once when its handler
+  never started, and let a request reusing a cancelled ID wait boundedly for its
+  operation to finish instead of closing the session.
 - Let `recover` read rollback state within the five-second management bound, so a
   concurrent recovery queues instead of failing at the 500 ms observer bound;
   read-only status keeps the short bound.
