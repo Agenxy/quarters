@@ -9,6 +9,9 @@ compatibility notes will be called out here.
 - Search the Quarter's own `~/.local/bin`, `~/.cargo/bin`, `~/go/bin` and
   `~/.bun/bin` before the host PATH, so a tool installed inside a Quarter is the
   one that runs (ADR 0013).
+- Back off exponentially (1 to 128 ms, at most 255 ms) when a private file or
+  agent registry is caught mid replacement, still failing closed after the
+  bound, so a reader outlasts real writer churn on fast filesystems.
 - Document mise inside a Quarter: its config and trust state follow the Quarter
   home, so host mise shims need tools configured in the Quarter or `quarters
   host`. The tool compatibility test now probes concrete executables, not
