@@ -46,6 +46,8 @@ jobs:
           sudo apt-get install --yes musl-tools
       - name: Build native binary
         run: cargo build --locked --release --target '${{ matrix.target }}' --package quarters
+      - name: Refuse test hooks in the shipped binary
+        run: cargo run --locked --quiet --package quarters-quality -- release-binary 'target/${{ matrix.target }}/release/quarters'
       - name: Test the shipped target
         run: cargo test --locked --workspace --all-targets --target '${{ matrix.target }}'
       - name: Set up Node.js
