@@ -13,6 +13,10 @@ compatibility notes will be called out here.
 - Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
   refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
   releases.
+- Document mise inside a Quarter: its config and trust state follow the Quarter
+  home, so host mise shims need tools configured in the Quarter or `quarters
+  host`. The tool compatibility test now probes concrete executables, not
+  multiplexing shims.
 - Treat a private file or SSH-agent registry that APFS reports with no remaining
   link during an atomic replacement as a replacement in progress and re-read it,
   instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
