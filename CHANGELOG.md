@@ -6,9 +6,13 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Move rmcp to 3.8.0 and conform to MCP 2026-07-28 on it: a discover-only stdio
+  client now exits cleanly, a ping carrying modern `_meta` is refused as a
+  removed method while a bare pre-initialize ping is answered, and the
+  conformance audit is recorded in `docs/mcp/VERIFICATION.md`.
 - Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
   refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
-  releases; rmcp stays at 3.5.0 pending its lifecycle migration.
+  releases.
 - Search the Quarter's own `~/.local/bin`, `~/.cargo/bin`, `~/go/bin` and
   `~/.bun/bin` before the host PATH, so a tool installed inside a Quarter is the
   one that runs (ADR 0013).

@@ -54,6 +54,36 @@ async fn legacy_initialize_offers_the_supported_revision() -> Result<(), Box<dyn
     Ok(())
 }
 
+/// Revisions older than 2025-11-25 are never served, whatever rmcp supports.
+#[tokio::test]
+async fn untested_older_revisions_are_refused_without_initialize() -> Result<(), Box<dyn Error>> {
+    for older in ["2025-06-18", "2025-03-26", "2024-11-05"] {
+        let directory = tempfile::tempdir()?;
+        let (server_io, client_io) = tokio::io::duplex(16 * 1_024);
+        let server_task = spawn_server(directory.path().join("quarters"), server_io)?;
+        let mut client = IntoTransport::<RoleClient, _, _>::into_transport(client_io);
+        client
+            .send(message(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": {
+                    "io.modelcontextprotocol/protocolVersion": older,
+                    "io.modelcontextprotocol/clientInfo": {"name": "older", "version": "1"},
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }}
+            }))?)
+            .await?;
+        let ServerJsonRpcMessage::Error(error) = receive(&mut client).await? else {
+            return Err(io::Error::other(format!("revision {older} was served")).into());
+        };
+        assert_eq!(error.error.code, rmcp::model::ErrorCode::UNSUPPORTED_PROTOCOL_VERSION);
+        drop(client);
+        server_task.await??;
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn stateless_discover_cannot_select_the_legacy_revision() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -153,8 +183,46 @@ async fn pipelined_legacy_request_uses_the_initialized_family() -> Result<(), Bo
     Ok(())
 }
 
+fn modern_meta(client: &str) -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": client, "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
+/// MCP 2026-07-28 changelog, item 5 (SEP-2575): `ping` is removed, so a ping
+/// that declares the modern revision is an unknown method.
 #[tokio::test]
-async fn modern_lifecycle_rejects_removed_ping_method() -> Result<(), Box<dyn Error>> {
+async fn modern_ping_is_a_removed_method() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let (server_io, client_io) = tokio::io::duplex(16 * 1_024);
+    let server_task = spawn_server(directory.path().join("quarters"), server_io)?;
+    let mut client = IntoTransport::<RoleClient, _, _>::into_transport(client_io);
+    client
+        .send(message(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "ping",
+            "params": {"_meta": modern_meta("modern-ping-test")}
+        }))?)
+        .await?;
+    let ServerJsonRpcMessage::Error(error) = receive(&mut client).await? else {
+        return Err(io::Error::other("modern ping was not rejected").into());
+    };
+    assert_eq!(error.error.code, rmcp::model::ErrorCode::METHOD_NOT_FOUND);
+    drop(client);
+    server_task.await??;
+    Ok(())
+}
+
+/// MCP 2026-07-28 versioning, "Backward Compatibility with Initialization-Based
+/// Versions": a dual-era server serves modern `_meta` requests statelessly and
+/// opens legacy semantics only on `initialize`. A bare ping carries no modern
+/// `_meta`, so it is the legacy pre-initialize ping that 2025-11-25 permits,
+/// even after a modern `server/discover` probe on the same stdio process.
+#[tokio::test]
+async fn bare_ping_after_a_modern_probe_is_a_legacy_preinitialize_ping() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let (server_io, client_io) = tokio::io::duplex(16 * 1_024);
     let server_task = spawn_server(directory.path().join("quarters"), server_io)?;
@@ -164,21 +232,36 @@ async fn modern_lifecycle_rejects_removed_ping_method() -> Result<(), Box<dyn Er
             "jsonrpc": "2.0",
             "id": 1,
             "method": "server/discover",
-            "params": {"_meta": {
-                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                "io.modelcontextprotocol/clientInfo": {"name": "modern-ping-test", "version": "1"},
-                "io.modelcontextprotocol/clientCapabilities": {}
-            }}
+            "params": {"_meta": modern_meta("probe-then-ping")}
         }))?)
         .await?;
     assert!(matches!(receive(&mut client).await?, ServerJsonRpcMessage::Response(_)));
     client
         .send(message(json!({"jsonrpc": "2.0", "id": 2, "method": "ping"}))?)
         .await?;
-    let ServerJsonRpcMessage::Error(error) = receive(&mut client).await? else {
-        return Err(io::Error::other("modern ping was not rejected").into());
-    };
-    assert_eq!(error.error.code, rmcp::model::ErrorCode::METHOD_NOT_FOUND);
+    assert!(matches!(receive(&mut client).await?, ServerJsonRpcMessage::Response(_)));
+    drop(client);
+    server_task.await??;
+    Ok(())
+}
+
+/// MCP 2026-07-28 changelog, item 3: clients MAY call `server/discover` as a
+/// stdio probe. A stateless client that probes and closes must see a clean exit.
+#[tokio::test]
+async fn a_discover_only_client_exits_cleanly() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let (server_io, client_io) = tokio::io::duplex(16 * 1_024);
+    let server_task = spawn_server(directory.path().join("quarters"), server_io)?;
+    let mut client = IntoTransport::<RoleClient, _, _>::into_transport(client_io);
+    client
+        .send(message(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {"_meta": modern_meta("discover-only")}
+        }))?)
+        .await?;
+    assert!(matches!(receive(&mut client).await?, ServerJsonRpcMessage::Response(_)));
     drop(client);
     server_task.await??;
     Ok(())

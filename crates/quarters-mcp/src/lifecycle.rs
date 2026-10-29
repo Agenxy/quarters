@@ -12,8 +12,6 @@ use rmcp::service::{RequestContext, RoleServer, Service};
 
 use crate::server::QuartersMcp;
 
-const INITIALIZE_PROTOCOL_VERSIONS: [ProtocolVersion; 1] = [ProtocolVersion::V_2025_11_25];
-
 /// Maximum requests retained until their responses finish writing.
 pub(crate) const MAX_IN_FLIGHT_REQUESTS: usize = 32;
 /// Maximum distinct request identifiers retained for one legacy session.
@@ -68,7 +66,10 @@ impl Service<RoleServer> for QuartersService {
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
-        Cow::Borrowed(&INITIALIZE_PROTOCOL_VERSIONS)
+        // rmcp checks every initialize-less request against this list, and its
+        // initialize negotiation only selects versions with an initialize
+        // handshake; family validation keeps the two eras disjoint.
+        Service::<RoleServer>::supported_protocol_versions(&self.inner)
     }
 }
 
@@ -441,7 +442,30 @@ enum FamilyState {
 mod tests {
     use rmcp::model::RequestId;
 
-    use super::{AdmissionFailure, MAX_IN_FLIGHT_REQUESTS, RequestAdmission};
+    use super::{AdmissionFailure, MAX_IN_FLIGHT_REQUESTS, ProtocolFamily, QuartersService, RequestAdmission};
+
+    /// rmcp negotiates and validates against this list, so it must stay
+    /// exactly the two tested revisions whatever rmcp itself supports.
+    #[test]
+    fn the_reported_protocol_set_is_exactly_the_tested_revisions() -> Result<(), Box<dyn std::error::Error>> {
+        use rmcp::model::ProtocolVersion;
+        use rmcp::service::{RoleServer, Service};
+
+        let directory = tempfile::tempdir()?;
+        let store = quarters_core::Store::new(directory.path().join("quarters"))?;
+        let service = QuartersService::with_controls(
+            store,
+            quarters_core::HostEnvironment::capture(),
+            None,
+            ProtocolFamily::new(),
+            RequestAdmission::new(),
+        );
+        assert_eq!(
+            Service::<RoleServer>::supported_protocol_versions(&service).as_ref(),
+            [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25]
+        );
+        Ok(())
+    }
 
     #[test]
     fn response_lifetime_and_cancellation_release_capacity() -> Result<(), Box<dyn std::error::Error>> {

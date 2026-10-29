@@ -70,3 +70,30 @@ Run `make check`, `make dependencies` and the end-to-end stdio acceptance tests
 on macOS and Linux before release. Cross-platform CI is evidence for portable
 behavior; namespace behavior additionally requires a Linux host whose policy
 allows the feature.
+
+## MCP 2026-07-28 conformance audit
+
+Audited on 2026-10-29 against the published 2026-07-28 changelog and
+versioning pages, on rmcp 3.8.0, by driving the built `quarters mcp` binary
+and the acceptance suites. Quarters is a dual-era stdio server: modern
+requests carrying `_meta` are served statelessly, and `initialize` opens the
+2025-11-25 legacy family.
+
+| Requirement (2026-07-28) | Status | Evidence |
+|---|---|---|
+| Stateless requests carry `protocolVersion` and `clientCapabilities` in `_meta` (major 2) | Holds | A request without them is refused with `-32602` naming the missing keys |
+| Servers SHOULD identify themselves in each result's `_meta` (major 2) | Holds | `io.modelcontextprotocol/serverInfo` is present on every result |
+| Unsupported versions return `UnsupportedProtocolVersionError` (major 2) | Holds | An unknown version returns `-32022` naming `2026-07-28`; a legacy version without `initialize` is refused the same way |
+| `server/discover` MUST be implemented (major 3) | Holds | Returns `supportedVersions: ["2026-07-28"]`, capabilities and identity |
+| A discover-only stdio probe is a normal client (major 3, versioning) | Holds | `a_discover_only_client_exits_cleanly`; the binary exits 0 |
+| `ping`, `logging/setLevel` and `notifications/roots/list_changed` are removed (major 5) | Holds | A ping carrying modern `_meta` and `logging/setLevel` both return `-32601` |
+| No `notifications/message` without a per-request `logLevel` (major 5) | Holds | Quarters emits no log notifications |
+| A bare ping before any lifecycle is the legacy pre-initialize ping (versioning, dual-era) | Holds | `bare_ping_after_a_modern_probe_is_a_legacy_preinitialize_ping` |
+| Every result carries `resultType` (major 8) | Holds | `complete` on every result; Quarters returns no interim results |
+| List and read results carry `ttlMs` and `cacheScope` (minor 5) | Holds | `tools/list`, `resources/list` and static `resources/read` are public for one hour; dynamic status reads are private and short |
+| `tools/list` order is deterministic (minor 3) | Holds | Tools are returned sorted by name |
+| Resource not found is `-32602` (minor 6) | Holds | An unknown `quarters://` URI returns `-32602` |
+| Legacy clients keep working through `initialize` (versioning, dual-era) | Holds | The legacy initialize and pipelining suites pass unchanged |
+| Only the two tested revisions are negotiable | Holds | The transport reports exactly `2026-07-28` and `2025-11-25` to rmcp whatever rmcp supports (`the_reported_protocol_set_is_exactly_the_tested_revisions`); initialize-less requests claiming `2025-06-18`, `2025-03-26` or `2024-11-05` are refused with `-32022` |
+| Sessions, `subscriptions/listen`, SSE resumability, HTTP headers (major 1, 4, 9; minor 4) | Not applicable | Quarters serves stdio only and offers no subscriptions |
+| Tasks extension, MRTR and elicitation changes (major 6, 7; minor 11) | Not applicable | Quarters issues no server-initiated requests or tasks |

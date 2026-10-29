@@ -14,7 +14,7 @@ pub use server::SUPPORTED_PROTOCOL_VERSIONS;
 
 use quarters_core::{ErrorKind, HostEnvironment, QuartersError, Result, Store, validate_command_launcher};
 use rmcp::ServiceExt;
-use rmcp::service::QuitReason;
+use rmcp::service::{QuitReason, ServerInitializeError};
 use std::path::PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -71,10 +71,16 @@ where
     let family = lifecycle::ProtocolFamily::new();
     let admission = lifecycle::RequestAdmission::new();
     let transport = transport::BoundedStdioTransport::new(reader, writer, family.clone(), admission.clone());
-    let service = lifecycle::QuartersService::with_controls(store, host, command_launcher, family, admission)
+    let service = match lifecycle::QuartersService::with_controls(store, host, command_launcher, family, admission)
         .serve(transport)
         .await
-        .map_err(|_error| startup_error())?;
+    {
+        Ok(service) => service,
+        // A stateless 2026 client may probe with server/discover and close the
+        // stream without opening any lifecycle; that is a normal exit.
+        Err(ServerInitializeError::ConnectionClosed(_)) => return Ok(()),
+        Err(_error) => return Err(startup_error()),
+    };
     let reason = service.waiting().await.map_err(|_error| runtime_error())?;
     match reason {
         QuitReason::Cancelled | QuitReason::Closed => Ok(()),
