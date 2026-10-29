@@ -6,6 +6,10 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Treat a private file or SSH-agent registry that APFS reports with no remaining
+  link during an atomic replacement as a replacement in progress and re-read it,
+  instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
+  a real extra hard link still fails closed, and the error now names which.
 - Always give an exited private-agent launcher its single relaunch, with its own
   five-second window, even after lock waits spent the shared startup budget, and
   report an agent that exits on every attempt as such instead of implying one.
