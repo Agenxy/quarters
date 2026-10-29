@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Move the toolchain to Rust 1.99.1, Bun 1.4.4 and Node.js 26.13.0 (LTS), and
+  refresh exact dependency, npm, GitHub Action, maturin and uv pins to current
+  releases; rmcp stays at 3.5.0 pending its lifecycle migration.
 - Move tokio to 1.54.1, past the `AsyncFd` I/O-safety advisory RUSTSEC-2026-0386.
 - Treat a Linux private-agent process that exits between opening and reading
   its `/proc` stat (ESRCH) as gone instead of failing concurrent `agent start`.
