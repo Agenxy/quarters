@@ -10,6 +10,9 @@ compatibility notes will be called out here.
   link during an atomic replacement as a replacement in progress and re-read it,
   instead of failing a concurrent `agent start`, `list` or `status` as corrupt;
   a real extra hard link still fails closed, and the error now names which.
+- Let `recover` read rollback state within the five-second management bound, so a
+  concurrent recovery queues instead of failing at the 500 ms observer bound;
+  read-only status keeps the short bound.
 - Always give an exited private-agent launcher its single relaunch, with its own
   five-second window, even after lock waits spent the shared startup budget, and
   report an agent that exits on every attempt as such instead of implying one.
