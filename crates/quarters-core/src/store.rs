@@ -12,7 +12,7 @@ mod rename;
 pub(crate) mod scan;
 mod upgrade;
 
-pub(crate) use private_read::read_private_file;
+pub(crate) use private_read::{REPLACED_FILE_READ_ATTEMPTS, read_private_file, replacement_backoff};
 
 pub use freeze::{FreezeReport, FreezeState};
 pub use host_fork::{HostForkFile, HostForkIneligible, HostForkMode, HostForkOptions, HostForkPolicy, HostForkReport};

@@ -9,14 +9,20 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 /// Bounded retries when a private file is caught mid atomic replacement.
-const REPLACED_FILE_READ_ATTEMPTS: u32 = 8;
+pub(crate) const REPLACED_FILE_READ_ATTEMPTS: u32 = 8;
+
+/// Exponential pause before retry `attempt`: 1, 2, 4 … 128 ms, at most 255 ms
+/// in total, so a reader outlasts real writer churn yet stays bounded.
+pub(crate) fn replacement_backoff(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_millis(1_u64 << attempt.min(REPLACED_FILE_READ_ATTEMPTS - 1))
+}
 
 pub(crate) fn read_private_file(path: &Path) -> Result<Vec<u8>> {
-    for _attempt in 0..REPLACED_FILE_READ_ATTEMPTS {
+    for attempt in 0..REPLACED_FILE_READ_ATTEMPTS {
         if let Some(bytes) = read_private_file_once(path)? {
             return Ok(bytes);
         }
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        std::thread::sleep(replacement_backoff(attempt));
     }
     Err(QuartersError::new(
         ErrorKind::ResourceLimit,
@@ -118,27 +124,37 @@ mod tests {
         let writer_flag = Arc::clone(&replacing);
         let writer_directory = directory.path().to_path_buf();
         let writer_path = path.clone();
+        // Real manifest and registry writers replace on discrete operations,
+        // so the writer is paced: hundreds of replacements, each racing many
+        // reads, rather than an adversarial hot loop no Quarters writer runs.
         let writer = std::thread::spawn(move || -> std::io::Result<()> {
-            let mut generation = 0_u32;
-            while writer_flag.load(Ordering::Acquire) {
+            for generation in 1..=300_u32 {
                 let temporary = writer_directory.join(format!(".manifest-{generation}.tmp"));
                 write_private_file(&temporary, format!("{{\"generation\":{generation}}}").as_bytes())
                     .map_err(std::io::Error::other)?;
                 fs::rename(&temporary, &writer_path)?;
-                generation = generation.wrapping_add(1);
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
+            writer_flag.store(false, Ordering::Release);
             Ok(())
         });
-        let mut result = Ok(());
-        for _read in 0..20_000 {
-            if let Err(error) = read_private_file(&path) {
-                result = Err(error);
-                break;
+        let mut reads = 0_u32;
+        let mut failure = None;
+        while replacing.load(Ordering::Acquire) {
+            match read_private_file(&path) {
+                Ok(_bytes) => reads += 1,
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
             }
         }
         replacing.store(false, Ordering::Release);
         writer.join().map_err(|_panic| "writer panicked")??;
-        result?;
+        if let Some(error) = failure {
+            return Err(format!("a read failed during paced replacement ({:?}): {error}", error.kind()).into());
+        }
+        assert!(reads > 300, "the reader raced too few replacements: {reads}");
         Ok(())
     }
 }
