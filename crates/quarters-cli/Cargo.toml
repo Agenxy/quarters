@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+nix = { workspace = true, features = ["mount"] }
 tempfile.workspace = true
 
 [lints]
