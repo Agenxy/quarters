@@ -14,6 +14,9 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use tempfile::TempDir;
 
+#[path = "support/grant_probes.rs"]
+mod grant_probes;
+
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
     command.arg("--root").arg(root);
@@ -241,6 +244,7 @@ fn user_grants_are_data_only_explicit_and_workdir_bound() -> Result<(), Box<dyn 
         }
         return Ok(());
     }
+    grant_probes::install(&root.join("spaces/granted/home"))?;
 
     let read_only_arg = format!("{}:ro", read_only.display());
     let read_write_arg = format!("{}:rw", read_write.display());
@@ -260,10 +264,7 @@ fn user_grants_are_data_only_explicit_and_workdir_bound() -> Result<(), Box<dyn 
     let script = r#"
 test "$PWD" = "$1" || exit 30
 cat "$2/input" >/dev/null || exit 31
-if printf 'no\n' > "$2/blocked" 2>/dev/null; then exit 32; fi
 printf 'yes\n' > "$1/output" || exit 33
-if cat "$3/secret" >/dev/null 2>&1; then exit 34; fi
-if "$1/workspace-command" 2>/dev/null; then exit 35; fi
 "#;
     run(quarters(&root)
         .env("HOME", &host_home)
@@ -280,6 +281,14 @@ if "$1/workspace-command" 2>/dev/null; then exit 35; fi
         .arg(&read_write)
         .arg(&read_only)
         .arg(&sibling))?;
+    let grants = [read_only_arg.clone(), read_write_arg.clone()];
+    for (operation, path) in [
+        ("create", read_only.join("blocked")),
+        ("read", sibling.join("secret")),
+        ("execute", executable.clone()),
+    ] {
+        grant_probes::denied(&root, "granted", &grants, operation, &path)?;
+    }
     assert_eq!(fs::read(read_write.join("output"))?, b"yes\n");
     assert!(!read_only.join("blocked").exists());
     assert!(!read_write.join("executed").exists());
@@ -323,6 +332,8 @@ fn user_file_grants_apply_exact_access() -> Result<(), Box<dyn Error>> {
     fs::create_dir(&host_home)?;
     fs::write(&read_only, b"file-readable\n")?;
     fs::write(&read_write, b"file-original\n")?;
+    let sibling = temporary.path().join("sibling-file");
+    fs::write(&sibling, b"sibling\n")?;
     create(&root, &host_home, "files")?;
     if !confinement_available(&root, &host_home)? {
         if landlock_required() {
@@ -330,6 +341,7 @@ fn user_file_grants_apply_exact_access() -> Result<(), Box<dyn Error>> {
         }
         return Ok(());
     }
+    grant_probes::install(&root.join("spaces/files/home"))?;
     let read_only_arg = format!("{}:ro", read_only.display());
     let read_write_arg = format!("{}:rw", read_write.display());
     let plan = run(quarters(&root)
@@ -344,7 +356,6 @@ fn user_file_grants_apply_exact_access() -> Result<(), Box<dyn Error>> {
     verify_requested_grant(&plan, &read_write, "rw", "data-read-write-file")?;
     let script = r#"
 cat "$1" >/dev/null || exit 40
-if printf 'no\n' > "$1" 2>/dev/null; then exit 41; fi
 printf 'file-written\n' > "$2" || exit 42
 "#;
     run(quarters(&root)
@@ -357,6 +368,17 @@ printf 'file-written\n' > "$2" || exit 42
         .args(["--", "/bin/sh", "-c", script, "_"])
         .arg(&read_only)
         .arg(&read_write))?;
+    let grants = [read_only_arg, read_write_arg];
+    for (operation, path) in [
+        ("write", read_only.clone()),
+        ("read", sibling.clone()),
+        ("create", temporary.path().join("forbidden-new-file")),
+        ("list", temporary.path().to_path_buf()),
+        ("unlink", sibling.clone()),
+        ("unlink", read_write.clone()),
+    ] {
+        grant_probes::denied(&root, "files", &grants, operation, &path)?;
+    }
     assert_eq!(fs::read(&read_only)?, b"file-readable\n");
     assert_eq!(fs::read(&read_write)?, b"file-written\n");
     remove(&root, &host_home, "files")?;

@@ -9,6 +9,7 @@ compatibility notes will be called out here.
 - Relicense from Apache-2.0 to GPL-3.0-or-later from this release onward, with
   a commercial licence available from Agenxy. Releases through 0.1.0-alpha.2
   remain Apache-2.0.
+- Move tokio to 1.54.1, past the `AsyncFd` I/O-safety advisory RUSTSEC-2026-0386.
 - Treat a Linux private-agent process that exits between opening and reading
   its `/proc` stat (ESRCH) as gone instead of failing concurrent `agent start`.
 - Report an empty unnamed `status` for a store that does not exist yet instead
