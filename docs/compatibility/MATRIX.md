@@ -38,7 +38,9 @@ current host. It does not read credentials.
 | GnuPG | B | `GNUPGHOME`, short runtime | external keychain or hardware identity remains host hardware |
 | Python | A | `HOME`, XDG | system and site packages remain shared |
 | uv | B | cache, Python and tool directory variables | host binaries remain shared |
-| Cargo | B | `CARGO_HOME`; confined mode also redirects `RUSTUP_HOME` and keeps Quarter Cargo bins on PATH | baseline system and rustup toolchains may remain shared |
+| Cargo | B | `CARGO_HOME`, with Quarter Cargo bins ahead of the host PATH; confined mode also redirects `RUSTUP_HOME` | baseline system and rustup toolchains may remain shared |
+| Go | A | default `GOPATH` under the Quarter `HOME`, with `~/go/bin` ahead of the host PATH | host Go toolchain and module proxy settings remain shared |
+| Bun | A | default install root under the Quarter `HOME`, with `~/.bun/bin` ahead of the host PATH | host Bun executable remains shared unless installed in the Quarter |
 | npm | B | user config and cache; confined mode uses a Quarter-local prefix | baseline global system prefix remains shared |
 | Codex | B/D | `CODEX_HOME` | OS keychain, permissions and login session remain host-bound |
 | Claude Code | B/D | `CLAUDE_CONFIG_DIR` | OS keychain, permissions and login session remain host-bound |

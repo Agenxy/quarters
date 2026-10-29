@@ -6,6 +6,9 @@ compatibility notes will be called out here.
 
 ## 0.1.0-alpha.4 — unreleased
 
+- Search the Quarter's own `~/.local/bin`, `~/.cargo/bin`, `~/go/bin` and
+  `~/.bun/bin` before the host PATH, so a tool installed inside a Quarter is the
+  one that runs (ADR 0013).
 - Always give an exited private-agent launcher its single relaunch, with its own
   five-second window, even after lock waits spent the shared startup budget, and
   report an agent that exits on every attempt as such instead of implying one.
