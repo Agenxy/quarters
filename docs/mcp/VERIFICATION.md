@@ -38,14 +38,23 @@ The MCP adapter is acceptable only when all of these remain true.
 - valid traffic can recover after a non-terminal parse or metadata error
 - notifications before lifecycle selection are ignored without selecting a
   protocol family or closing the stream
-- duplicate live IDs and overlong IDs are terminal protocol violations
+- duplicate live IDs and overlong IDs are terminal protocol violations; an ID
+  whose request the client cancelled is not, because its operation may still be
+  finishing
 - legacy IDs cannot be reused, including IDs rejected at active capacity
 - every decodable request in a 200-request capacity burst receives either its
   result or a bounded capacity error, and a later request still succeeds
 - decoded transport errors are owned by a bounded writer actor, so cancellation
   of the SDK receive future cannot silently discard them
-- an end-to-end blocked status call proves cancellation suppresses delivery,
-  lets the filesystem operation finish and releases its request ID for reuse
+- a request cancelled before its handler starts releases its ID and capacity at
+  once; a cancelled running handler keeps its slot until it finishes
+- reusing a cancelled ID waits, for at most five seconds, for its operation to
+  finish and is then admitted; the request is held by the transport, so a
+  dropped receive cannot lose it, and an ID still held after the bound receives
+  a non-terminal error
+- an end-to-end blocked status call proves cancellation is graceful: a late
+  response for the cancelled ID is tolerated as the specification allows, and
+  the session keeps serving fresh requests
 - stalled output cannot produce unbounded request or error queues
 
 ## Stored-state hostility

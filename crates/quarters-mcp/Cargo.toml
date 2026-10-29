@@ -22,6 +22,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 fs4.workspace = true
 jsonschema.workspace = true
 rmcp = { workspace = true, features = ["client"] }
