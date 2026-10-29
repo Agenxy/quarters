@@ -75,6 +75,7 @@ fn retire_space(spaces_root: &Path, trash_root: &Path, name: &str) -> Result<Ret
     let file = open_private_lock(&lock_path)?;
     lock_for_removal(&file, &lock_path, name)?;
     verify_held_lock(&file, &lock_path)?;
+    lifecycle::ensure_cleanup_depth(&space_path)?;
     create_private_dir(trash_root)?;
     let retired = trash_root.join(format!(".retired-{}", unique_suffix()?));
     identity.verify_directory(&space_path, "reinspect removal target")?;
@@ -141,4 +142,66 @@ fn delete_retired_space(retired: &RetiredSpace, name: &str) -> Result<()> {
             "space '{name}' was removed, but directory durability could not be confirmed; inspect status before retrying"
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ErrorKind, HostEnvironment, SpaceName, Store};
+    use std::error::Error;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+
+    fn store_with_space(root: &Path, name: &str) -> Result<(Store, crate::Space), Box<dyn Error>> {
+        let store = Store::new(root.join("root"))?;
+        let space = store.create(SpaceName::parse(name)?, PathBuf::from("/bin/sh"))?;
+        Ok((store, space))
+    }
+
+    #[test]
+    fn removal_clears_a_read_only_module_cache_larger_than_any_entry_bound() -> Result<(), Box<dyn Error>> {
+        let temporary = tempfile::TempDir::new()?;
+        let (store, space) = store_with_space(temporary.path(), "gocache")?;
+        let host = HostEnvironment::capture();
+        let runtime = crate::platform::runtime_directory(&space, &host)?;
+        // Go keeps its module cache read-only, and a large one holds more
+        // than 131,072 entries, the bound removal used to stop at.
+        let cache = space.home().join("go/pkg/mod");
+        for module in 0..132 {
+            let directory = cache.join(format!("example.com/m{module}@v1.0.0"));
+            fs::create_dir_all(&directory)?;
+            for file in 0..1_000 {
+                fs::File::create(directory.join(format!("f{file}.go")))?;
+            }
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o555))?;
+        }
+        fs::set_permissions(cache.join("example.com"), fs::Permissions::from_mode(0o555))?;
+        fs::set_permissions(&cache, fs::Permissions::from_mode(0o555))?;
+
+        store.remove("gocache")?;
+
+        assert!(!store.root().join("spaces/gocache").exists());
+        assert_eq!(fs::read_dir(store.root().join("trash"))?.count(), 0);
+        assert!(!runtime.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn an_overdeep_space_fails_in_place_instead_of_stranding_in_trash() -> Result<(), Box<dyn Error>> {
+        let temporary = tempfile::TempDir::new()?;
+        let (store, space) = store_with_space(temporary.path(), "deep")?;
+        let mut nested = space.home().clone();
+        for _ in 0..=256 {
+            nested.push("d");
+        }
+        fs::create_dir_all(&nested)?;
+
+        let error = store.remove("deep").err().ok_or("over-deep removal must fail")?;
+
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+        assert!(store.root().join("spaces/deep/.quarters.json").is_file());
+        let trash = store.root().join("trash");
+        assert!(!trash.exists() || fs::read_dir(trash)?.count() == 0);
+        Ok(())
+    }
 }

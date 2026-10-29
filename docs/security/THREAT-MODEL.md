@@ -77,7 +77,7 @@ policy.
 | Symlinked or broadly accessible space anchors | No-follow type, ownership and private-mode validation for roots, homes, manifests and locks |
 | Damaged entry hides healthy siblings | Inspection reports each entry independently with machine-readable health |
 | Unsafe removal of damaged state | Removal requires the exact validated private root and activity lock, not a readable home or manifest |
-| Cleanup resource exhaustion | Iterative private cleanup refuses trees deeper than 256 levels or containing more than 131,072 descendant directories and leaves them recoverable for manual inspection |
+| Cleanup resource exhaustion | Iterative private cleanup holds bounded memory: it refuses trees deeper than 256 levels or needing more than 131,072 directories queued at once, without capping total tree size. `rm` checks both bounds before retirement, so a refused space stays in place; a refused retired tree stays recoverable for manual inspection |
 | Credential environment leakage | `env_clear()` plus safe allowlist; explicit values are redacted |
 | Profile override through explicit inheritance | `--inherit` rejects every Quarters-owned state variable |
 | Prompt-code injection | Prompt-expanded values come only from the validated ASCII name; roots and stored text never reach prompt expansion |

@@ -252,9 +252,12 @@ never removal targets. A losing concurrent creation is cleaned automatically.
 `recover --confirm stale-state` retires only those reserved, private-directory
 prefixes while holding the bounded management lock, then performs potentially
 large deletion after releasing it.
-Cleanup is iterative and fails closed beyond 256 directory levels or 131,072
-descendant directories. Such a retired tree is retained for exact-path manual
-inspection; Quarters does not partially guess at deletion. On Linux, restoring
+Cleanup is iterative and removes a tree of any size. Its memory is bounded by
+failing closed beyond 256 directory levels or 131,072 directories queued at
+once. `quarters rm` checks both bounds before retiring a space, so a space
+outside them stays in place; a retired tree that still exceeds them is retained
+for exact-path manual inspection, and Quarters does not partially guess at
+deletion. On Linux, restoring
 mode-`000` directories requires working no-follow `fchmodat` support, which may
 depend on `/proc` on older libc/kernel combinations.
 If recovery metadata is corrupt, `doctor` keeps reporting platform and tool
