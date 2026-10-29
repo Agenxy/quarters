@@ -491,6 +491,7 @@ encrypted-at-rest storage and supported macOS confinement remain unavailable.
 - [Private agent lifecycle](docs/architecture/ADR-0005-PRIVATE-AGENT-LIFECYCLE.md)
 - [Storage migration and runtime identity](docs/architecture/ADR-0006-STORAGE-MIGRATION-AND-RUNTIME-IDENTITY.md)
 - [Linux Landlock confinement](docs/architecture/ADR-0011-LINUX-LANDLOCK-CONFINEMENT.md)
+- [Quarter toolchain PATH precedence](docs/architecture/ADR-0013-QUARTER-TOOLCHAIN-PATH-PRECEDENCE.md)
 - [Maximum native isolation](docs/architecture/ADR-0007-MAXIMUM-NATIVE-ISOLATION.md)
 - [Lifecycle artifacts and rollback](docs/architecture/ADR-0008-LIFECYCLE-ARTIFACTS-AND-ROLLBACK.md)
 - [Authenticated portable bundles](docs/architecture/ADR-0009-AUTHENTICATED-BUNDLES.md)
