@@ -167,6 +167,8 @@ pub struct DiscoveryObservation {
     pub unstable_entries: u64,
     /// Entries not owned by the current UID.
     pub foreign_owned: u64,
+    /// Mounted network or FUSE filesystems that were not entered.
+    pub non_local_filesystems: u64,
     /// Whether a selected root's filesystem identity changed between phases.
     pub root_identity_changed: bool,
     /// Metadata or directory-stream errors not otherwise classified.
@@ -322,6 +324,9 @@ pub(super) fn report(
         foreign_owned: pre
             .foreign_owned
             .saturating_add(post.map_or(0, |value| value.foreign_owned)),
+        non_local_filesystems: pre
+            .non_local_filesystems
+            .saturating_add(post.map_or(0, |value| value.non_local_filesystems)),
         root_identity_changed,
         metadata_errors: pre
             .metadata_errors

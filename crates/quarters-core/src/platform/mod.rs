@@ -5,12 +5,14 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+mod report_descriptor;
 mod working_directory;
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 compile_error!("Quarters currently supports macOS and Linux only");
 
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result, Space};
 use nix::unistd::Uid;
+pub use report_descriptor::open_report_descriptor;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -87,11 +89,22 @@ pub struct ConfinedExecutable {
 }
 
 impl ConfinedExecutable {
-    /// Consume the stable executable into its diagnostic path and descriptor.
-    #[must_use]
-    pub fn into_parts(self) -> (PathBuf, File) {
-        (self.path, self.descriptor)
+    /// Replace the current process with this executable through its held
+    /// descriptor, passing `arguments` and the current environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the platform cannot execute a descriptor or the
+    /// kernel refuses the replacement; on success it does not return.
+    pub fn exec(self, arguments: &[OsString]) -> Result<std::convert::Infallible> {
+        platform_exec_descriptor(&self.descriptor, &self.path, arguments)
     }
+}
+
+/// Normalize a platform `st_dev` into one unsigned device number.
+#[must_use]
+pub fn device_number(device: nix::libc::dev_t) -> u64 {
+    platform_device_number(device)
 }
 
 /// Access requested for one invocation-local host data grant.
@@ -242,6 +255,12 @@ pub(crate) fn existing_runtime_directory(space: &Space, host: &HostEnvironment) 
         )
         .with_hint("inspect the exact private runtime paths; Quarters will not guess which state is authoritative")),
     }
+}
+
+/// Whether `directory` is on a local filesystem, so traversing it cannot block
+/// on a network peer or a FUSE daemon.
+pub(crate) fn filesystem_is_local(directory: &nix::dir::Dir) -> nix::Result<bool> {
+    platform_filesystem_is_local(directory)
 }
 
 /// Re-key an existing released or transitional legacy runtime.
@@ -550,15 +569,17 @@ pub fn resolve_confined_executable(
 #[cfg(target_os = "linux")]
 use linux::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
-    platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
+    platform_device_number, platform_directory_open_flags, platform_enter_filesystem_confinement,
+    platform_enter_home_view, platform_exec_descriptor, platform_extend_environment, platform_filesystem_is_local,
+    platform_open_report_descriptor, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
     platform_runtime_base, platform_workspace_directories,
 };
 #[cfg(target_os = "macos")]
 use macos::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
-    platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
+    platform_device_number, platform_directory_open_flags, platform_enter_filesystem_confinement,
+    platform_enter_home_view, platform_exec_descriptor, platform_extend_environment, platform_filesystem_is_local,
+    platform_open_report_descriptor, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
     platform_runtime_base, platform_workspace_directories,
 };
 

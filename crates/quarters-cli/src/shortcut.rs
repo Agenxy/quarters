@@ -284,21 +284,11 @@ fn remove_exact_shortcut(directory: &Path, entry: &Path, target: &Path, identity
 
 fn shortcut_stat_identity(metadata: &nix::libc::stat) -> ShortcutIdentity {
     ShortcutIdentity {
-        device: normalized_device(metadata.st_dev),
+        device: quarters_core::platform::device_number(metadata.st_dev),
         inode: metadata.st_ino,
         change_seconds: metadata.st_ctime,
         change_nanoseconds: metadata.st_ctime_nsec,
     }
-}
-
-#[cfg(target_os = "linux")]
-const fn normalized_device(device: nix::libc::dev_t) -> u64 {
-    device
-}
-
-#[cfg(target_os = "macos")]
-fn normalized_device(device: nix::libc::dev_t) -> u64 {
-    u64::from(device.cast_unsigned())
 }
 
 fn open_install_directory(directory: &Path) -> Result<fs::File> {
