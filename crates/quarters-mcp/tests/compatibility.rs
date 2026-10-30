@@ -217,6 +217,42 @@ async fn modern_ping_is_a_removed_method() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Prompts and completions are not advertised in either revision, so their
+/// methods are unknown rather than answered with empty results.
+#[tokio::test]
+async fn unadvertised_prompts_and_completions_are_unknown_methods() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let (server_io, client_io) = tokio::io::duplex(16 * 1_024);
+    let server_task = spawn_server(directory.path().join("quarters"), server_io)?;
+    let mut client = IntoTransport::<RoleClient, _, _>::into_transport(client_io);
+    let requests = [
+        json!({"_meta": modern_meta("unadvertised-test")}),
+        json!({
+            "_meta": modern_meta("unadvertised-test"),
+            "ref": {"type": "ref/prompt", "name": "absent"},
+            "argument": {"name": "argument", "value": "value"}
+        }),
+    ];
+    for (id, (method, params)) in ["prompts/list", "completion/complete"]
+        .into_iter()
+        .zip(requests)
+        .enumerate()
+    {
+        client
+            .send(message(
+                json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+            )?)
+            .await?;
+        let ServerJsonRpcMessage::Error(error) = receive(&mut client).await? else {
+            return Err(io::Error::other(format!("{method} was answered although not advertised")).into());
+        };
+        assert_eq!(error.error.code, rmcp::model::ErrorCode::METHOD_NOT_FOUND, "{method}");
+    }
+    drop(client);
+    server_task.await??;
+    Ok(())
+}
+
 /// MCP 2026-07-28 versioning, "Backward Compatibility with Initialization-Based
 /// Versions": a dual-era server serves modern `_meta` requests statelessly and
 /// opens legacy semantics only on `initialize`. A bare ping carries no modern
