@@ -290,6 +290,22 @@ pub(crate) fn remove_runtime_directory(space: &Space, host: &HostEnvironment) ->
     crate::store::sync_directory(parent)
 }
 
+/// Remove the runtime a published alpha gave a space that was rooted at
+/// `space_root` and no longer exists.
+pub(crate) fn remove_published_alpha_runtime(name: &str, space_root: &Path, host: &HostEnvironment) -> Result<()> {
+    let runtime = published_alpha_runtime_path(name, space_root, host);
+    if !existing_valid_runtime_directory(&runtime, Uid::current().as_raw())? {
+        return Ok(());
+    }
+    crate::store::lifecycle::remove_tree_restoring_owner_access(&runtime)?;
+    crate::store::sync_directory(&runtime_namespace(host, Uid::current().as_raw()))
+}
+
+/// Where a published alpha put the runtime of a space rooted at `space_root`.
+pub(crate) fn published_alpha_runtime_path(name: &str, space_root: &Path, host: &HostEnvironment) -> PathBuf {
+    runtime_namespace(host, Uid::current().as_raw()).join(published_alpha_runtime_name(name, space_root))
+}
+
 fn ensure_owned_private_directory(path: &Path, uid: u32) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => return validate_runtime_directory(path, uid, &metadata),
@@ -383,12 +399,16 @@ fn pre_alpha4_runtime_identity(space: &Space) -> String {
 /// The runtime name the published alpha.1 and alpha.2 releases used: the
 /// space name and a 32-bit FNV-1a fingerprint of its root.
 fn published_alpha_runtime_identity(space: &Space) -> String {
+    published_alpha_runtime_name(space.manifest().name.as_str(), space.root())
+}
+
+fn published_alpha_runtime_name(name: &str, space_root: &Path) -> String {
     let mut hash = 2_166_136_261_u32;
-    for byte in space.root().as_os_str().as_encoded_bytes() {
+    for byte in space_root.as_os_str().as_encoded_bytes() {
         hash ^= u32::from(*byte);
         hash = hash.wrapping_mul(16_777_619);
     }
-    format!("{}-{hash:08x}", space.manifest().name)
+    format!("{name}-{hash:08x}")
 }
 
 fn path_fingerprint(path: &Path) -> u64 {

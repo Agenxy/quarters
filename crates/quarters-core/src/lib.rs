@@ -14,6 +14,7 @@ mod store_concurrency_tests;
 mod store_lock;
 mod store_policy;
 mod store_recovery;
+mod store_recovery_published;
 mod text;
 
 pub mod platform;
