@@ -9,7 +9,13 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
+
+#[path = "support/agent_guard.rs"]
+mod agent_guard;
+use agent_guard::AgentGuard;
 
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
@@ -76,6 +82,7 @@ fn private_agent_refuses_an_overlong_socket_path() -> Result<(), Box<dyn Error>>
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700))?;
     create(&root, &host_home, "long-socket")?;
 
+    let _agent = AgentGuard::new(&root, &["long-socket"]);
     let output = quarters(&root)
         .env("HOME", &host_home)
         .env("XDG_RUNTIME_DIR", &runtime)
