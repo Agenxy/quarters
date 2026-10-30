@@ -34,7 +34,7 @@ pub(crate) struct ProfileLaunch<'a> {
 pub(crate) struct PreparedProfileLaunch {
     environment: EnvironmentPlan,
     confinement: Option<quarters_core::ConfinementPlan>,
-    baseline_workdir: Option<PathBuf>,
+    baseline_workdir: Option<platform::WorkingDirectory>,
 }
 
 impl PreparedProfileLaunch {
@@ -132,7 +132,7 @@ impl ProfileLaunch<'_> {
                 program,
                 arguments,
                 &prepared.environment,
-                prepared.baseline_workdir.as_deref(),
+                prepared.baseline_workdir.as_ref(),
             )?
         };
         Ok(status)
@@ -244,7 +244,7 @@ impl ProfileLaunch<'_> {
         self.resolved_baseline_workdir().map(|_path| ())
     }
 
-    fn resolved_baseline_workdir(&self) -> Result<Option<PathBuf>> {
+    fn resolved_baseline_workdir(&self) -> Result<Option<platform::WorkingDirectory>> {
         self.working_directory
             .map(platform::resolve_existing_working_directory)
             .transpose()
@@ -374,12 +374,9 @@ pub(crate) fn linux_launch(request: &LinuxLaunchRequest<'_>) -> Result<i32> {
         platform::enter_home_view(request.space_home, host_home, request.runtime)?;
     }
     if let Some(plan) = confinement_plan.as_ref() {
-        std::env::set_current_dir(&plan.working_directory).map_err(|error| {
-            QuartersError::io("enter the confined working directory", &plan.working_directory, error)
-        })?;
+        plan.working_directory.enter()?;
     } else if let Some(workdir) = baseline_workdir {
-        std::env::set_current_dir(&workdir)
-            .map_err(|error| QuartersError::io("enter requested working directory", &workdir, error))?;
+        workdir.enter()?;
     }
     let confined_executable = if let Some(plan) = confinement_plan.as_ref() {
         let mapped = map_home_view_program(program, request.space_home, effective_home);
@@ -498,12 +495,15 @@ fn run_direct(
     program: &OsStr,
     arguments: &[OsString],
     environment: &EnvironmentPlan,
-    working_directory: Option<&Path>,
+    working_directory: Option<&platform::WorkingDirectory>,
 ) -> Result<ExitStatus> {
     let mut command = Command::new(program);
     command.args(arguments);
+    // The child inherits this process's directory, entered by verified
+    // identity; a path given to the child would be resolved again after fork.
+    // Every later path this process uses is absolute.
     if let Some(directory) = working_directory {
-        command.current_dir(directory);
+        directory.enter()?;
     }
     environment.apply(&mut command);
     command

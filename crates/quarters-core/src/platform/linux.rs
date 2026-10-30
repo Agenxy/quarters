@@ -59,6 +59,16 @@ pub(super) fn platform_resolve_confined_executable(
 
 pub(super) fn platform_extend_environment(_values: &mut BTreeMap<OsString, OsString>, _home: &Path) {}
 
+/// Directory descriptors only need to be entered and inspected, so Linux opens
+/// them as `O_PATH`, which also works for search-only directories.
+pub(super) fn platform_directory_open_flags() -> i32 {
+    (nix::fcntl::OFlag::O_PATH
+        | nix::fcntl::OFlag::O_DIRECTORY
+        | nix::fcntl::OFlag::O_NOFOLLOW
+        | nix::fcntl::OFlag::O_CLOEXEC)
+        .bits()
+}
+
 pub(super) fn platform_runtime_base(host: &HostEnvironment) -> PathBuf {
     let environment_home = host.get("HOME").map(Path::new);
     let passwd_home = nix::unistd::User::from_uid(Uid::current())

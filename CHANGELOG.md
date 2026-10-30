@@ -276,6 +276,9 @@ compatibility notes will be called out here.
 - Validate stored names during deserialization and escape terminal control
   characters without damaging printable Unicode.
 - Request npm provenance attestations for every native and launcher package.
+- Enter `--workdir` by identity: the directory's device and inode are recorded
+  when it is validated, and the launch changes into a descriptor with that
+  identity, refusing a path replaced in between instead of following it.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 

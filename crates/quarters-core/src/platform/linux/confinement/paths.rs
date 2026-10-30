@@ -3,7 +3,9 @@
 
 use super::identity::{Anchor, existing_anchors};
 use super::mounts::MountTopology;
-use crate::platform::{ConfinedExecutable, ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess};
+use crate::platform::{
+    ConfinedExecutable, ConfinementGrant, ConfinementPlan, ConfinementRequest, UserGrantAccess, WorkingDirectory,
+};
 use crate::{ErrorKind, QuartersError, Result};
 use nix::unistd::Uid;
 use std::collections::BTreeSet;
@@ -454,24 +456,32 @@ fn resolve_working_directory(
     request: &ConfinementRequest<'_>,
     grants: &[ConfinementGrant],
     effective: &Path,
-) -> Result<PathBuf> {
+) -> Result<WorkingDirectory> {
     let Some(requested) = request.working_directory else {
-        return Ok(effective.to_path_buf());
+        // With a home view, the passwd home is later mounted from the Quarter
+        // home, so that is the directory the default entry must match.
+        let source = if request.home_view {
+            request.space_home
+        } else {
+            effective
+        };
+        return WorkingDirectory::identified(effective.to_path_buf(), source);
     };
-    let canonical = if request.home_view {
+    let directory = if request.home_view {
         crate::platform::resolve_home_view_working_directory(requested, request.space_home, request.effective_home)?
     } else {
         crate::platform::resolve_existing_working_directory(requested)?
     };
+    let canonical = directory.path();
     let space = request
         .space_home
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve Quarter home for working directory", request.space_home, error))?;
     if request.home_view && canonical.starts_with(effective) {
-        return Ok(canonical);
+        return Ok(directory);
     }
     if !request.home_view && canonical.starts_with(&space) {
-        return Ok(canonical);
+        return Ok(directory);
     }
     let data_granted = grants.iter().any(|grant| {
         grant.source == "user-granted"
@@ -479,7 +489,7 @@ fn resolve_working_directory(
             && canonical.starts_with(&grant.path)
     });
     if data_granted {
-        return Ok(canonical);
+        return Ok(directory);
     }
     Err(QuartersError::new(
         ErrorKind::Unsupported,
