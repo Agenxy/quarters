@@ -311,10 +311,20 @@ compatibility notes will be called out here.
 - Answer `prompts/list` and `completion/complete` with method-not-found:
   Quarters advertises neither capability, and rmcp's defaults returned empty
   results.
+- Run the release-binary test-hook guard on the binary each PyPI wheel
+  installs, and state in the README that the PyPI workflow builds and tests
+  wheels but nothing has been published there.
 - Make the quality gate refuse em dashes in repository text and files that
   start with a shell shebang, alongside the existing `.sh` refusal.
 - Move the CLI's remaining platform-specific code, the Linux descriptor exec
   and device-number normalization, behind the core platform module.
+- Watch every pin for drift: `quarters-quality drift` compares the Rust,
+  Bun, Node.js LTS, maturin, uv, npm and cargo-audit pins, every SHA-pinned
+  Action, every exact Cargo pin and the launcher's npm dev dependencies with
+  their upstream releases, and a daily workflow runs it beside a report-only
+  RustSec audit. The gate also refuses a workflow or document that names a
+  toolchain version other than the pin, and npm is now pinned (12.2.1) where
+  it publishes.
 - Audit Quarters against Agenxy's engineering standards
   (`docs/standards/ENGINEERING-AUDIT.md`) and enforce what the audit found:
   code lines at 120 characters, cyclomatic complexity 15, clippy cognitive

@@ -12,6 +12,7 @@ pub(crate) fn check_repository() -> Result<(), Vec<String>> {
     check_required_files(&root, &mut violations);
     check_distribution_versions(&root, &mut violations);
     check_mcp_network_dependency_gate(&root, &mut violations);
+    violations.extend(crate::drift::pins::consistency(&root));
     let files = rust_files(&root).map_err(|error| vec![error])?;
     for path in files {
         inspect_rust_file(&path, &mut violations);
