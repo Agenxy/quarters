@@ -1,0 +1,8 @@
+# Shell scripts the quality gate permits, one per line:
+#
+#   relative/path/from/repository/root  # why no compiled or uv alternative works
+#
+# An entry is a decision and is reviewed like one. Every entry needs a reason
+# after `#`, and its path must exist. Shell is permitted only where the
+# execution context accepts nothing else, such as a bootstrap step that runs
+# before any toolchain exists or a completion file a shell sources.

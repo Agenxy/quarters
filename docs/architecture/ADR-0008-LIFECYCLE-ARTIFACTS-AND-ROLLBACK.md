@@ -37,7 +37,7 @@ Non-cloneable management and lifecycle-lease tokens make lock ownership
 explicit. Whole-tree copy and hashing never hold the global management token.
 Rollback verifies first, then holds management continuously across a portable
 three-state transition: `prepared`, `retired`, `published`. The visible state is
-old, new or marked in progress—not an atomic exchange. Recovery validates state,
+old, new or marked in progress; it is not an atomic exchange. Recovery validates state,
 identity and filesystem tuples and never guesses. Recovery first moves the
 durable marker to a state whose next filesystem tuple remains accepted on
 retry; once the marker is removed, leftover staging is an independently
