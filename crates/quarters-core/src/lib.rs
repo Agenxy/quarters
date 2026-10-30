@@ -37,7 +37,7 @@ pub use model::{
 };
 pub use platform::{
     Capabilities, CapabilityStatus, ConfinementGrant, ConfinementPlan, ConfinementRequest, LegacyTiocstiStatus,
-    UserConfinementGrant, UserGrantAccess,
+    UserConfinementGrant, UserGrantAccess, WorkingDirectory,
 };
 pub use probe::{CompatibilityTier, ToolProbe, executable_matches, tool_probes};
 pub use store::artifact::{

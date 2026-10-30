@@ -5,6 +5,7 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+mod working_directory;
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 compile_error!("Quarters currently supports macOS and Linux only");
 
@@ -16,6 +17,7 @@ use std::ffi::OsString;
 use std::fs::{self, DirBuilder, File};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
+pub use working_directory::WorkingDirectory;
 
 /// Host feature inventory.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -154,7 +156,7 @@ pub struct ConfinementPlan {
     /// Oldest Landlock ABI whose complete rights are required.
     pub minimum_abi: u32,
     /// Directory selected as the launched process working directory.
-    pub working_directory: PathBuf,
+    pub working_directory: WorkingDirectory,
     /// Quarter-visible home that remains eligible to supply executables.
     pub quarter_command_root: PathBuf,
     /// Exact rules that would be applied.
@@ -438,7 +440,12 @@ pub fn enter_home_view(space_home: &Path, host_home: &Path, runtime: &Path) -> R
 ///
 /// Returns an error when the path is not absolute, cannot be resolved, or is
 /// not a directory.
-pub fn resolve_existing_working_directory(path: &Path) -> Result<PathBuf> {
+pub fn resolve_existing_working_directory(path: &Path) -> Result<WorkingDirectory> {
+    let canonical = canonical_working_directory(path)?;
+    WorkingDirectory::identified(canonical.clone(), &canonical)
+}
+
+fn canonical_working_directory(path: &Path) -> Result<PathBuf> {
     if !path.is_absolute() {
         return Err(QuartersError::new(
             ErrorKind::InvalidInput,
@@ -467,22 +474,29 @@ pub fn resolve_existing_working_directory(path: &Path) -> Result<PathBuf> {
 ///
 /// Returns an error for a non-absolute or missing directory, an invalid home
 /// root, or a passwd-home path without a Quarter counterpart.
-pub fn resolve_home_view_working_directory(path: &Path, space_home: &Path, effective_home: &Path) -> Result<PathBuf> {
-    let canonical = resolve_existing_working_directory(path)?;
+pub fn resolve_home_view_working_directory(
+    path: &Path,
+    space_home: &Path,
+    effective_home: &Path,
+) -> Result<WorkingDirectory> {
+    let canonical = canonical_working_directory(path)?;
     let space = space_home
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve Quarter home for working directory", space_home, error))?;
     let host = effective_home
         .canonicalize()
         .map_err(|error| QuartersError::io("resolve passwd home for working directory", effective_home, error))?;
+    // A Quarter-home directory is entered through the passwd-home mount of
+    // the same directory, so its identity comes from the stored copy.
     if let Ok(relative) = canonical.strip_prefix(&space) {
-        return Ok(host.join(relative));
+        return WorkingDirectory::identified(host.join(relative), &canonical);
     }
     let Ok(relative) = canonical.strip_prefix(&host) else {
-        return Ok(canonical);
+        return WorkingDirectory::identified(canonical.clone(), &canonical);
     };
-    if space.join(relative).is_dir() {
-        return Ok(host.join(relative));
+    let counterpart = space.join(relative);
+    if counterpart.is_dir() {
+        return WorkingDirectory::identified(host.join(relative), &counterpart);
     }
     Err(QuartersError::new(
         ErrorKind::Unsupported,
@@ -536,16 +550,16 @@ pub fn resolve_confined_executable(
 #[cfg(target_os = "linux")]
 use linux::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
-    platform_enter_filesystem_confinement, platform_enter_home_view, platform_extend_environment,
-    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
-    platform_workspace_directories,
+    platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
+    platform_extend_environment, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
+    platform_runtime_base, platform_workspace_directories,
 };
 #[cfg(target_os = "macos")]
 use macos::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
-    platform_enter_filesystem_confinement, platform_enter_home_view, platform_extend_environment,
-    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
-    platform_workspace_directories,
+    platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
+    platform_extend_environment, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
+    platform_runtime_base, platform_workspace_directories,
 };
 
 #[cfg(target_os = "macos")]
@@ -563,7 +577,9 @@ mod tests {
 
     use nix::unistd::Uid;
 
-    use super::{ensure_owned_private_directory, resolve_home_view_working_directory};
+    use super::{
+        ensure_owned_private_directory, resolve_existing_working_directory, resolve_home_view_working_directory,
+    };
 
     #[test]
     fn existing_runtime_permissions_are_never_repaired() -> Result<(), Box<dyn std::error::Error>> {
@@ -593,12 +609,12 @@ mod tests {
         std::fs::create_dir(&host)?;
         let expected = host.canonicalize()?.join("project");
         assert_eq!(
-            resolve_home_view_working_directory(&space.join("project"), &space, &host)?,
+            resolve_home_view_working_directory(&space.join("project"), &space, &host)?.path(),
             expected
         );
         std::fs::create_dir(host.join("project"))?;
         assert_eq!(
-            resolve_home_view_working_directory(&host.join("project"), &space, &host)?,
+            resolve_home_view_working_directory(&host.join("project"), &space, &host)?.path(),
             expected
         );
         Ok(())
@@ -612,10 +628,34 @@ mod tests {
         std::fs::create_dir(&space)?;
         std::fs::create_dir_all(host.join("host-only"))?;
         let error = match resolve_home_view_working_directory(&host.join("host-only"), &space, &host) {
-            Ok(path) => return Err(format!("host-only workdir unexpectedly mapped to {}", path.display()).into()),
+            Ok(path) => {
+                return Err(format!("host-only workdir unexpectedly mapped to {}", path.path().display()).into());
+            }
             Err(error) => error,
         };
         assert!(error.to_string().contains("has no Quarter counterpart"));
+        Ok(())
+    }
+
+    // Only refusals are exercised here: a successful entry would move the
+    // working directory of every concurrently running test.
+    #[test]
+    fn a_working_directory_replaced_after_validation_is_refused() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let project = directory.path().join("project");
+        std::fs::create_dir(&project)?;
+        let validated = resolve_existing_working_directory(&project)?;
+        let before = std::env::current_dir()?;
+
+        std::fs::rename(&project, directory.path().join("moved"))?;
+        std::fs::create_dir(&project)?;
+        let replaced = validated.enter().err().ok_or("a replaced directory was entered")?;
+        assert_eq!(replaced.kind(), crate::ErrorKind::CorruptState);
+
+        std::fs::remove_dir(&project)?;
+        symlink(directory.path().join("moved"), &project)?;
+        assert!(validated.enter().is_err(), "a directory swapped for a link was entered");
+        assert_eq!(std::env::current_dir()?, before);
         Ok(())
     }
 }

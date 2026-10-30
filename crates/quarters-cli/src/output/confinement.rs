@@ -40,7 +40,7 @@ fn print_human_plan(plan: &quarters_core::ConfinementPlan) {
     println!(
         "Confinement=filesystem (Landlock ABI {}+, cwd {})",
         plan.minimum_abi,
-        bounded_path_for_human(&plan.working_directory)
+        bounded_path_for_human(plan.working_directory.path())
     );
     println!("ConfinementGrants={}", plan.grants.len());
     println!("ConfinementOmittedHostPathEntries={}", plan.omitted_host_path_entries);
@@ -73,7 +73,7 @@ pub(super) fn value(plan: &quarters_core::ConfinementPlan) -> Value {
     json!({
         "mode": safe_json_text(&plan.mode, 32),
         "minimum_abi": plan.minimum_abi,
-        "working_directory": safe_json_path(&plan.working_directory),
+        "working_directory": safe_json_path(plan.working_directory.path()),
         "quarter_command_root": safe_json_path(&plan.quarter_command_root),
         "grants": grants,
         "omitted_paths": plan.omitted_paths.iter().map(|path| safe_json_path(path)).collect::<Vec<_>>(),

@@ -289,6 +289,9 @@ compatibility notes will be called out here.
   `rm` failed, including that space's alpha runtime directory. An entry whose
   lease is still held, and the runtime of a space recreated under the same
   name, are left alone.
+- Enter `--workdir` by identity: the directory's device and inode are recorded
+  when it is validated, and the launch changes into a descriptor with that
+  identity, refusing a path replaced in between instead of following it.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 

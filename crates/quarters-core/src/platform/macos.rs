@@ -45,6 +45,15 @@ pub(super) fn platform_extend_environment(values: &mut BTreeMap<OsString, OsStri
     values.insert("CFFIXED_USER_HOME".into(), home.as_os_str().to_owned());
 }
 
+/// macOS has no `O_PATH`, so a directory is opened read-only to be entered.
+pub(super) fn platform_directory_open_flags() -> i32 {
+    (nix::fcntl::OFlag::O_RDONLY
+        | nix::fcntl::OFlag::O_DIRECTORY
+        | nix::fcntl::OFlag::O_NOFOLLOW
+        | nix::fcntl::OFlag::O_CLOEXEC)
+        .bits()
+}
+
 pub(super) fn platform_runtime_base(_host: &HostEnvironment) -> PathBuf {
     PathBuf::from("/tmp")
 }
