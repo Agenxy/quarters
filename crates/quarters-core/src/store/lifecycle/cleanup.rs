@@ -12,8 +12,11 @@ use std::path::Path;
 
 use super::identity::PathIdentity;
 
+/// Cleanup bounds the memory it holds, not the size of the tree: depth, and
+/// directories queued at once. A home of any size, such as a Go module cache,
+/// stays removable.
 const MAX_PRIVATE_REMOVAL_DEPTH: u32 = 256;
-const MAX_PRIVATE_REMOVAL_ENTRIES: usize = 131_072;
+const MAX_PRIVATE_REMOVAL_PENDING: usize = 131_072;
 
 pub(crate) fn remove_tree_restoring_owner_access(path: &Path) -> Result<()> {
     remove_tree(path, None)
@@ -58,7 +61,6 @@ fn verify_expected_identity(identity: Option<PathIdentity>, metadata: &fs::Metad
 
 fn restore_tree_access(root: &Path) -> Result<()> {
     let mut pending = vec![(root.to_path_buf(), 0_u32)];
-    let mut observed = 0_usize;
     while let Some((path, depth)) = pending.pop() {
         if depth > MAX_PRIVATE_REMOVAL_DEPTH {
             return Err(cleanup_limit_error("directory depth"));
@@ -66,7 +68,7 @@ fn restore_tree_access(root: &Path) -> Result<()> {
         if !restore_directory_access(&path)? {
             continue;
         }
-        collect_child_directories(&path, depth, &mut pending, &mut observed)?;
+        collect_child_directories(&path, depth, &mut pending)?;
     }
     Ok(())
 }
@@ -141,12 +143,7 @@ fn restore_directory_access(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn collect_child_directories(
-    path: &Path,
-    depth: u32,
-    pending: &mut Vec<(std::path::PathBuf, u32)>,
-    observed: &mut usize,
-) -> Result<()> {
+fn collect_child_directories(path: &Path, depth: u32, pending: &mut Vec<(std::path::PathBuf, u32)>) -> Result<()> {
     let entries = match fs::read_dir(path) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -163,14 +160,42 @@ fn collect_child_directories(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(QuartersError::io("inspect private removal entry", &entry.path(), error)),
         };
-        *observed = observed.saturating_add(1);
-        if *observed > MAX_PRIVATE_REMOVAL_ENTRIES {
-            return Err(cleanup_limit_error("entry count"));
-        }
         if entry_metadata.file_type().is_dir() {
-            pending.push((entry.path(), depth.saturating_add(1)));
+            queue_directory(pending, entry.path(), depth)?;
         }
     }
+    Ok(())
+}
+
+/// Fail before a tree is retired when it is deeper than cleanup supports, so
+/// an unsupported space stays in place instead of being stranded in trash.
+/// Directories this probe cannot read are restored and checked by removal.
+pub(crate) fn ensure_cleanup_depth(root: &Path) -> Result<()> {
+    let mut pending = vec![(root.to_path_buf(), 0_u32)];
+    while let Some((path, depth)) = pending.pop() {
+        if depth > MAX_PRIVATE_REMOVAL_DEPTH {
+            return Err(cleanup_limit_error("directory depth")
+                .with_hint("the space was left in place; remove its deepest directories, then retry"));
+        }
+        let Ok(entries) = fs::read_dir(&path) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                queue_directory(&mut pending, entry.path(), depth).map_err(|error| {
+                    error.with_hint("the space was left in place; flatten its widest directories, then retry")
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn queue_directory(pending: &mut Vec<(std::path::PathBuf, u32)>, path: std::path::PathBuf, depth: u32) -> Result<()> {
+    if pending.len() >= MAX_PRIVATE_REMOVAL_PENDING {
+        return Err(cleanup_limit_error("number of queued directories"));
+    }
+    pending.push((path, depth.saturating_add(1)));
     Ok(())
 }
 
