@@ -13,9 +13,10 @@ use quarters_core::{
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CacheScope, DiscoverResult, Implementation, InitializeRequestParams, InitializeResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
-    ReadResourceResponse, ServerCapabilities, ServerConfig,
+    CacheScope, CompleteRequestMethod, CompleteRequestParams, CompleteResult, DiscoverResult, Implementation,
+    InitializeRequestParams, InitializeResult, ListPromptsRequestMethod, ListPromptsResult,
+    ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
@@ -465,6 +466,24 @@ impl ServerHandler for QuartersMcp {
         context: RequestContext<rmcp::RoleServer>,
     ) -> impl Future<Output = Result<ListResourcesResult, ErrorData>> + Send + '_ {
         std::future::ready(Ok(resources::list(supports_cache_hints(&context))))
+    }
+
+    // Prompts and completions are not advertised, so their methods are unknown
+    // rather than answered with rmcp's empty defaults.
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<rmcp::RoleServer>,
+    ) -> impl Future<Output = Result<ListPromptsResult, ErrorData>> + Send + '_ {
+        std::future::ready(Err(ErrorData::method_not_found::<ListPromptsRequestMethod>()))
+    }
+
+    fn complete(
+        &self,
+        _request: CompleteRequestParams,
+        _context: RequestContext<rmcp::RoleServer>,
+    ) -> impl Future<Output = Result<CompleteResult, ErrorData>> + Send + '_ {
+        std::future::ready(Err(ErrorData::method_not_found::<CompleteRequestMethod>()))
     }
 
     fn list_resource_templates(

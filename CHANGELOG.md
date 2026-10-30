@@ -308,6 +308,9 @@ compatibility notes will be called out here.
   is not entered, is counted in `non_local_filesystems` and marks the root
   incomplete. The scan also runs on a worker thread whose caller stops waiting
   once the time budget passes, so a hung mount can no longer hold discovery.
+- Answer `prompts/list` and `completion/complete` with method-not-found:
+  Quarters advertises neither capability, and rmcp's defaults returned empty
+  results.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 
