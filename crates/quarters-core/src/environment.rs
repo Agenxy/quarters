@@ -347,6 +347,9 @@ fn safe_to_inherit(name: &OsString) -> bool {
             | "USER"
             | "VISUAL"
             | "WAYLAND_DISPLAY"
+            // Terminal context on macOS, like TERM_PROGRAM: it names the app
+            // hosting the terminal so tools can attribute notifications and
+            // detect their host. It carries no credential or account state.
             | "__CFBundleIdentifier"
     ) || name.starts_with("LC_")
 }
@@ -413,7 +416,14 @@ mod tests {
 
     #[test]
     fn allowlist_keeps_terminal_context_and_rejects_credentials() {
-        for name in ["LANG", "LC_MESSAGES", "PATH", "TERM", "WAYLAND_DISPLAY"] {
+        for name in [
+            "LANG",
+            "LC_MESSAGES",
+            "PATH",
+            "TERM",
+            "WAYLAND_DISPLAY",
+            "__CFBundleIdentifier",
+        ] {
             assert!(safe_to_inherit(&OsString::from(name)), "expected {name} to be safe");
         }
         for name in [
@@ -422,6 +432,10 @@ mod tests {
             "GITHUB_TOKEN",
             "OPENAI_API_KEY",
             "SSH_AUTH_SOCK",
+            // Only the bundle identifier is allowed, not CoreFoundation's other
+            // private variables.
+            "__CF_USER_TEXT_ENCODING",
+            "__CFPREFERENCES_AVOID_DAEMON",
         ] {
             assert!(!safe_to_inherit(&OsString::from(name)), "expected {name} to be blocked");
         }
