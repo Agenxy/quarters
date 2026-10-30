@@ -292,6 +292,8 @@ compatibility notes will be called out here.
 - Enter `--workdir` by identity: the directory's device and inode are recorded
   when it is validated, and the launch changes into a descriptor with that
   identity, refusing a path replaced in between instead of following it.
+- Move the CLI's remaining platform-specific code, the Linux descriptor exec
+  and device-number normalization, behind the core platform module.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 

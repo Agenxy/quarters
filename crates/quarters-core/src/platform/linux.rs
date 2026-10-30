@@ -2,6 +2,8 @@
 //! Linux profile and opt-in mount-home backend.
 
 mod confinement;
+mod exec;
+pub(super) use exec::platform_exec_descriptor;
 
 use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
@@ -67,6 +69,10 @@ pub(super) fn platform_directory_open_flags() -> i32 {
         | nix::fcntl::OFlag::O_NOFOLLOW
         | nix::fcntl::OFlag::O_CLOEXEC)
         .bits()
+}
+
+pub(super) const fn platform_device_number(device: nix::libc::dev_t) -> u64 {
+    device
 }
 
 pub(super) fn platform_runtime_base(host: &HostEnvironment) -> PathBuf {
