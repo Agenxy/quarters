@@ -51,9 +51,9 @@ stable ID. That ID is lifecycle metadata, not a credential or authority token.
 
 ## Resources
 
-- `quarters://help` — stable agent workflow
-- `quarters://security` — authority and privacy boundary
-- `quarters://status` — private bounded snapshot with a 500 ms 2026 cache TTL
+- `quarters://help`: stable agent workflow
+- `quarters://security`: authority and privacy boundary
+- `quarters://status`: private bounded snapshot with a 500 ms 2026 cache TTL
 
 The static resources may be cached publicly for one hour under 2026. The 2025
 family receives no cache extensions.
