@@ -306,3 +306,59 @@ fn replacing_a_selected_root_suppresses_the_delta() -> Result<(), Box<dyn std::e
     assert!(result.observation.root_identity_changed);
     Ok(())
 }
+
+fn tree_with_two_directories()
+-> Result<(tempfile::TempDir, std::path::PathBuf, std::path::PathBuf), Box<dyn std::error::Error>> {
+    let (temporary, home, runtime) = private_roots()?;
+    for directory in ["mounted-a", "mounted-b"] {
+        fs::create_dir(home.join(directory))?;
+        fs::write(home.join(directory).join("inside"), b"state")?;
+    }
+    Ok((temporary, home, runtime))
+}
+
+fn every_directory_is_remote(
+    _parent_device: nix::libc::dev_t,
+    _opened: &nix::sys::stat::FileStat,
+    directory: &nix::dir::Dir,
+) -> nix::Result<bool> {
+    nix::sys::stat::fstat(directory).map(|_metadata| false)
+}
+
+#[test]
+fn non_local_filesystems_are_not_entered_and_mark_the_root_incomplete() -> Result<(), Box<dyn std::error::Error>> {
+    let (_temporary, home, _runtime) = tree_with_two_directories()?;
+    let roots = [(DiscoverySelector::Home, home)];
+
+    let scanned = super::scan::scan_with(&roots, DiscoveryLimits::ALPHA, every_directory_is_remote)?;
+
+    assert_eq!(scanned.non_local_filesystems, 2);
+    assert_eq!(scanned.entries.len(), 2, "a refused filesystem was traversed");
+    assert!(!scanned.complete);
+    assert_eq!(scanned.root_complete.get(&DiscoverySelector::Home), Some(&false));
+    Ok(())
+}
+
+#[test]
+fn a_local_temporary_tree_is_still_scanned_completely() -> Result<(), Box<dyn std::error::Error>> {
+    let (_temporary, home, runtime) = tree_with_two_directories()?;
+
+    let scanned = snapshot(&home, &runtime, &[DiscoverySelector::Home], DiscoveryLimits::ALPHA)?;
+
+    assert_eq!(scanned.0.non_local_filesystems, 0);
+    assert_eq!(scanned.0.entries.len(), 4);
+    assert!(scanned.0.complete);
+    Ok(())
+}
+
+#[test]
+fn a_stalled_scan_reports_every_root_incomplete() {
+    let stalled = super::Snapshot::stalled(&[DiscoverySelector::Home, DiscoverySelector::Runtime]);
+
+    assert!(!stalled.complete);
+    assert!(stalled.bounds_exceeded);
+    for selector in [DiscoverySelector::Home, DiscoverySelector::Runtime] {
+        assert_eq!(stalled.root_complete.get(&selector), Some(&false));
+        assert_eq!(stalled.root_bounds_exceeded.get(&selector), Some(&true));
+    }
+}

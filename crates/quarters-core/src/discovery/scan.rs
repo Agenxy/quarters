@@ -8,16 +8,38 @@ use nix::sys::stat::{FileStat, Mode, SFlag, fstat, fstatat};
 use nix::unistd::Uid;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-pub(super) fn scan(roots: &[(DiscoverySelector, &Path)], limits: DiscoveryLimits) -> Result<Snapshot> {
+/// Decides whether an opened child directory, entered from a directory on
+/// `parent_device`, may be traversed.
+pub(super) type LocalProbe =
+    fn(parent_device: nix::libc::dev_t, opened: &FileStat, directory: &Dir) -> nix::Result<bool>;
+
+pub(super) fn scan(roots: &[(DiscoverySelector, PathBuf)], limits: DiscoveryLimits) -> Result<Snapshot> {
+    scan_with(roots, limits, mount_is_local)
+}
+
+/// A directory on its parent's filesystem is always traversed; a mount
+/// crossing is traversed only onto a local filesystem.
+fn mount_is_local(parent_device: nix::libc::dev_t, opened: &FileStat, directory: &Dir) -> nix::Result<bool> {
+    if opened.st_dev == parent_device {
+        return Ok(true);
+    }
+    crate::platform::filesystem_is_local(directory)
+}
+
+pub(super) fn scan_with(
+    roots: &[(DiscoverySelector, PathBuf)],
+    limits: DiscoveryLimits,
+    local_probe: LocalProbe,
+) -> Result<Snapshot> {
     let mut combined = Snapshot::default();
     for (selector, root) in roots {
-        let mut scanner = Scanner::new(limits);
-        let (mut directory, identity, expected) = open_root(root, *selector)?;
+        let mut scanner = Scanner::new(limits, local_probe);
+        let (mut directory, identity, expected, device) = open_root(root, *selector)?;
         scanner.snapshot.root_identities.insert(*selector, identity);
-        scanner.walk(&mut directory, *selector, &[], 0)?;
+        scanner.walk(&mut directory, *selector, &[], 0, device)?;
         scanner.recheck_directory(&directory, &expected);
         let count = u64::try_from(scanner.snapshot.entries.len()).unwrap_or(u64::MAX);
         scanner.snapshot.roots.insert(*selector, count);
@@ -58,6 +80,9 @@ fn merge(combined: &mut Snapshot, part: Snapshot) -> Result<()> {
         .saturating_add_assign(&part.unreadable_classes);
     combined.unstable_entries = combined.unstable_entries.saturating_add(part.unstable_entries);
     combined.foreign_owned = combined.foreign_owned.saturating_add(part.foreign_owned);
+    combined.non_local_filesystems = combined
+        .non_local_filesystems
+        .saturating_add(part.non_local_filesystems);
     combined.metadata_errors = combined.metadata_errors.saturating_add(part.metadata_errors);
     combined.entry_key_collisions = combined.entry_key_collisions.saturating_add(part.entry_key_collisions);
     Ok(())
@@ -65,6 +90,7 @@ fn merge(combined: &mut Snapshot, part: Snapshot) -> Result<()> {
 
 struct Scanner {
     limits: DiscoveryLimits,
+    local_probe: LocalProbe,
     started: Instant,
     snapshot: Snapshot,
     pending_names: u64,
@@ -72,9 +98,10 @@ struct Scanner {
 }
 
 impl Scanner {
-    fn new(limits: DiscoveryLimits) -> Self {
+    fn new(limits: DiscoveryLimits, local_probe: LocalProbe) -> Self {
         Self {
             limits,
+            local_probe,
             started: Instant::now(),
             snapshot: Snapshot::default(),
             pending_names: 0,
@@ -88,6 +115,7 @@ impl Scanner {
         selector: DiscoverySelector,
         relative: &[OsString],
         depth: u32,
+        device: nix::libc::dev_t,
     ) -> Result<()> {
         let names = self.names(directory)?;
         for name in names {
@@ -112,7 +140,7 @@ impl Scanner {
             };
             self.record(selector, &path, &metadata)?;
             if SFlag::from_bits_truncate(metadata.st_mode) == SFlag::S_IFDIR {
-                self.visit_directory(&*directory, selector, &name, &path, depth, &metadata)?;
+                self.visit_directory(&*directory, selector, &name, &path, (depth, device), &metadata)?;
             }
         }
         Ok(())
@@ -226,7 +254,7 @@ impl Scanner {
         selector: DiscoverySelector,
         name: &OsStr,
         path: &[OsString],
-        depth: u32,
+        (depth, device): (u32, nix::libc::dev_t),
         metadata: &FileStat,
     ) -> Result<()> {
         if metadata.st_mode & 0o500 != 0o500 {
@@ -273,9 +301,30 @@ impl Scanner {
             self.snapshot.complete = false;
             return Ok(());
         }
-        self.walk(&mut child, selector, path, depth.saturating_add(1))?;
+        if !self.may_traverse(device, &opened, &child) {
+            return Ok(());
+        }
+        self.walk(&mut child, selector, path, depth.saturating_add(1), opened.st_dev)?;
         self.recheck_directory(&child, &expected);
         Ok(())
+    }
+
+    /// A mount crossing into a network or FUSE filesystem is not entered: its
+    /// calls can block past every bound, so the root is reported incomplete.
+    fn may_traverse(&mut self, parent_device: nix::libc::dev_t, opened: &FileStat, directory: &Dir) -> bool {
+        match (self.local_probe)(parent_device, opened, directory) {
+            Ok(true) => true,
+            Ok(false) => {
+                self.snapshot.non_local_filesystems = self.snapshot.non_local_filesystems.saturating_add(1);
+                self.snapshot.complete = false;
+                false
+            }
+            Err(_error) => {
+                self.snapshot.metadata_errors = self.snapshot.metadata_errors.saturating_add(1);
+                self.snapshot.complete = false;
+                false
+            }
+        }
     }
 
     fn recheck_directory(&mut self, directory: &Dir, expected: &EntryIdentity) {
@@ -300,7 +349,7 @@ impl Scanner {
     }
 }
 
-fn open_root(path: &Path, selector: DiscoverySelector) -> Result<(Dir, RootIdentity, EntryIdentity)> {
+fn open_root(path: &Path, selector: DiscoverySelector) -> Result<(Dir, RootIdentity, EntryIdentity, nix::libc::dev_t)> {
     let directory = Dir::open(
         path,
         OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
@@ -313,7 +362,7 @@ fn open_root(path: &Path, selector: DiscoverySelector) -> Result<(Dir, RootIdent
     if directory_kind && metadata.st_uid == Uid::current().as_raw() && private {
         let root_identity = RootIdentity::from_stat(&metadata);
         let scan_identity = EntryIdentity::from_stat(&metadata);
-        Ok((directory, root_identity, scan_identity))
+        Ok((directory, root_identity, scan_identity, metadata.st_dev))
     } else {
         Err(QuartersError::new(
             ErrorKind::CorruptState,
