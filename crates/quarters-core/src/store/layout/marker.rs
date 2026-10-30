@@ -625,6 +625,9 @@ fn device_number(value: nix::libc::dev_t) -> u64 {
 }
 
 fn metadata_device_number(metadata: &fs::Metadata) -> u64 {
+    // std widens st_dev to u64 with sign extension on macOS, while
+    // device_number zero-extends the native value; narrowing back to dev_t
+    // first makes both sides normalize the same way.
     #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     let native = metadata.dev() as nix::libc::dev_t;
     device_number(native)

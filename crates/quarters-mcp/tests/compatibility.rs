@@ -513,65 +513,16 @@ async fn exercise_modern(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
     assert_eq!(peer.protocol_version, ProtocolVersion::V_2026_07_28);
     let tools = client.list_tools(None).await?;
     assert_catalog(&tools, true)?;
-    let resources = client.list_resources(None).await?;
-    assert_eq!(resources.resources.len(), 3);
-    assert!(resources.result_type.is_some());
-    assert_eq!(resources.ttl_ms, Some(3_600_000));
-    assert_eq!(resources.cache_scope, Some(rmcp::model::CacheScope::Public));
-    let help = client
-        .read_resource(ReadResourceRequestParams::new("quarters://help"))
-        .await?;
-    assert_eq!(help.cache_scope, Some(rmcp::model::CacheScope::Public));
-    assert!(help.result_type.is_some());
-    assert_eq!(
-        unknown_resource_code(&client).await?,
-        rmcp::model::ErrorCode::INVALID_PARAMS
-    );
-    let created = call(
-        &client,
-        "quarters_create",
-        json!({"name": "modern", "layout": "workspace"}),
-    )
-    .await?;
-    assert!(created.result_type.is_some());
-    assert_eq!(structured(&created)?["data"]["space"]["name"], "modern");
-    assert_eq!(structured(&created)?["data"]["space"]["layout"], "workspace");
-    assert_eq!(
-        structured(&created)?["data"]["space"]["space_id"]
-            .as_str()
-            .map(str::len),
-        Some(32)
-    );
-    let create_schema = output_schema(&tools, "quarters_create")?;
-    validate_output(&create_schema, structured(&created)?)?;
-    let failed = call(&client, "quarters_create", json!({"name": "../invalid"})).await?;
-    assert_eq!(failed.is_error, Some(true));
-    validate_output(&create_schema, structured(&failed)?)?;
-    let invalid_layout = call(
-        &client,
-        "quarters_create",
-        json!({"name": "invalid-layout", "layout": "container"}),
-    )
-    .await?;
-    assert_eq!(invalid_layout.is_error, Some(true));
-    let mut incomplete = structured(&created)?.clone();
-    incomplete
-        .as_object_mut()
-        .ok_or_else(|| io::Error::other("result was not an object"))?
-        .remove("data");
-    assert!(!jsonschema::validator_for(&create_schema)?.is_valid(&incomplete));
-    let doctor_schema = output_schema(&tools, "quarters_doctor")?;
-    assert!(!schema_declares_property(&doctor_schema, "migration_marker"));
-    let doctor = call(&client, "quarters_doctor", json!({})).await?;
-    validate_output(&doctor_schema, structured(&doctor)?)?;
-    let failed_doctor = call(&client, "quarters_doctor", json!({"name": "../invalid"})).await?;
-    assert_eq!(failed_doctor.is_error, Some(true));
-    validate_output(&doctor_schema, structured(&failed_doctor)?)?;
+    assert_modern_resources(&client).await?;
+    assert_modern_create(&client, &tools).await?;
+    assert_doctor_contract(&client, &tools).await?;
     client.cancel().await?;
     server_task.await??;
     Ok(())
 }
 
+// The legacy revision is reached through rmcp's deprecated initialize-based
+// client entry point, which is exactly what this test exercises.
 #[allow(deprecated)]
 async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>> {
     let (server_io, client_io) = tokio::io::duplex(128 * 1_024);
@@ -583,15 +534,7 @@ async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
     assert_eq!(peer.protocol_version, ProtocolVersion::V_2025_11_25);
     let tools = client.list_tools(None).await?;
     assert_catalog(&tools, false)?;
-    let resources = client.list_resources(None).await?;
-    assert_eq!(resources.resources.len(), 3);
-    assert!(resources.result_type.is_none());
-    assert_eq!(resources.ttl_ms, None);
-    assert_eq!(resources.cache_scope, None);
-    assert_eq!(
-        unknown_resource_code(&client).await?,
-        rmcp::model::ErrorCode::RESOURCE_NOT_FOUND
-    );
+    assert_legacy_resources(&client).await?;
     let status = call(&client, "quarters_status", json!({})).await?;
     assert!(status.result_type.is_none());
     assert_eq!(structured(&status)?["data"]["spaces"][0]["name"], "modern");
@@ -610,15 +553,98 @@ async fn exercise_legacy(root: std::path::PathBuf) -> Result<(), Box<dyn Error>>
     )
     .await?;
     assert_eq!(invalid_layout.is_error, Some(true));
-    let doctor_schema = output_schema(&tools, "quarters_doctor")?;
-    assert!(!schema_declares_property(&doctor_schema, "migration_marker"));
-    let doctor = call(&client, "quarters_doctor", json!({})).await?;
-    validate_output(&doctor_schema, structured(&doctor)?)?;
-    let failed_doctor = call(&client, "quarters_doctor", json!({"name": "../invalid"})).await?;
-    assert_eq!(failed_doctor.is_error, Some(true));
-    validate_output(&doctor_schema, structured(&failed_doctor)?)?;
+    assert_doctor_contract(&client, &tools).await?;
     client.cancel().await?;
     server_task.await??;
+    Ok(())
+}
+
+type Client = rmcp::service::RunningService<RoleClient, TestClient>;
+
+/// Legacy resource results carry no result type or cache hints, and an
+/// unknown resource is resource-not-found.
+async fn assert_legacy_resources(client: &Client) -> Result<(), Box<dyn Error>> {
+    let resources = client.list_resources(None).await?;
+    assert_eq!(resources.resources.len(), 3);
+    assert!(resources.result_type.is_none());
+    assert_eq!(resources.ttl_ms, None);
+    assert_eq!(resources.cache_scope, None);
+    assert_eq!(
+        unknown_resource_code(client).await?,
+        rmcp::model::ErrorCode::RESOURCE_NOT_FOUND
+    );
+    Ok(())
+}
+
+/// Modern resource results carry their result type and cache hints, and an
+/// unknown resource is an invalid-params error.
+async fn assert_modern_resources(client: &Client) -> Result<(), Box<dyn Error>> {
+    let resources = client.list_resources(None).await?;
+    assert_eq!(resources.resources.len(), 3);
+    assert!(resources.result_type.is_some());
+    assert_eq!(resources.ttl_ms, Some(3_600_000));
+    assert_eq!(resources.cache_scope, Some(rmcp::model::CacheScope::Public));
+    let help = client
+        .read_resource(ReadResourceRequestParams::new("quarters://help"))
+        .await?;
+    assert_eq!(help.cache_scope, Some(rmcp::model::CacheScope::Public));
+    assert!(help.result_type.is_some());
+    assert_eq!(
+        unknown_resource_code(client).await?,
+        rmcp::model::ErrorCode::INVALID_PARAMS
+    );
+    Ok(())
+}
+
+/// The create tool's results, successes and failures alike, match its declared
+/// output schema, and the schema rejects a result missing its data.
+async fn assert_modern_create(client: &Client, tools: &rmcp::model::ListToolsResult) -> Result<(), Box<dyn Error>> {
+    let created = call(
+        client,
+        "quarters_create",
+        json!({"name": "modern", "layout": "workspace"}),
+    )
+    .await?;
+    assert!(created.result_type.is_some());
+    assert_eq!(structured(&created)?["data"]["space"]["name"], "modern");
+    assert_eq!(structured(&created)?["data"]["space"]["layout"], "workspace");
+    assert_eq!(
+        structured(&created)?["data"]["space"]["space_id"]
+            .as_str()
+            .map(str::len),
+        Some(32)
+    );
+    let create_schema = output_schema(tools, "quarters_create")?;
+    validate_output(&create_schema, structured(&created)?)?;
+    let failed = call(client, "quarters_create", json!({"name": "../invalid"})).await?;
+    assert_eq!(failed.is_error, Some(true));
+    validate_output(&create_schema, structured(&failed)?)?;
+    let invalid_layout = call(
+        client,
+        "quarters_create",
+        json!({"name": "invalid-layout", "layout": "container"}),
+    )
+    .await?;
+    assert_eq!(invalid_layout.is_error, Some(true));
+    let mut incomplete = structured(&created)?.clone();
+    incomplete
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("result was not an object"))?
+        .remove("data");
+    assert!(!jsonschema::validator_for(&create_schema)?.is_valid(&incomplete));
+    Ok(())
+}
+
+/// Doctor results, successes and failures alike, match its declared output
+/// schema, which no longer carries the retired migration marker.
+async fn assert_doctor_contract(client: &Client, tools: &rmcp::model::ListToolsResult) -> Result<(), Box<dyn Error>> {
+    let doctor_schema = output_schema(tools, "quarters_doctor")?;
+    assert!(!schema_declares_property(&doctor_schema, "migration_marker"));
+    let doctor = call(client, "quarters_doctor", json!({})).await?;
+    validate_output(&doctor_schema, structured(&doctor)?)?;
+    let failed_doctor = call(client, "quarters_doctor", json!({"name": "../invalid"})).await?;
+    assert_eq!(failed_doctor.is_error, Some(true));
+    validate_output(&doctor_schema, structured(&failed_doctor)?)?;
     Ok(())
 }
 

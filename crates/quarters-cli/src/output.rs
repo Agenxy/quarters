@@ -231,7 +231,10 @@ pub(crate) fn print_recovered(summary: &RecoverySummary, json_output: bool) -> q
         return print_success("recover", summary, true);
     }
     println!(
-        "Recovered {} unfinished space creation(s), {} retired space entry(s), {} rename transaction(s), {} rollback transaction(s), {} artifact creation(s), {} artifact deletion(s), {} manifest temporary file(s), and {} freeze temporary file(s); {} rename issue(s), {} rollback issue(s), {} space and {} artifact creation(s) remain",
+        "Recovered {} unfinished space creation(s), {} retired space entry(s), {} rename transaction(s), {} rollback \
+            transaction(s), {} artifact creation(s), {} artifact deletion(s), {} manifest temporary file(s), and {} \
+            freeze temporary file(s); {} rename issue(s), {} rollback issue(s), {} space and {} artifact creation(s) \
+            remain",
         summary.unfinished_creations,
         summary.retired_entries,
         summary.rename_transactions,
@@ -487,7 +490,8 @@ pub(crate) fn print_doctor(
         "recovery": recovery_value,
         "shortcuts": shortcuts.iter().map(shortcut_value).collect::<Vec<_>>(),
         "tools": tools,
-        "classification_evidence": "installed executable plus declared state-location contract; no credentials were read",
+        "classification_evidence": "installed executable plus declared state-location contract; \
+            no credentials were read",
     });
     if json_output {
         return print_success("doctor", &result, true);
@@ -523,7 +527,8 @@ fn print_doctor_human(
     println!("  Authority      {}", capabilities.authority_boundary);
     match recovery {
         Ok(summary) => println!(
-            "  Recovery       {} space active, {} space unfinished, {} retired, {} rename, {} rename issue; {} artifact active, {} artifact unfinished, {} reclaiming, {} manifest temp, {} freeze temp",
+            "  Recovery       {} space active, {} space unfinished, {} retired, {} rename, {} rename issue; {} \
+                artifact active, {} artifact unfinished, {} reclaiming, {} manifest temp, {} freeze temp",
             summary.active_creations,
             summary.unfinished_creations,
             summary.retired_entries,
@@ -691,7 +696,8 @@ pub(crate) fn print_removed(
         && (surviving_templates > 0 || surviving_snapshots > 0)
     {
         println!(
-            "  Kept {surviving_templates} template(s) and {surviving_snapshots} snapshot(s) from this exact space generation."
+            "  Kept {surviving_templates} template(s) and {surviving_snapshots} snapshot(s) from this exact space \
+                generation."
         );
         println!("  Remove those artifacts separately with their exact confirmed commands.");
     }
@@ -977,7 +983,9 @@ fn serialization_error(error: serde_json::Error) -> QuartersError {
 }
 
 fn fallback_error_json() -> String {
-    "{\"schema_version\":1,\"ok\":false,\"error\":{\"kind\":\"system\",\"message\":\"could not serialize error output\",\"hint\":null}}".to_owned()
+    "{\"schema_version\":1,\"ok\":false,\"error\":{\"kind\":\"system\",\"message\":\"could not serialize error \
+        output\",\"hint\":null}}"
+        .to_owned()
 }
 
 #[cfg(test)]

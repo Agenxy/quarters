@@ -248,6 +248,7 @@ fn restore_path_access_nofollow(path: &Path, mode: Mode) -> Result<bool> {
     }
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

@@ -155,8 +155,10 @@ pub(super) fn prepare(store: &Store, request: &PrepareRequest<'_>) -> Result<Pre
         may_include_sensitive_content: true,
         replace_generated: request.replace_generated,
         destination_space_id: None,
-        warning: "selected files are uninspected and may contain secrets; entering may execute startup code, but creation never evaluates it",
-        authority_boundary: "copied state is separate, but the real host account and same-UID filesystem authority remain",
+        warning: "selected files are uninspected and may contain secrets; entering may execute startup code, but \
+            creation never evaluates it",
+        authority_boundary: "copied state is separate, but the real host account and same-UID filesystem authority \
+            remain",
         publication_model: "nothing or one complete atomically published Quarter",
     };
     Ok(PreparedHostFork {

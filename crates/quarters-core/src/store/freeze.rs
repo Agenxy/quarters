@@ -210,7 +210,8 @@ fn read_marker(path: &Path, expected: &SpaceId) -> Result<Option<FreezeMarker>> 
             ),
         )
         .with_hint(format!(
-            "upgrade Quarters to preserve newer policy state, or explicitly clear it with 'quarters unfreeze NAME --confirm NAME'; marker: {}",
+            "upgrade Quarters to preserve newer policy state, or explicitly clear it with 'quarters unfreeze NAME \
+                --confirm NAME'; marker: {}",
             path.display()
         )));
     }
@@ -324,7 +325,8 @@ fn report(space: &Space, state: FreezeState, changed: bool) -> Result<FreezeRepo
         state,
         changed,
         scope: "blocks new managed process/agent launches and space lifecycle mutation; existing activity continues",
-        boundary: "same-UID processes can alter files or the marker; this is not immutability, confinement or encryption",
+        boundary: "same-UID processes can alter files or the marker; this is not immutability, confinement or \
+            encryption",
     })
 }
 

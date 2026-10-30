@@ -391,7 +391,8 @@ fn validate_key_metadata(stat: &nix::sys::stat::FileStat) -> Result<()> {
     }
     Err(QuartersError::new(
         ErrorKind::InvalidInput,
-        "export authentication key must be a current-user, single-link, mode-0600 regular file containing exactly 32 bytes",
+        "export authentication key must be a current-user, single-link, mode-0600 regular file containing exactly 32 \
+            bytes",
     ))
 }
 

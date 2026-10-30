@@ -418,6 +418,7 @@ fn validated_pid(pid: u32) -> Result<Pid> {
     Ok(Pid::from_raw(raw))
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod generation_tests {
@@ -438,6 +439,7 @@ mod generation_tests {
     }
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(all(test, target_os = "linux"))]
 #[allow(clippy::expect_used)]
 mod linux_tests {

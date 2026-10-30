@@ -140,7 +140,8 @@ pub(super) fn resolve_executable(
             "the requested executable is outside the confined executable roots",
         )
         .with_hint(
-            "install it inside the Quarter or use a system executable reported by 'quarters env --confinement filesystem'",
+            "install it inside the Quarter or use a system executable reported by 'quarters env --confinement \
+                filesystem'",
         ));
     }
     let descriptor = open_stable_executable(&canonical, &metadata)?;
@@ -628,18 +629,22 @@ fn limitations(has_user_grants: bool, legacy_tiocsti: &crate::platform::LegacyTi
             "user-granted host paths are exposed to the confined process tree; Quarters does not inspect their content",
         );
         items.push(
-            "Landlock combines overlapping rules by union; Quarters rejects overlap between explicit grants and all other explicit or built-in roots",
+            "Landlock combines overlapping rules by union; Quarters rejects overlap between explicit grants and all \
+                other explicit or built-in roots",
         );
         items.push(
-            "explicit grants require disjoint filesystem identities and single-link files; a grant whose own or nested mounts expose protected filesystem regions is refused",
+            "explicit grants require disjoint filesystem identities and single-link files; a grant whose own or \
+                nested mounts expose protected filesystem regions is refused",
         );
         items.push(
-            "mount topology is inspected, not frozen; unconfined host processes can change it between validation and enforcement",
+            "mount topology is inspected, not frozen; unconfined host processes can change it between validation and \
+                enforcement",
         );
     }
     if legacy_tiocsti.state != "disabled" {
         items.push(
-            "legacy TIOCSTI terminal injection is not proven disabled; a shared controlling terminal can cross the filesystem boundary",
+            "legacy TIOCSTI terminal injection is not proven disabled; a shared controlling terminal can cross the \
+                filesystem boundary",
         );
     }
     items.into_iter().map(str::to_owned).collect()

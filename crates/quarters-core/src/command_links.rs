@@ -409,6 +409,7 @@ fn remove_managed_tool(path: &Path) -> Result<()> {
     fs::remove_file(path).map_err(|error| QuartersError::io("remove OpenSSH adapter", path, error))
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

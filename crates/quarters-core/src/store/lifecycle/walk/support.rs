@@ -95,6 +95,7 @@ fn relative_byte_length(path: &[OsString]) -> Result<u64> {
     })
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

@@ -669,6 +669,7 @@ fn parse_wrapped_artifact_id(name: &str, prefix: &str, suffix: &str) -> bool {
         .is_some()
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

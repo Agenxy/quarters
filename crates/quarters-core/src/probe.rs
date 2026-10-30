@@ -51,7 +51,8 @@ pub fn tool_probes() -> Vec<ToolProbe> {
             CompatibilityTier::C,
             "verified managed ssh/scp/sftp links select the per-space configuration",
             Some(
-                "doctor NAME reports actual link state; passwd home is unchanged; absolute host-tool paths bypass adapters",
+                "doctor NAME reports actual link state; passwd home is unchanged; absolute host-tool paths bypass \
+                    adapters",
             ),
         ),
         probe("gh", CompatibilityTier::B, "GH_CONFIG_DIR", None),

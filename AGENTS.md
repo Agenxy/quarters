@@ -26,7 +26,8 @@ manages development dependencies and scripts for the typed npm launcher; npm
 remains its registry packaging and publication interface. Every warning is an
 error. The native quality gate enforces source files at 1,024 lines, functions
 at 128 lines, type bodies at 512 lines, eight parameters, cyclomatic complexity
-16 and nesting eight. Never weaken a gate to land a change.
+15, nesting eight and code lines at 120 characters; clippy enforces cognitive
+complexity 20. Never weaken a gate to land a change.
 
 Read `docs/security/THREAT-MODEL.md` before changing process launching,
 environment policy, filesystem behavior or platform capabilities. Add an ADR

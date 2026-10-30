@@ -53,30 +53,12 @@ fn compound_cleanup_failure_preserves_the_original_error_contract() {
 fn workspace_clone_has_fresh_controls_and_declared_topology() {
     let (_temporary, store) = test_store();
     let source = create_workspace(&store, "source");
-    let proof = source.home().join("proof.txt");
-    fs::write(&proof, b"persistent state\n").expect("write proof");
-    fs::set_permissions(&proof, fs::Permissions::from_mode(0o4751)).expect("set proof mode");
-    fs::hard_link(&proof, source.home().join("proof-hardlink.txt")).expect("create hard link");
-    symlink("proof.txt", source.home().join("proof-link")).expect("create relative link");
-    fs::write(source.home().join(".cache/derived"), b"cache").expect("write cache");
-    symlink(".cache/derived", source.home().join("cache-link")).expect("create cache link");
-    let socket_path = source.home().join(".gnupg/S.gpg-agent");
-    let _socket = UnixListener::bind(&socket_path).expect("create runtime socket");
-    mkfifo(
-        &source.home().join(".gnupg/runtime-pipe"),
-        Mode::from_bits_truncate(0o600),
-    )
-    .expect("create runtime FIFO");
+    let _socket = seed_declared_topology(&source);
 
     let preview = store
         .clone_plan(&name("source"), &name("copy"), false)
         .expect("preview clone");
-    assert_eq!(preview.mode, CloneMode::Preview);
-    assert_eq!(preview.exclusions.hard_linked_files_copied_independently, 2);
-    assert_eq!(preview.exclusions.sockets, 1);
-    assert_eq!(preview.exclusions.fifos, 1);
-    assert!(preview.exclusions.cache_roots >= 1);
-    assert_eq!(preview.exclusions.symlinks_into_omitted_cache_roots, 1);
+    assert_preview_declares_topology(&preview);
     assert!(!source.root().parent().expect("spaces root").join("copy").exists());
 
     let cloned = store
@@ -104,6 +86,41 @@ fn workspace_clone_has_fresh_controls_and_declared_topology() {
     let second = fs::metadata(copy.home().join("proof-hardlink.txt")).expect("second metadata");
     assert_ne!(first.ino(), second.ino());
     assert_eq!(first.permissions().mode() & 0o7777, 0o751);
+    assert_private_clone_provenance(&copy);
+}
+
+/// The preview declares each special entry the seeded topology holds.
+fn assert_preview_declares_topology(preview: &super::CloneReport) {
+    assert_eq!(preview.mode, CloneMode::Preview);
+    assert_eq!(preview.exclusions.hard_linked_files_copied_independently, 2);
+    assert_eq!(preview.exclusions.sockets, 1);
+    assert_eq!(preview.exclusions.fifos, 1);
+    assert!(preview.exclusions.cache_roots >= 1);
+    assert_eq!(preview.exclusions.symlinks_into_omitted_cache_roots, 1);
+}
+
+/// A hard link, a relative link, a cache entry and a link into it, a runtime
+/// socket and a FIFO; the returned listener keeps the socket alive.
+fn seed_declared_topology(source: &crate::Space) -> UnixListener {
+    let proof = source.home().join("proof.txt");
+    fs::write(&proof, b"persistent state\n").expect("write proof");
+    fs::set_permissions(&proof, fs::Permissions::from_mode(0o4751)).expect("set proof mode");
+    fs::hard_link(&proof, source.home().join("proof-hardlink.txt")).expect("create hard link");
+    symlink("proof.txt", source.home().join("proof-link")).expect("create relative link");
+    fs::write(source.home().join(".cache/derived"), b"cache").expect("write cache");
+    symlink(".cache/derived", source.home().join("cache-link")).expect("create cache link");
+    let socket_path = source.home().join(".gnupg/S.gpg-agent");
+    let socket = UnixListener::bind(&socket_path).expect("create runtime socket");
+    mkfifo(
+        &source.home().join(".gnupg/runtime-pipe"),
+        Mode::from_bits_truncate(0o600),
+    )
+    .expect("create runtime FIFO");
+    socket
+}
+
+/// Clone provenance is private and names the source without its home path.
+fn assert_private_clone_provenance(copy: &crate::Space) {
     let provenance = copy.root().join(".quarters-provenance.json");
     assert_eq!(
         fs::metadata(&provenance)

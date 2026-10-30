@@ -612,7 +612,8 @@ fn source_access_error(operation: &str, path: &[OsString], error: Errno) -> Quar
     let failure = nix_error(operation, path, error);
     if error == Errno::EACCES {
         return failure.with_hint(
-            "grant the current user read permission on the entry and search permission on its parent; Quarters never changes source permissions",
+            "grant the current user read permission on the entry and search permission on its parent; Quarters never \
+                changes source permissions",
         );
     }
     failure
@@ -625,7 +626,8 @@ fn root_access_error(operation: &str, error: Errno) -> QuartersError {
     }
     if operation == "open source home" {
         return failure.with_hint(
-            "grant the current user read and search permission on the source home; Quarters never changes source permissions",
+            "grant the current user read and search permission on the source home; Quarters never changes source \
+                permissions",
         );
     }
     failure.with_hint("inspect the private staging directory permissions and retry the clone")
@@ -679,6 +681,7 @@ fn conversion_error(source: std::num::TryFromIntError) -> QuartersError {
     .with_source(source)
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod identity_tests {

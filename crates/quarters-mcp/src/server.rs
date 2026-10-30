@@ -443,7 +443,8 @@ impl ServerHandler for QuartersMcp {
         ServerConfig::new(capabilities)
             .with_server_info(server_implementation())
             .with_instructions(
-                "Read quarters://help and quarters://security first. Observe quarters_status before mutation. Quarters virtualizes user-owned state but preserves the host account's real authority.",
+                "Read quarters://help and quarters://security first. Observe quarters_status before mutation. \
+                    Quarters virtualizes user-owned state but preserves the host account's real authority.",
             )
     }
 

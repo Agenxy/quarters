@@ -18,8 +18,13 @@ use crate::store::{
 };
 use std::cell::Cell;
 
-const ZSH_PROMPT_TAIL: &[u8] = b"\n# Quarters-managed state and context for this fork.\nHISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/zsh_history\"\nsetopt APPEND_HISTORY INC_APPEND_HISTORY SHARE_HISTORY\nif command -v quarters >/dev/null 2>&1; then\n  eval \"$(quarters shell-init zsh 2>/dev/null)\"\nfi\n";
-const BASH_PROMPT_TAIL: &[u8] = b"\n# Quarters-managed state and context for this fork.\nHISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/bash_history\"\nexport HISTFILE\nif command -v quarters >/dev/null 2>&1; then\n  eval \"$(quarters shell-init bash 2>/dev/null)\"\nfi\n";
+const ZSH_PROMPT_TAIL: &[u8] = b"\n# Quarters-managed state and context for this \
+    fork.\nHISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/zsh_history\"\nsetopt APPEND_HISTORY \
+    INC_APPEND_HISTORY SHARE_HISTORY\nif command -v quarters >/dev/null 2>&1; then\n  eval \"$(quarters shell-init \
+    zsh 2>/dev/null)\"\nfi\n";
+const BASH_PROMPT_TAIL: &[u8] = b"\n# Quarters-managed state and context for this \
+    fork.\nHISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/bash_history\"\nexport HISTFILE\nif command -v \
+    quarters >/dev/null 2>&1; then\n  eval \"$(quarters shell-init bash 2>/dev/null)\"\nfi\n";
 
 impl Store {
     /// Preview selected host state without creating store state.
@@ -243,7 +248,8 @@ fn publish(store: &Store, staging: &Staging, manifest: &crate::SpaceManifest) ->
     staging.published.set(true);
     sync_parent_directory(&staging.destination).map_err(|error| {
         error.with_hint(format!(
-            "space '{}' was published completely, but directory durability could not be confirmed; inspect it before retrying",
+            "space '{}' was published completely, but directory durability could not be confirmed; inspect it before \
+                retrying",
             manifest.name
         ))
     })?;
