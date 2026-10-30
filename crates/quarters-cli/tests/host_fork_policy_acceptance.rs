@@ -11,7 +11,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 
 const MIB: u64 = 1_048_576;
 

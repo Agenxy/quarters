@@ -7,7 +7,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
     command.arg("--root").arg(root);

@@ -6,7 +6,13 @@ use std::error::Error;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::process::{Command, Output};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
+
+#[path = "support/agent_guard.rs"]
+mod agent_guard;
+use agent_guard::AgentGuard;
 
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
@@ -112,6 +118,7 @@ fn frozen_policy_blocks_managed_mutation_but_allows_copy_sources() -> Result<(),
     let temporary = TempDir::new()?;
     let root = temporary.path().join("store");
     create(&root, "studio")?;
+    let _agent = AgentGuard::new(&root, &["studio"]);
     run(quarters(&root).args(["agent", "start", "studio"]))?;
     run(quarters(&root).args(["freeze", "studio"]))?;
 

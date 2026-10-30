@@ -8,6 +8,8 @@ mod registry;
 mod startup;
 #[cfg(test)]
 mod startup_tests;
+#[cfg(test)]
+mod test_runtime;
 
 pub use model::{AgentState, AgentStatus};
 
@@ -488,7 +490,7 @@ mod tests {
             )
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         let mut child = std::process::Command::new("/usr/bin/true")
             .spawn()
             .expect("spawn completed process");
@@ -526,7 +528,7 @@ mod tests {
             )
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         let mut child = std::process::Command::new("/usr/bin/true")
             .spawn()
             .expect("spawn completed process");
@@ -556,7 +558,7 @@ mod tests {
             )
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         let socket = registry::socket_path(&runtime);
         let mut child = std::process::Command::new("/usr/bin/ssh-agent")
             .args(["-D", "-a"])
@@ -613,7 +615,7 @@ mod tests {
             )
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         let socket = registry::socket_path(&runtime);
         let identity = disconnected_socket(&socket);
         let mut child = std::process::Command::new("/usr/bin/true")
@@ -644,7 +646,7 @@ mod tests {
             )
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         let socket = registry::socket_path(&runtime);
         let identity = disconnected_socket(&socket);
         let mut unrelated = std::process::Command::new("/bin/sleep")
@@ -682,7 +684,7 @@ mod tests {
             )
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         let socket = registry::socket_path(&runtime);
         let identity = disconnected_socket(&socket);
         let mut unrelated = std::process::Command::new("/bin/sleep")
@@ -718,7 +720,7 @@ mod tests {
                 .create(SpaceName::parse(name).expect("space name"), PathBuf::from("/bin/sh"))
                 .expect("create space");
             let host = HostEnvironment::capture();
-            let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+            let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
             let socket = registry::socket_path(&runtime);
             let identity = disconnected_socket(&socket);
             let mut unrelated = std::process::Command::new("/bin/sleep")
@@ -755,7 +757,7 @@ mod tests {
             )
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (_runtime_guard, runtime) = test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         let socket = registry::socket_path(&runtime);
         let mut child = std::process::Command::new("/usr/bin/ssh-agent")
             .args(["-D", "-a"])

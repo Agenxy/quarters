@@ -345,9 +345,11 @@ fn escaping_links_fail_without_published_or_staged_state() {
             .all(|entry| !entry.file_name().to_string_lossy().starts_with(".creating-"))
     );
     assert_eq!(
-        fs::metadata(read_only).expect("source unchanged").permissions().mode() & 0o777,
+        fs::metadata(&read_only).expect("source unchanged").permissions().mode() & 0o777,
         0o500
     );
+    // The temporary directory cannot remove a read-only tree on drop.
+    fs::set_permissions(&read_only, fs::Permissions::from_mode(0o700)).expect("restore fixture access");
 }
 
 #[test]

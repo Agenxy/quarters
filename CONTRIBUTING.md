@@ -17,6 +17,14 @@ platform module, and capability requests fail rather than degrading silently.
 Changes to process authority, environment inheritance, filesystem mutation,
 stored schema or platform guarantees need tests and an architecture decision.
 
+Tests leave nothing outside their temporary directory. Acceptance tests that
+start a private agent hold an `AgentGuard`, declared before `agent start`, so
+a failing test still stops its `ssh-agent`. Acceptance tests take their
+temporary directory from `tests/support/test_store.rs`, which removes every
+space with `quarters rm` on drop and fails the test if a private runtime
+directory survives. Core unit tests that create a runtime directory hold a
+`TestRuntime` guard, which removes it the same way.
+
 ## Licensing of contributions
 
 Quarters is licensed under GPL-3.0-or-later, and Agenxy also offers it under a
