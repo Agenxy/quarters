@@ -613,12 +613,14 @@ fn import_mode(mode: u32) -> Result<Mode> {
 #[cfg(test)]
 static TEST_BARRIER: std::sync::Mutex<Option<std::sync::Arc<std::sync::Barrier>>> = std::sync::Mutex::new(None);
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 pub(super) fn set_test_barrier(barrier: Option<std::sync::Arc<std::sync::Barrier>>) {
     *TEST_BARRIER.lock().expect("import test barrier lock") = barrier;
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 fn whole_tree_test_hook() {

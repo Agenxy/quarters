@@ -392,7 +392,8 @@ impl Store {
         fs::remove_file(&marker_path)
             .map_err(|error| QuartersError::io("remove completed rollback marker", &marker_path, error))?;
         let cleanup_hint = format!(
-            "rollback of '{}' completed and its recovery snapshot was published; run 'quarters doctor' and recover validated stale state",
+            "rollback of '{}' completed and its recovery snapshot was published; run 'quarters doctor' and recover \
+                validated stale state",
             target.manifest().name
         );
         sync_directory(&spaces).map_err(|error| post_commit_cleanup_error(error, &cleanup_hint))?;
@@ -629,8 +630,12 @@ fn recovery_action(spaces: &Path, marker_path: &Path, marker: &RollbackMarker) -
                 ),
             )
             .with_hint(format!(
-                "preserve every rollback path; inspect marker {} and entries '{}', '{}' and '{}'; Quarters will not guess",
-                marker_path.display(), marker.target, marker.staging_entry, marker.retired_entry
+                "preserve every rollback path; inspect marker {} and entries '{}', '{}' and '{}'; Quarters will not \
+                    guess",
+                marker_path.display(),
+                marker.target,
+                marker.staging_entry,
+                marker.retired_entry
             )));
         }
     };
@@ -865,7 +870,8 @@ fn require_recovery_name_available(store: &Store, name: &ArtifactName) -> Result
         .map_err(|error| {
             if error.kind() == ErrorKind::AlreadyExists {
                 error.with_hint(
-                    "a prior attempt may have preserved this recovery snapshot; inspect it, then choose a new name or remove it explicitly",
+                    "a prior attempt may have preserved this recovery snapshot; inspect it, then choose a new name or \
+                        remove it explicitly",
                 )
             } else {
                 error

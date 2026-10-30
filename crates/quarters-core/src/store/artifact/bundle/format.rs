@@ -536,6 +536,7 @@ fn conversion_error(error: impl std::error::Error + Send + Sync + 'static) -> Qu
     QuartersError::new(ErrorKind::ResourceLimit, "bundle length cannot be represented safely").with_source(error)
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

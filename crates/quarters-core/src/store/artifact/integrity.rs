@@ -411,6 +411,7 @@ fn conversion_error(error: impl std::error::Error + Send + Sync + 'static) -> Qu
     .with_source(error)
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

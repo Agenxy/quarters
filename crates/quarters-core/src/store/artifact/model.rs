@@ -104,7 +104,8 @@ impl ArtifactName {
         }
         Err(QuartersError::new(
             ErrorKind::InvalidInput,
-            "artifact names must be 1-32 ASCII letters, numbers, hyphens or underscores and start with a letter or number",
+            "artifact names must be 1-32 ASCII letters, numbers, hyphens or underscores and start with a letter or \
+                number",
         ))
     }
 

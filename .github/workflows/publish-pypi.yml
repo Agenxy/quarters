@@ -59,10 +59,13 @@ jobs:
           uv pip install --python "$RUNNER_TEMP/quarters-pypi-venv/bin/python" --no-deps dist/*.whl
           export PATH="$RUNNER_TEMP/quarters-pypi-venv/bin:$PATH"
           quarters --version
-          QUARTERS_ROOT="$RUNNER_TEMP/quarters-pypi-store" quarters create smoke
-          QUARTERS_ROOT="$RUNNER_TEMP/quarters-pypi-store" quarters exec smoke -- /bin/sh -c 'test "$QUARTERS_SPACE" = smoke'
+          export QUARTERS_ROOT="$RUNNER_TEMP/quarters-pypi-store"
+          quarters create smoke
+          quarters exec smoke -- /bin/sh -c 'test "$QUARTERS_SPACE" = smoke'
       - name: Refuse test hooks in the wheel's binary
-        run: cargo run --locked --quiet --package quarters-quality -- release-binary "$RUNNER_TEMP/quarters-pypi-venv/bin/quarters"
+        run: >-
+          cargo run --locked --quiet --package quarters-quality --
+          release-binary "$RUNNER_TEMP/quarters-pypi-venv/bin/quarters"
       - name: Upload wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

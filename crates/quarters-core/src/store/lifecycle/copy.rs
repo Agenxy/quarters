@@ -434,7 +434,8 @@ fn publish(store: &Store, setup: &CloneSetup, manifest: &SpaceManifest, control:
     control.abort_after_publish()?;
     sync_parent_directory(&staging.destination).map_err(|error| {
         error.with_hint(format!(
-            "space '{}' was published completely, but directory durability could not be confirmed; inspect it before retrying",
+            "space '{}' was published completely, but directory durability could not be confirmed; inspect it before \
+                retrying",
             manifest.name
         ))
     })

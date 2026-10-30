@@ -102,7 +102,9 @@ test "$(quarters current)" = confined || exit 22
 quarters doctor >/dev/null 2>&1; test $? -eq 6 || exit 23
 if [ "$5" = true ]; then ssh -V >/dev/null 2>&1 || exit 24; fi
 if [ "$6" = true ]; then git init -q "$HOME/git-smoke" || exit 25; fi
-if [ "$7" = true ]; then python3 -c 'from pathlib import Path; Path.home().joinpath("python-smoke").write_text("ok")' || exit 26; fi
+if [ "$7" = true ]; then
+  python3 -c 'from pathlib import Path; Path.home().joinpath("python-smoke").write_text("ok")' || exit 26
+fi
 if [ "$8" = true ]; then node -e 'require("fs").writeFileSync(process.env.HOME + "/node-smoke", "ok")' || exit 27; fi
 quarter-descriptor-script "$HOME/descriptor-script-smoke" || exit 28
 "#;
@@ -141,7 +143,9 @@ fn home_view_mounts_space_state_and_disables_host_escape() -> Result<(), Box<dyn
             "--",
             "/bin/sh",
             "-c",
-            "test -f \"$HOME/.quarters-home-view-marker\" || exit 1\ntest -f .quarters-home-view-marker || exit 1\ntest \"$(quarters current)\" = mounted || exit 1\nquarters host -- /usr/bin/true >/dev/null 2>&1\ntest $? -eq 6",
+            "test -f \"$HOME/.quarters-home-view-marker\" || exit 1\ntest -f .quarters-home-view-marker || exit \
+                1\ntest \"$(quarters current)\" = mounted || exit 1\nquarters host -- /usr/bin/true >/dev/null \
+                2>&1\ntest $? -eq 6",
         ])
         .output()?;
 

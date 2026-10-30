@@ -180,7 +180,8 @@ fn recover_inactive_state(space: &Space, runtime: &Path) -> Result<AgentStatus> 
         }
         return finish_stopping(space, runtime, &record).map_err(|error| {
             error.with_hint(format!(
-                "the stopping record was retained; inspect the exact socket, then retry 'quarters agent recover {} --confirm {}'",
+                "the stopping record was retained; inspect the exact socket, then retry 'quarters agent recover {} \
+                    --confirm {}'",
                 space.manifest().name,
                 space.manifest().name
             ))
@@ -419,6 +420,7 @@ fn missing_registry() -> QuartersError {
     )
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

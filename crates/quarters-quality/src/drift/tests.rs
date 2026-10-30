@@ -14,7 +14,9 @@ fn versions_compare_numerically_and_place_prereleases_first() {
 
 #[test]
 fn workflow_pins_are_read_in_each_of_their_forms() {
-    let workflow = "      - uses: actions/checkout@3d3c # v7.0.1\n        uses: astral-sh/setup-uv@6855 # v10.3.3\n        with:\n          version: \"0.13.6\"\n        run: cargo install --locked cargo-audit --version 0.22.2\n          npm install --global npm@12.2.1\n";
+    let workflow = "      - uses: actions/checkout@3d3c # v7.0.1\n        uses: astral-sh/setup-uv@6855 # \
+        v10.3.3\n        with:\n          version: \"0.13.6\"\n        run: cargo install --locked cargo-audit \
+        --version 0.22.2\n          npm install --global npm@12.2.1\n";
     let actions = action_pins("ci.yml", workflow);
     assert_eq!(actions.len(), 2);
     assert_eq!(
@@ -37,7 +39,8 @@ fn workflow_pins_are_read_in_each_of_their_forms() {
 
 #[test]
 fn only_exact_workspace_dependencies_are_pins() {
-    let manifest = "[package]\nname = \"x\"\n[workspace.dependencies]\nblake3 = \"=1.8.7\"\nrmcp = { version = \"=3.8.0\", default-features = false }\nloose = \"1\"\n[workspace.lints.rust]\n";
+    let manifest = "[package]\nname = \"x\"\n[workspace.dependencies]\nblake3 = \"=1.8.7\"\nrmcp = { version = \
+        \"=3.8.0\", default-features = false }\nloose = \"1\"\n[workspace.lints.rust]\n";
     let pins = crate_pins(manifest);
     let names: Vec<(&str, &str)> = pins
         .iter()

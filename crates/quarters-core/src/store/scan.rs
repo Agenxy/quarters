@@ -31,6 +31,7 @@ impl ScanBudget {
     }
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

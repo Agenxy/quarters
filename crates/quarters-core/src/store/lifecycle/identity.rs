@@ -90,6 +90,7 @@ fn identity_error(component: &str) -> QuartersError {
     .with_hint("the mismatched filesystem state was preserved for manual inspection")
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

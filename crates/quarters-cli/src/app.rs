@@ -536,7 +536,8 @@ fn clone_space(store: &Store, arguments: &CloneArgs, json: bool) -> Result<i32> 
                 "--confirm-sensitive-state must exactly repeat the source space name",
             )
             .with_hint(format!(
-                "run 'quarters clone {source} {destination} --preview', then execute with '--confirm-sensitive-state {source}'"
+                "run 'quarters clone {source} {destination} --preview', then execute with '--confirm-sensitive-state \
+                    {source}'"
             )));
         }
         store.clone_space(&source, destination.clone(), arguments.include_cache)?
@@ -550,11 +551,14 @@ fn clone_space(store: &Store, arguments: &CloneArgs, json: bool) -> Result<i32> 
 
 fn install_created_commands(store: &Store, name: &SpaceName) -> Result<()> {
     let space = store.open(name)?;
-    crate::adapter::install(store, &space).map(|_report| ()).map_err(|error| {
-        error.with_hint(format!(
-            "space '{name}' was published, but managed commands are incomplete; inspect 'quarters adapter status {name}', then retry installation"
-        ))
-    })
+    crate::adapter::install(store, &space)
+        .map(|_report| ())
+        .map_err(|error| {
+            error.with_hint(format!(
+                "space '{name}' was published, but managed commands are incomplete; inspect 'quarters adapter status \
+                {name}', then retry installation"
+            ))
+        })
 }
 
 fn list(store: &Store, json: bool) -> Result<i32> {

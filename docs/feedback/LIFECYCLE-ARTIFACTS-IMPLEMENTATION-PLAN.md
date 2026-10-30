@@ -344,7 +344,7 @@ bytes and directory identity, so no whole-tree hash holds the global token.
 
 Artifacts record the creating platform. Template use reapplies the destination
 platform's exact create-time directory skeleton for the recorded layout. A
-profile gets only the private-directory set; a workspace additionally gets the
+profile gets only the private-directory set; a workspace also gets the
 portable and platform workspace sets. Platform cache roots are not invented for
 a layout whose `quarters create` path does not create them. A no-follow
 create-if-absent helper validates any existing directory's owner and type

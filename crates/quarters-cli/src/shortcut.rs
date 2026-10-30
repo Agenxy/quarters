@@ -601,6 +601,7 @@ fn missing_directory_error() -> QuartersError {
     .with_hint("run from the host shell with HOME set, or pass an existing absolute PATH directory with --dir")
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

@@ -68,7 +68,7 @@ The MCP adapter is acceptable only when all of these remain true.
 
 Run `make check`, `make dependencies` and the end-to-end stdio acceptance tests
 on macOS and Linux before release. Cross-platform CI is evidence for portable
-behavior; namespace behavior additionally requires a Linux host whose policy
+behavior; namespace behavior also requires a Linux host whose policy
 allows the feature.
 
 ## MCP 2026-07-28 conformance audit

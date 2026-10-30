@@ -139,7 +139,8 @@ fn delete_retired_space(retired: &RetiredSpace, name: &str) -> Result<()> {
         .map_err(|error| error.with_hint(hint))?;
     sync_parent_directory(&retired.path).map_err(|error| {
         error.with_hint(format!(
-            "space '{name}' was removed, but directory durability could not be confirmed; inspect status before retrying"
+            "space '{name}' was removed, but directory durability could not be confirmed; inspect status before \
+                retrying"
         ))
     })
 }

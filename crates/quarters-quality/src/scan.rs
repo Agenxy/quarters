@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Repository discovery and non-code policy checks.
 
-use crate::limits::MAX_FILE_LINES;
+use crate::limits::{MAX_FILE_LINES, MAX_LINE_WIDTH};
 use crate::metrics;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -243,20 +243,42 @@ fn check_repository_files(root: &Path, violations: &mut Vec<String>) {
                 violations.push(format!("shell script is not allowed: {}", path.display()));
             }
             if let Ok(text) = fs::read_to_string(&path) {
-                if !allowlisted && starts_with_shell_shebang(&text) {
-                    violations.push(format!(
-                        "shell interpreter is not allowed: {}; use a uv script or a compiled program",
-                        path.display()
-                    ));
-                }
-                for line in em_dash_lines(&text) {
-                    violations.push(format!(
-                        "{}:{line}: em dash; use a comma, colon, semicolon or parentheses",
-                        path.display()
-                    ));
-                }
+                check_text(&path, &text, allowlisted, violations);
             }
         }
+    }
+}
+
+/// The text policies for one file: shell shebangs, code line width, avoided
+/// prose vocabulary in Markdown, and em dashes anywhere.
+fn check_text(path: &Path, text: &str, allowlisted: bool, violations: &mut Vec<String>) {
+    if !allowlisted && starts_with_shell_shebang(text) {
+        violations.push(format!(
+            "shell interpreter is not allowed: {}; use a uv script or a compiled program",
+            path.display()
+        ));
+    }
+    if is_code_file(path) {
+        for line in wide_lines(text) {
+            violations.push(format!(
+                "{}:{line}: longer than {MAX_LINE_WIDTH} characters",
+                path.display()
+            ));
+        }
+    }
+    if path.extension().is_some_and(|extension| extension == "md") {
+        for (line, word) in machine_prose_lines(text) {
+            violations.push(format!(
+                "{}:{line}: \"{word}\" reads as machine-written; say it plainly",
+                path.display()
+            ));
+        }
+    }
+    for line in em_dash_lines(text) {
+        violations.push(format!(
+            "{}:{line}: em dash; use a comma, colon, semicolon or parentheses",
+            path.display()
+        ));
     }
 }
 
@@ -300,6 +322,91 @@ fn starts_with_shell_shebang(text: &str) -> bool {
     matches!(name, "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish")
 }
 
+/// Code, configuration and workflow files share the 120-character line bound;
+/// prose and tables in Markdown are not code.
+fn is_code_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "rs" | "ts" | "toml" | "yml" | "yaml"))
+}
+
+/// One-based numbers of the lines longer than the line bound, in characters.
+fn wide_lines(text: &str) -> Vec<usize> {
+    text.lines()
+        .enumerate()
+        .filter(|(_index, line)| line.chars().count() > MAX_LINE_WIDTH)
+        .map(|(index, _line)| index.saturating_add(1))
+        .collect()
+}
+
+/// Words and openers Agenxy's writing standard asks prose to avoid, matched
+/// case-insensitively as whole words.
+const MACHINE_PROSE: &[&str] = &[
+    "delve",
+    "leverage",
+    "foster",
+    "seamless",
+    "robust",
+    "cutting-edge",
+    "pivotal",
+    "meticulous",
+    "intricate",
+    "paramount",
+    "tapestry",
+    "realm",
+    "landscape",
+    "beacon",
+    "journey",
+    "showcase",
+    "underscore",
+    "unleash",
+    "empower",
+    "navigate",
+    "demystify",
+    "myriad",
+    "plethora",
+    "comprehensive",
+    "transformative",
+    "revolutionary",
+    "game-changer",
+    "furthermore",
+    "moreover",
+    "additionally",
+    "in conclusion",
+];
+
+/// One-based line numbers and words of Markdown prose that uses the avoided
+/// vocabulary, outside `<!-- prose-check: off -->` ... `on` regions.
+fn machine_prose_lines(text: &str) -> Vec<(usize, &'static str)> {
+    let mut checking = true;
+    let mut found = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        match line.trim() {
+            "<!-- prose-check: off -->" => checking = false,
+            "<!-- prose-check: on -->" => checking = true,
+            _ if checking => {
+                let lower = line.to_lowercase();
+                for word in MACHINE_PROSE {
+                    if contains_word(&lower, word) {
+                        found.push((index.saturating_add(1), *word));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Whether `word` occurs in `text` bounded by non-letters on both sides.
+fn contains_word(text: &str, word: &str) -> bool {
+    text.match_indices(word).any(|(start, _matched)| {
+        let before = text[..start].chars().next_back();
+        let after = text[start.saturating_add(word.len())..].chars().next();
+        !before.is_some_and(char::is_alphabetic) && !after.is_some_and(char::is_alphabetic)
+    })
+}
+
 /// One-based numbers of the lines that contain an em dash (U+2014).
 fn em_dash_lines(text: &str) -> Vec<usize> {
     text.lines()
@@ -311,7 +418,22 @@ fn em_dash_lines(text: &str) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{em_dash_lines, parse_shell_allowlist, starts_with_shell_shebang};
+    use super::{em_dash_lines, machine_prose_lines, parse_shell_allowlist, starts_with_shell_shebang, wide_lines};
+
+    #[test]
+    fn machine_prose_is_found_by_whole_word_outside_disabled_regions() {
+        let text = "A robust design.\nRobustness is fine.\n<!-- prose-check: off -->\nseamless\n\
+            <!-- prose-check: on -->\nMoreover, it works.\n";
+        assert_eq!(machine_prose_lines(text), vec![(1, "robust"), (6, "moreover")]);
+    }
+
+    #[test]
+    fn lines_are_measured_in_characters_against_the_bound() {
+        let fits = "x".repeat(120);
+        let wide = "x".repeat(121);
+        let accented = "\u{e9}".repeat(120);
+        assert_eq!(wide_lines(&format!("{fits}\n{wide}\n{accented}\n")), vec![2]);
+    }
 
     #[test]
     fn shell_allowlist_entries_need_a_reason_and_an_existing_file() {
