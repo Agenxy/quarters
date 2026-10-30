@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Quarters' native repository quality gate.
 
+mod drift;
 mod limits;
 mod metrics;
 mod release;
@@ -14,8 +15,17 @@ fn main() -> ExitCode {
     if command.as_deref() == Some("release-binary") {
         return check_release_binaries(&arguments.collect::<Vec<_>>());
     }
+    if command.as_deref() == Some("drift") {
+        return match std::env::current_dir() {
+            Ok(root) => ExitCode::from(drift::run(&root)),
+            Err(error) => {
+                eprintln!("quarters-quality drift: {error}");
+                ExitCode::from(2)
+            }
+        };
+    }
     if command.as_deref() != Some("check") {
-        eprintln!("usage: quarters-quality check | quarters-quality release-binary PATH...");
+        eprintln!("usage: quarters-quality check | quarters-quality drift | quarters-quality release-binary PATH...");
         return ExitCode::from(2);
     }
     match scan::check_repository() {

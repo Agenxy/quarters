@@ -298,6 +298,13 @@ compatibility notes will be called out here.
 - Answer `prompts/list` and `completion/complete` with method-not-found:
   Quarters advertises neither capability, and rmcp's defaults returned empty
   results.
+- Watch every pin for drift: `quarters-quality drift` compares the Rust,
+  Bun, Node.js LTS, maturin, uv, npm and cargo-audit pins, every SHA-pinned
+  Action, every exact Cargo pin and the launcher's npm dev dependencies with
+  their upstream releases, and a daily workflow runs it beside a report-only
+  RustSec audit. The gate also refuses a workflow or document that names a
+  toolchain version other than the pin, and npm is now pinned (12.2.1) where
+  it publishes.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 

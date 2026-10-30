@@ -14,6 +14,11 @@ packaging and publication interface. Direct dependencies are exact in
 `Cargo.toml`; `Cargo.lock` is committed. Platform behavior stays behind the
 platform module, and capability requests fail rather than degrading silently.
 
+Toolchain versions are pinned in `rust-toolchain.toml`, the launcher's
+`packageManager`, `pyproject.toml` and the workflows, and every mention of one
+must match its pin. `cargo run -p quarters-quality -- drift` reports any pin
+behind its upstream release; the scheduled Drift workflow runs it daily.
+
 Changes to process authority, environment inheritance, filesystem mutation,
 stored schema or platform guarantees need tests and an architecture decision.
 
