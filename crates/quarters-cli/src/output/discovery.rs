@@ -62,6 +62,13 @@ pub(crate) fn print_report(report: &DiscoveryReport) -> io::Result<()> {
         )
     )?;
     write_counts(&mut output, "Unreadable", &report.observation.unreadable_classes)?;
+    if report.observation.non_local_filesystems > 0 {
+        writeln!(
+            output,
+            "  Skipped  {} network or FUSE filesystem(s) not scanned",
+            report.observation.non_local_filesystems
+        )?;
+    }
     writeln!(
         output,
         "  Boundary Quarter-owned metadata only; host access and writes were not measured"

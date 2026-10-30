@@ -376,9 +376,15 @@ fn reject_unowned_socket(runtime: &Path) -> Result<()> {
 }
 
 fn agent_lock(runtime: &Path) -> Result<File> {
+    agent_lock_until(runtime, Instant::now() + LOCK_TIMEOUT)
+}
+
+/// Wait for the lifecycle lock until `deadline`, and never longer than the
+/// lock timeout, so a bounded operation spends no more than what it has left.
+fn agent_lock_until(runtime: &Path, deadline: Instant) -> Result<File> {
     let path = runtime.join(registry::LOCK_FILE);
     let file = open_or_create_private_lock(&path)?;
-    let deadline = Instant::now() + LOCK_TIMEOUT;
+    let deadline = deadline.min(Instant::now() + LOCK_TIMEOUT);
     loop {
         match <File as FileExt>::try_lock(&file) {
             Ok(()) => return Ok(file),
@@ -388,7 +394,7 @@ fn agent_lock(runtime: &Path) -> Result<File> {
             Err(fs4::TryLockError::WouldBlock) => {
                 return Err(QuartersError::new(
                     ErrorKind::ResourceLimit,
-                    "the private-agent lifecycle lock did not become available within eight seconds",
+                    "the private-agent lifecycle lock did not become available before its deadline",
                 ));
             }
             Err(fs4::TryLockError::Error(error)) => {
@@ -850,5 +856,23 @@ mod tests {
             socket_device: None,
             failure: Some(AgentFailure::LaunchExited),
         }
+    }
+
+    #[test]
+    fn a_lifecycle_lock_wait_ends_at_the_callers_deadline() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let holder = agent_lock(temporary.path()).expect("hold lifecycle lock");
+        let started = Instant::now();
+
+        let error = agent_lock_until(temporary.path(), started + Duration::from_millis(200))
+            .expect_err("a held lock must time out");
+
+        assert_eq!(error.kind(), ErrorKind::ResourceLimit);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "waited {:?}",
+            started.elapsed()
+        );
+        drop(holder);
     }
 }
