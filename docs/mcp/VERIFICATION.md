@@ -89,6 +89,7 @@ requests carrying `_meta` are served statelessly, and `initialize` opens the
 | `ping`, `logging/setLevel` and `notifications/roots/list_changed` are removed (major 5) | Holds | A ping carrying modern `_meta` and `logging/setLevel` both return `-32601` |
 | No `notifications/message` without a per-request `logLevel` (major 5) | Holds | Quarters emits no log notifications |
 | A bare ping before any lifecycle is the legacy pre-initialize ping (versioning, dual-era) | Holds | `bare_ping_after_a_modern_probe_is_a_legacy_preinitialize_ping` |
+| Only advertised capabilities are served (capability negotiation) | Holds | Prompts and completions are not advertised; `prompts/list` and `completion/complete` return `-32601` instead of rmcp's empty defaults (`unadvertised_prompts_and_completions_are_unknown_methods`) |
 | Every result carries `resultType` (major 8) | Holds | `complete` on every result; Quarters returns no interim results |
 | List and read results carry `ttlMs` and `cacheScope` (minor 5) | Holds | `tools/list`, `resources/list` and static `resources/read` are public for one hour; dynamic status reads are private and short |
 | `tools/list` order is deterministic (minor 3) | Holds | Tools are returned sorted by name |

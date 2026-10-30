@@ -295,6 +295,9 @@ compatibility notes will be called out here.
 - Record why `__CFBundleIdentifier` is inherited (terminal context naming the
   hosting app, like `TERM_PROGRAM`) and test that no other CoreFoundation
   private variable is.
+- Answer `prompts/list` and `completion/complete` with method-not-found:
+  Quarters advertises neither capability, and rmcp's defaults returned empty
+  results.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 
