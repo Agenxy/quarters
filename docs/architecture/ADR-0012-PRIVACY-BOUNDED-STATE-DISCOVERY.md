@@ -72,6 +72,13 @@ writes under runtime `bin` are measured rather than excluded.
 The alpha gives each selected root an independent per-phase budget of 262,144
 entries, depth 64, 4,096 relative-path bytes, 16 MiB of pending directory-entry
 names and five seconds. Each root reports its own completeness and bound state.
+The time bound is checked between filesystem calls, so it cannot preempt one
+call that blocks: a hung network or FUSE mount inside a selected root can hold
+a scan past five seconds until the kernel returns. Quarters does not add a
+watchdog, because interrupting a blocked call needs signals or unsafe code and
+the scan would still have to wait for the call to return. Once it returns, the
+elapsed bound marks that root incomplete and the delta is suppressed, so a
+stall delays the report but never makes it claim completeness.
 Library callers are rejected before scanning when depth exceeds the supported
 recursive ceiling of 256; the relative-path byte bound independently limits
 practical depth.

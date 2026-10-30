@@ -2,6 +2,8 @@
 //! Linux profile and opt-in mount-home backend.
 
 mod confinement;
+mod report_descriptor;
+pub(super) use report_descriptor::platform_open_report_descriptor;
 
 use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};

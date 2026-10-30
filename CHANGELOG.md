@@ -292,6 +292,18 @@ compatibility notes will be called out here.
 - Enter `--workdir` by identity: the directory's device and inode are recorded
   when it is validated, and the launch changes into a descriptor with that
   identity, refusing a path replaced in between instead of following it.
+- Bound every private-agent startup lock wait by the startup's remaining
+  budget, so a contended lock can no longer stretch startup past ten seconds;
+  recording a failure still waits the full lock timeout.
+- Include the Linux boot identity in the private-agent process generation, so
+  a PID and start time repeated after a reboot never match a stale record;
+  records written before this change still match on start time.
+- Refuse a non-blocking pipe or FIFO as the macOS `--report-fd`, which shares
+  its status flags and could drop the report, and move descriptor reopening
+  behind the platform module.
+- Document that the discovery time bound is checked between filesystem calls,
+  so a hung network or FUSE mount delays the report but still marks it
+  incomplete.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 

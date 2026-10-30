@@ -5,12 +5,14 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+mod report_descriptor;
 mod working_directory;
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 compile_error!("Quarters currently supports macOS and Linux only");
 
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result, Space};
 use nix::unistd::Uid;
+pub use report_descriptor::open_report_descriptor;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -551,15 +553,15 @@ pub fn resolve_confined_executable(
 use linux::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
     platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
-    platform_runtime_base, platform_workspace_directories,
+    platform_extend_environment, platform_open_report_descriptor, platform_prepare_filesystem_confinement,
+    platform_resolve_confined_executable, platform_runtime_base, platform_workspace_directories,
 };
 #[cfg(target_os = "macos")]
 use macos::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
     platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
-    platform_runtime_base, platform_workspace_directories,
+    platform_extend_environment, platform_open_report_descriptor, platform_prepare_filesystem_confinement,
+    platform_resolve_confined_executable, platform_runtime_base, platform_workspace_directories,
 };
 
 #[cfg(target_os = "macos")]

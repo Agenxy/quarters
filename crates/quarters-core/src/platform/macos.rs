@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! macOS profile backend.
 
+mod report_descriptor;
+pub(super) use report_descriptor::platform_open_report_descriptor;
+
 use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest, unsupported_home_view};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use std::collections::BTreeMap;
