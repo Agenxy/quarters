@@ -311,6 +311,8 @@ compatibility notes will be called out here.
 - Answer `prompts/list` and `completion/complete` with method-not-found:
   Quarters advertises neither capability, and rmcp's defaults returned empty
   results.
+- Move the CLI's remaining platform-specific code, the Linux descriptor exec
+  and device-number normalization, behind the core platform module.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 
