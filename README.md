@@ -140,6 +140,10 @@ quarters template create current-room --from-active --confirm-sensitive-state wo
 quarters unfreeze --confirm work
 ```
 
+`man quarters` and `man quarters-COMMAND` document every command once
+installed through Homebrew or npm, and `make install` places them under
+`~/.local/share/man`.
+
 Install the current checkout with `make install`. Building from source requires
 a current Rust toolchain plus a working C compiler and assembler for optimized
 BLAKE3. The complete repository gate and typed npm launcher development also

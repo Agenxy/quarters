@@ -1,0 +1,39 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-env 1  "quarters-env " 
+.SH NAME
+quarters\-env \- Show the exact environment Quarters would apply
+.SH SYNOPSIS
+\fBquarters\-env\fR [\fB\-\-home\-view\fR] [\fB\-\-confinement\fR] [\fB\-\-inherit\fR] [\fB\-\-grant\-path\fR] [\fB\-\-workdir\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> 
+.SH DESCRIPTION
+Show the exact environment Quarters would apply
+.SH OPTIONS
+.TP
+\fB\-\-home\-view\fR
+Opt into Linux\*(Aqs experimental bind\-mounted passwd\-home view
+.TP
+\fB\-\-confinement\fR \fI<CONFINEMENT>\fR
+Enforce the named native filesystem policy; defaults to the Quarter home
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+filesystem: Linux Landlock ABI 3 path policy; unavailable on macOS
+.RE
+.TP
+\fB\-\-inherit\fR \fI<NAME>\fR
+Explicitly inherit one otherwise\-blocked host environment variable
+.TP
+\fB\-\-grant\-path\fR \fI<ABSOLUTE_PATH:ro|rw>\fR
+Admit one existing absolute host data path to Linux confinement
+.TP
+\fB\-\-workdir\fR \fI<ABSOLUTE_PATH>\fR
+Start the shell or command in this existing absolute directory
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fINAME\fR>
+Space to inspect or launch

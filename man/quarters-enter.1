@@ -1,0 +1,45 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-enter 1  "quarters-enter " 
+.SH NAME
+quarters\-enter \- Enter an interactive shell in a space
+.SH SYNOPSIS
+\fBquarters\-enter\fR [\fB\-\-home\-view\fR] [\fB\-\-confinement\fR] [\fB\-\-inherit\fR] [\fB\-\-grant\-path\fR] [\fB\-\-workdir\fR] [\fB\-\-shell\fR] [\fB\-\-login\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> 
+.SH DESCRIPTION
+Enter an interactive shell in a space
+.SH OPTIONS
+.TP
+\fB\-\-home\-view\fR
+Opt into Linux\*(Aqs experimental bind\-mounted passwd\-home view
+.TP
+\fB\-\-confinement\fR \fI<CONFINEMENT>\fR
+Enforce the named native filesystem policy; defaults to the Quarter home
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+filesystem: Linux Landlock ABI 3 path policy; unavailable on macOS
+.RE
+.TP
+\fB\-\-inherit\fR \fI<NAME>\fR
+Explicitly inherit one otherwise\-blocked host environment variable
+.TP
+\fB\-\-grant\-path\fR \fI<ABSOLUTE_PATH:ro|rw>\fR
+Admit one existing absolute host data path to Linux confinement
+.TP
+\fB\-\-workdir\fR \fI<ABSOLUTE_PATH>\fR
+Start the shell or command in this existing absolute directory
+.TP
+\fB\-\-shell\fR \fI<PATH>\fR
+Override the space\*(Aqs default shell for this entry
+.TP
+\fB\-\-login\fR
+Ask the shell for login behavior. This may run host system profiles
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fINAME\fR>
+Space to inspect or launch

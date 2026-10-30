@@ -18,6 +18,7 @@ homepage = "https://github.com/Agenxy/quarters"
 [workspace.dependencies]
 blake3 = "=1.8.7"
 clap = "=4.6.7"
+clap_mangen = "=0.3.3"
 futures = "=0.3.34"
 fs4 = "=1.1.0"
 getrandom = "=0.4.3"

@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-unfreeze 1  "quarters-unfreeze " 
+.SH NAME
+quarters\-unfreeze \- Remove a cooperative freeze marker after exact confirmation
+.SH SYNOPSIS
+\fBquarters\-unfreeze\fR [\fB\-h\fR|\fB\-\-help\fR] <\fB\-\-confirm\fR> [\fINAME\fR] 
+.SH DESCRIPTION
+Remove a cooperative freeze marker after exact confirmation
+.SH OPTIONS
+.TP
+\fB\-\-confirm\fR \fI<NAME>\fR
+Must exactly repeat the resolved space name
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fINAME\fR]
+Space name. Defaults to the current Quarter when inside one

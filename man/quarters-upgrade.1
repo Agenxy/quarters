@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-upgrade 1  "quarters-upgrade " 
+.SH NAME
+quarters\-upgrade \- Assign stable identity to an inactive legacy space
+.SH SYNOPSIS
+\fBquarters\-upgrade\fR [\fB\-\-preview\fR] [\fB\-\-confirm\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> 
+.SH DESCRIPTION
+Assign stable identity to an inactive legacy space
+.SH OPTIONS
+.TP
+\fB\-\-preview\fR
+Validate lease and schema without changing metadata
+.TP
+\fB\-\-confirm\fR \fI<NAME>\fR
+Exactly repeat NAME to execute the metadata upgrade
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fINAME\fR>
+Existing space to inspect or upgrade

@@ -331,6 +331,9 @@ compatibility notes will be called out here.
   complexity 20, a reason on every lint suppression, the standard's avoided
   vocabulary refused in Markdown, and weekly Dependabot updates for Cargo,
   GitHub Actions and Bun. Two departures are recorded with their reasons.
+- Ship manual pages: `quarters.1` and one page per subcommand, generated from
+  the command-line definition with `clap_mangen`, checked so they cannot drift
+  from `--help`, and installed by the npm launcher and the Homebrew formula.
 
 ## 0.1.0-alpha.2 (2026-08-20)
 

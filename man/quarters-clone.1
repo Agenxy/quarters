@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-clone 1  "quarters-clone " 
+.SH NAME
+quarters\-clone \- Clone persistent state into a new independent space
+.SH SYNOPSIS
+\fBquarters\-clone\fR [\fB\-\-preview\fR] [\fB\-\-confirm\-sensitive\-state\fR] [\fB\-\-include\-cache\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR> <\fIDESTINATION\fR> 
+.SH DESCRIPTION
+Clone persistent state into a new independent space
+.SH OPTIONS
+.TP
+\fB\-\-preview\fR
+Validate and summarize without creating the destination
+.TP
+\fB\-\-confirm\-sensitive\-state\fR \fI<SOURCE>\fR
+Exactly repeat SOURCE to acknowledge copied state may contain credentials
+.TP
+\fB\-\-include\-cache\fR
+Copy derived cache contents instead of recreating cache roots empty
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fISOURCE\fR>
+Existing source space
+.TP
+<\fIDESTINATION\fR>
+New destination space

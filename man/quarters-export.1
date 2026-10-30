@@ -1,0 +1,41 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-export 1  "quarters-export " 
+.SH NAME
+quarters\-export \- Export an authenticated plaintext template or snapshot bundle
+.SH SYNOPSIS
+\fBquarters\-export\fR [\fB\-\-preview\fR] [\fB\-\-confirm\-sensitive\-state\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fB\-\-to\fR> <\fB\-\-key\fR> <\fIKIND\fR> <\fINAME\fR> 
+.SH DESCRIPTION
+Export an authenticated plaintext template or snapshot bundle
+.SH OPTIONS
+.TP
+\fB\-\-to\fR \fI<PATH>\fR
+Absolute bundle destination outside the Quarters store
+.TP
+\fB\-\-key\fR \fI<PATH>\fR
+Absolute private 32\-byte key file in a protected directory outside the Quarters store
+.TP
+\fB\-\-preview\fR
+Authenticate inputs and report the exact policy without writing
+.TP
+\fB\-\-confirm\-sensitive\-state\fR \fI<NAME>\fR
+Exactly repeat NAME to acknowledge plaintext sensitive\-state export
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fIKIND\fR>
+Artifact category
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+template: Reusable creation source
+.IP \(bu 2
+snapshot: Named recovery point; imports as a template
+.RE
+.TP
+<\fINAME\fR>
+Existing artifact display name

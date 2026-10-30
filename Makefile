@@ -2,7 +2,7 @@
 QUARTERS_INSTALL_ROOT ?= $(HOME)/.local
 LAUNCHER_DIR := $(CURDIR)/packaging/npm/quarters-cli
 
-.PHONY: help format check test quality launcher-check dependencies docs install
+.PHONY: help format check test quality launcher-check dependencies docs man install
 
 help:
 	@printf '%s\n' \
@@ -15,6 +15,7 @@ help:
 	  '  make launcher-check  Check the typed npm launcher with Bun' \
 	  '  make dependencies  Audit advisories, licences and sources' \
 	  '  make docs     Build warning-free API documentation' \
+	  '  make man      Regenerate man/ from the command-line definition' \
 	  '  make install  Install quarters under ~/.local/bin'
 
 format:
@@ -42,9 +43,14 @@ dependencies:
 	cargo deny check
 	cargo audit --deny warnings
 
+man:
+	QUARTERS_WRITE_MAN=1 cargo test --quiet -p quarters --bin quarters man_pages
+
 docs:
 	RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
 
 install:
 	cargo install --locked --path crates/quarters-cli --root '$(QUARTERS_INSTALL_ROOT)'
+	install -d '$(QUARTERS_INSTALL_ROOT)/share/man/man1'
+	install -m 0644 man/*.1 '$(QUARTERS_INSTALL_ROOT)/share/man/man1/'
 	@printf '%s\n' "Installed quarters. Optional shorthand: $(QUARTERS_INSTALL_ROOT)/bin/quarters shortcut install qts --dir $(QUARTERS_INSTALL_ROOT)/bin"
