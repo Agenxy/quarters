@@ -292,6 +292,9 @@ compatibility notes will be called out here.
 - Enter `--workdir` by identity: the directory's device and inode are recorded
   when it is validated, and the launch changes into a descriptor with that
   identity, refusing a path replaced in between instead of following it.
+- Record why `__CFBundleIdentifier` is inherited (terminal context naming the
+  hosting app, like `TERM_PROGRAM`) and test that no other CoreFoundation
+  private variable is.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 
