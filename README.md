@@ -67,7 +67,7 @@ managed OpenSSH invocation adapters and an explicit private SSH-agent
 lifecycle. The socket enters a child environment only after process liveness,
 socket identity and the SSH-agent protocol all verify.
 
-Linux uses the same baseline. An experimental `--home-view` can additionally
+Linux uses the same baseline. An experimental `--home-view` can also
 bind the space home over the real passwd home inside an unprivileged user and
 mount namespace. It is opt-in because distro policy can disable user
 namespaces, supplementary groups cannot be mapped without added privilege, and

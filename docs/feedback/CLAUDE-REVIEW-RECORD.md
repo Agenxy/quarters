@@ -61,7 +61,7 @@ Claude Opus 5 reviewed
 [`LIFECYCLE-CLONE-IMPLEMENTATION-PLAN.md`](LIFECYCLE-CLONE-IMPLEMENTATION-PLAN.md)
 at maximum effort in read-only mode. The first pass returned `BLOCK`. Its
 findings required the plan to specify descriptor-relative traversal, bounded
-logical-file copying, hard-link treatment, special-file exclusion, robust
+logical-file copying, hard-link treatment, special-file exclusion, reliable
 cleanup of private read-only trees, deterministic transaction fault points,
 fresh control-plane identity and exact derived-cache policy.
 

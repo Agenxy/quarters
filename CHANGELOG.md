@@ -315,6 +315,12 @@ compatibility notes will be called out here.
   start with a shell shebang, alongside the existing `.sh` refusal.
 - Move the CLI's remaining platform-specific code, the Linux descriptor exec
   and device-number normalization, behind the core platform module.
+- Audit Quarters against Agenxy's engineering standards
+  (`docs/standards/ENGINEERING-AUDIT.md`) and enforce what the audit found:
+  code lines at 120 characters, cyclomatic complexity 15, clippy cognitive
+  complexity 20, a reason on every lint suppression, the standard's avoided
+  vocabulary refused in Markdown, and weekly Dependabot updates for Cargo,
+  GitHub Actions and Bun. Two departures are recorded with their reasons.
 
 ## 0.1.0-alpha.2 (2026-08-20)
 
