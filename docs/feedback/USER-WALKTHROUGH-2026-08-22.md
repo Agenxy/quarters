@@ -1,4 +1,4 @@
-# User walkthrough notes — 2026-08-22
+# User walkthrough notes, 2026-08-22
 
 These notes capture direct product feedback from the first guided Quarters walkthrough. They are intentionally descriptive; implementation decisions belong in the normal design and review process after the walkthrough.
 
@@ -53,7 +53,7 @@ gates pass:
 
 - Quarters-managed top-level implementation directories should be hidden with a leading dot by default.
 - Apply the convention consistently to storage-root and per-space internals such as spaces, metadata, snapshots, templates, runtime bookkeeping, locks, and staging areas.
-- Keep intentional user-facing directories inside an expanded workspace—such as Desktop, Documents, Downloads, and Applications—normally visible.
+- Keep intentional user-facing directories inside an expanded workspace, such as Desktop, Documents, Downloads, and Applications, normally visible.
 - Provide friendly CLI commands for locating or opening managed storage so hidden internals do not become undiscoverable.
 - Introduce the layout change through a versioned, transactional migration that preserves existing alpha spaces and can recover safely from interruption.
 

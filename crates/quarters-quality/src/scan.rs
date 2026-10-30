@@ -16,7 +16,7 @@ pub(crate) fn check_repository() -> Result<(), Vec<String>> {
     for path in files {
         inspect_rust_file(&path, &mut violations);
     }
-    check_for_shell_scripts(&root, &mut violations);
+    check_repository_files(&root, &mut violations);
     if violations.is_empty() { Ok(()) } else { Err(violations) }
 }
 
@@ -209,7 +209,10 @@ fn ignored_directory(name: &std::ffi::OsStr) -> bool {
     )
 }
 
-fn check_for_shell_scripts(root: &Path, violations: &mut Vec<String>) {
+/// Walk the repository once for the file-level policies: no shell scripts,
+/// whether named `.sh` or started with a shell shebang, and no em dashes in
+/// any UTF-8 text.
+fn check_repository_files(root: &Path, violations: &mut Vec<String>) {
     let mut directories = vec![root.to_path_buf()];
     while let Some(directory) = directories.pop() {
         let Ok(entries) = fs::read_dir(&directory) else {
@@ -217,11 +220,86 @@ fn check_for_shell_scripts(root: &Path, violations: &mut Vec<String>) {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() && !ignored_directory(&entry.file_name()) {
-                directories.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "sh") {
+            if path.is_dir() {
+                if !ignored_directory(&entry.file_name()) {
+                    directories.push(path);
+                }
+                continue;
+            }
+            if path.extension().is_some_and(|extension| extension == "sh") {
                 violations.push(format!("shell script is not allowed: {}", path.display()));
             }
+            if let Ok(text) = fs::read_to_string(&path) {
+                if starts_with_shell_shebang(&text) {
+                    violations.push(format!(
+                        "shell interpreter is not allowed: {}; use a uv script or a compiled program",
+                        path.display()
+                    ));
+                }
+                for line in em_dash_lines(&text) {
+                    violations.push(format!(
+                        "{}:{line}: em dash; use a comma, colon, semicolon or parentheses",
+                        path.display()
+                    ));
+                }
+            }
         }
+    }
+}
+
+/// Whether the first line runs a POSIX-family shell, directly or via `env`.
+fn starts_with_shell_shebang(text: &str) -> bool {
+    let Some(interpreter) = text.lines().next().and_then(|line| line.strip_prefix("#!")) else {
+        return false;
+    };
+    let mut words = interpreter.split_whitespace();
+    let program = words.next().unwrap_or_default();
+    let program = if program.ends_with("/env") {
+        words.find(|word| !word.starts_with('-')).unwrap_or_default()
+    } else {
+        program
+    };
+    let name = program.rsplit('/').next().unwrap_or_default();
+    matches!(name, "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish")
+}
+
+/// One-based numbers of the lines that contain an em dash (U+2014).
+fn em_dash_lines(text: &str) -> Vec<usize> {
+    text.lines()
+        .enumerate()
+        .filter(|(_index, line)| line.contains('\u{2014}'))
+        .map(|(index, _line)| index.saturating_add(1))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{em_dash_lines, starts_with_shell_shebang};
+
+    #[test]
+    fn shell_shebangs_are_recognized_and_other_interpreters_are_not() {
+        for script in [
+            "#!/bin/sh\n",
+            "#!/bin/bash -eu\n",
+            "#!/usr/bin/env bash\n",
+            "#!/usr/bin/env -S zsh -f\n",
+        ] {
+            assert!(starts_with_shell_shebang(script), "{script:?}");
+        }
+        for text in [
+            "#!/usr/bin/env -S uv run --script\n",
+            "#!/usr/bin/env python3\n",
+            "fn main() {}\n",
+            "x\n#!/bin/sh\n",
+        ] {
+            assert!(!starts_with_shell_shebang(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn em_dashes_are_reported_by_line_and_other_dashes_are_not() {
+        let text = "plain - hyphen\nrange 1\u{2013}2\nan aside \u{2014} here\n\u{2014}\n";
+        assert_eq!(em_dash_lines(text), vec![3, 4]);
+        assert_eq!(em_dash_lines("no dashes at all"), Vec::<usize>::new());
     }
 }
