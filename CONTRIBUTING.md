@@ -16,7 +16,9 @@ platform module, and capability requests fail rather than degrading silently.
 
 The gate also refuses shell scripts, whether named `.sh` or started with a
 shell shebang (write a uv script or a compiled program instead), and em dashes
-in any text file.
+in any text file. The only exceptions are entries in
+`crates/quarters-quality/shell-allowlist.txt`, each with a reason, reviewed as
+decisions; it has none today.
 
 Changes to process authority, environment inheritance, filesystem mutation,
 stored schema or platform guarantees need tests and an architecture decision.

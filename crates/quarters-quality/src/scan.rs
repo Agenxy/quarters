@@ -209,10 +209,19 @@ fn ignored_directory(name: &std::ffi::OsStr) -> bool {
     )
 }
 
+const SHELL_ALLOWLIST: &str = "crates/quarters-quality/shell-allowlist.txt";
+
 /// Walk the repository once for the file-level policies: no shell scripts,
-/// whether named `.sh` or started with a shell shebang, and no em dashes in
-/// any UTF-8 text.
+/// whether named `.sh` or started with a shell shebang, unless the reviewed
+/// allowlist names them, and no em dashes in any UTF-8 text.
 fn check_repository_files(root: &Path, violations: &mut Vec<String>) {
+    let allowed = match fs::read_to_string(root.join(SHELL_ALLOWLIST)) {
+        Ok(text) => parse_shell_allowlist(&text, |path| root.join(path).is_file(), violations),
+        Err(error) => {
+            violations.push(format!("{SHELL_ALLOWLIST}: {error}"));
+            Vec::new()
+        }
+    };
     let mut directories = vec![root.to_path_buf()];
     while let Some(directory) = directories.pop() {
         let Ok(entries) = fs::read_dir(&directory) else {
@@ -226,11 +235,14 @@ fn check_repository_files(root: &Path, violations: &mut Vec<String>) {
                 }
                 continue;
             }
-            if path.extension().is_some_and(|extension| extension == "sh") {
+            let allowlisted = path
+                .strip_prefix(root)
+                .is_ok_and(|relative| allowed.iter().any(|entry| Path::new(entry) == relative));
+            if !allowlisted && path.extension().is_some_and(|extension| extension == "sh") {
                 violations.push(format!("shell script is not allowed: {}", path.display()));
             }
             if let Ok(text) = fs::read_to_string(&path) {
-                if starts_with_shell_shebang(&text) {
+                if !allowlisted && starts_with_shell_shebang(&text) {
                     violations.push(format!(
                         "shell interpreter is not allowed: {}; use a uv script or a compiled program",
                         path.display()
@@ -245,6 +257,30 @@ fn check_repository_files(root: &Path, violations: &mut Vec<String>) {
             }
         }
     }
+}
+
+/// Paths from the shell allowlist. An entry without a reason after `#`, or
+/// naming a file that does not exist, is a violation rather than a permit.
+fn parse_shell_allowlist(text: &str, exists: impl Fn(&str) -> bool, violations: &mut Vec<String>) -> Vec<String> {
+    let mut allowed = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let number = index.saturating_add(1);
+        let (path, reason) = line
+            .split_once('#')
+            .map_or((line, ""), |(path, reason)| (path.trim(), reason.trim()));
+        if reason.is_empty() {
+            violations.push(format!("{SHELL_ALLOWLIST}:{number}: entry {path} gives no reason"));
+        } else if !exists(path) {
+            violations.push(format!("{SHELL_ALLOWLIST}:{number}: entry {path} names no file"));
+        } else {
+            allowed.push(path.to_owned());
+        }
+    }
+    allowed
 }
 
 /// Whether the first line runs a POSIX-family shell, directly or via `env`.
@@ -274,7 +310,25 @@ fn em_dash_lines(text: &str) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{em_dash_lines, starts_with_shell_shebang};
+    use super::{em_dash_lines, parse_shell_allowlist, starts_with_shell_shebang};
+
+    #[test]
+    fn shell_allowlist_entries_need_a_reason_and_an_existing_file() {
+        let text =
+            "# header\n\nboot/install.sh  # runs before any toolchain exists\nboot/bare.sh\nboot/gone.sh # stale\n";
+        let mut violations = Vec::new();
+        let allowed = parse_shell_allowlist(text, |path| path != "boot/gone.sh", &mut violations);
+        assert_eq!(allowed, vec!["boot/install.sh".to_owned()]);
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(
+            violations[0].contains(":4: entry boot/bare.sh gives no reason"),
+            "{violations:?}"
+        );
+        assert!(
+            violations[1].contains(":5: entry boot/gone.sh names no file"),
+            "{violations:?}"
+        );
+    }
 
     #[test]
     fn shell_shebangs_are_recognized_and_other_interpreters_are_not() {
