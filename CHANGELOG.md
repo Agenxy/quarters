@@ -301,9 +301,10 @@ compatibility notes will be called out here.
 - Refuse a non-blocking pipe or FIFO as the macOS `--report-fd`, which shares
   its status flags and could drop the report, and move descriptor reopening
   behind the platform module.
-- Document that the discovery time bound is checked between filesystem calls,
-  so a hung network or FUSE mount delays the report but still marks it
-  incomplete.
+- Keep discovery off network and FUSE filesystems: a mount crossing onto one
+  is not entered, is counted in `non_local_filesystems` and marks the root
+  incomplete. The scan also runs on a worker thread whose caller stops waiting
+  once the time budget passes, so a hung mount can no longer hold discovery.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 

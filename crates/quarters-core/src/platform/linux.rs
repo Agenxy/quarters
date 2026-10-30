@@ -71,6 +71,30 @@ pub(super) fn platform_directory_open_flags() -> i32 {
         .bits()
 }
 
+/// Network, cluster and FUSE filesystem magics; a call into one of these can
+/// block on a remote peer or a userspace daemon.
+const NON_LOCAL_FILESYSTEM_MAGICS: &[i128] = &[
+    0x0000_6969, // NFS
+    0x0000_517B, // SMB
+    0xFF53_4D42, // CIFS
+    0xFE53_4D42, // SMB2
+    0x6573_5546, // FUSE
+    0x0102_1997, // 9p
+    0x00C3_6400, // Ceph
+    0x5346_414F, // AFS
+    0x7375_7245, // Coda
+    0x0000_564C, // NCP
+    0x0116_1970, // GFS2
+    0x0BD0_0BD0, // Lustre
+];
+
+pub(super) fn platform_filesystem_is_local(directory: &nix::dir::Dir) -> nix::Result<bool> {
+    let filesystem = nix::sys::statfs::fstatfs(directory)?;
+    // The magic's integer type differs between libc implementations.
+    let magic = i128::from(filesystem.filesystem_type().0);
+    Ok(!NON_LOCAL_FILESYSTEM_MAGICS.contains(&magic))
+}
+
 pub(super) fn platform_runtime_base(host: &HostEnvironment) -> PathBuf {
     let environment_home = host.get("HOME").map(Path::new);
     let passwd_home = nix::unistd::User::from_uid(Uid::current())

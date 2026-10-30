@@ -14,7 +14,8 @@ pub use report::{
 
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -157,6 +158,7 @@ struct Snapshot {
     unreadable_classes: DiscoveryClassCounts,
     unstable_entries: u64,
     foreign_owned: u64,
+    non_local_filesystems: u64,
     metadata_errors: u64,
     entry_key_collisions: u64,
 }
@@ -175,9 +177,27 @@ impl Default for Snapshot {
             unreadable_classes: DiscoveryClassCounts::default(),
             unstable_entries: 0,
             foreign_owned: 0,
+            non_local_filesystems: 0,
             metadata_errors: 0,
             entry_key_collisions: 0,
         }
+    }
+}
+
+impl Snapshot {
+    /// A scan that did not return within its deadline: every selected root is
+    /// incomplete and over its bounds, so no delta is derived from it.
+    fn stalled(selectors: &[DiscoverySelector]) -> Self {
+        let mut snapshot = Self {
+            complete: false,
+            bounds_exceeded: true,
+            ..Self::default()
+        };
+        for selector in selectors {
+            snapshot.root_complete.insert(*selector, false);
+            snapshot.root_bounds_exceeded.insert(*selector, true);
+        }
+        snapshot
     }
 }
 
@@ -215,13 +235,43 @@ pub fn snapshot(
             (
                 *selector,
                 match selector {
-                    DiscoverySelector::Home => home,
-                    DiscoverySelector::Runtime => runtime,
+                    DiscoverySelector::Home => home.to_path_buf(),
+                    DiscoverySelector::Runtime => runtime.to_path_buf(),
                 },
             )
         })
         .collect::<Vec<_>>();
-    scan::scan(&roots, limits).map(DiscoverySnapshot)
+    scan_within_deadline(roots, limits).map(DiscoverySnapshot)
+}
+
+/// Grace beyond the per-root time budget before a scan counts as stalled.
+const SCAN_STALL_GRACE: Duration = Duration::from_secs(1);
+
+/// Run the scan on a worker thread and stop waiting once every root's time
+/// budget plus a grace period has passed. Mount checks keep the scan off
+/// network and FUSE filesystems; this backstop covers a selected root that is
+/// itself on one, or a local call that blocks. A stalled scan is reported as
+/// incomplete and its thread is left blocked until it returns or the process
+/// exits.
+fn scan_within_deadline(roots: Vec<(DiscoverySelector, PathBuf)>, limits: DiscoveryLimits) -> crate::Result<Snapshot> {
+    let budget = Duration::from_millis(limits.phase_milliseconds)
+        .saturating_mul(u32::try_from(roots.len()).unwrap_or(u32::MAX))
+        .saturating_add(SCAN_STALL_GRACE);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let selectors = roots.iter().map(|(selector, _path)| *selector).collect::<Vec<_>>();
+    std::thread::Builder::new()
+        .name("quarters-discovery-scan".to_owned())
+        .spawn(move || {
+            // The receiver is gone only when the caller stopped waiting.
+            let _delivered = sender.send(scan::scan(&roots, limits));
+        })
+        .map_err(|error| {
+            crate::QuartersError::new(crate::ErrorKind::System, "could not start the discovery scan").with_source(error)
+        })?;
+    match receiver.recv_timeout(budget) {
+        Ok(result) => result,
+        Err(_stalled) => Ok(Snapshot::stalled(&selectors)),
+    }
 }
 
 /// Builds a non-mutating preview of discovery scope and classification rules.

@@ -57,6 +57,13 @@ pub(super) fn platform_directory_open_flags() -> i32 {
         .bits()
 }
 
+/// Network mounts and FUSE volumes are not `MNT_LOCAL`; a call into one can
+/// block on a remote peer or a userspace daemon.
+pub(super) fn platform_filesystem_is_local(directory: &nix::dir::Dir) -> nix::Result<bool> {
+    let filesystem = nix::sys::statfs::fstatfs(directory)?;
+    Ok(filesystem.flags().contains(nix::mount::MntFlags::MNT_LOCAL))
+}
+
 pub(super) fn platform_runtime_base(_host: &HostEnvironment) -> PathBuf {
     PathBuf::from("/tmp")
 }

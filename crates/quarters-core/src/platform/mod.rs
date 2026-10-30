@@ -246,6 +246,12 @@ pub(crate) fn existing_runtime_directory(space: &Space, host: &HostEnvironment) 
     }
 }
 
+/// Whether `directory` is on a local filesystem, so traversing it cannot block
+/// on a network peer or a FUSE daemon.
+pub(crate) fn filesystem_is_local(directory: &nix::dir::Dir) -> nix::Result<bool> {
+    platform_filesystem_is_local(directory)
+}
+
 /// Re-key an existing released or transitional legacy runtime.
 pub(crate) fn migrate_existing_legacy_runtime(space: &Space, host: &HostEnvironment) -> Result<()> {
     let uid = Uid::current().as_raw();
@@ -553,15 +559,17 @@ pub fn resolve_confined_executable(
 use linux::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
     platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_open_report_descriptor, platform_prepare_filesystem_confinement,
-    platform_resolve_confined_executable, platform_runtime_base, platform_workspace_directories,
+    platform_extend_environment, platform_filesystem_is_local, platform_open_report_descriptor,
+    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
+    platform_workspace_directories,
 };
 #[cfg(target_os = "macos")]
 use macos::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
     platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_open_report_descriptor, platform_prepare_filesystem_confinement,
-    platform_resolve_confined_executable, platform_runtime_base, platform_workspace_directories,
+    platform_extend_environment, platform_filesystem_is_local, platform_open_report_descriptor,
+    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
+    platform_workspace_directories,
 };
 
 #[cfg(target_os = "macos")]
