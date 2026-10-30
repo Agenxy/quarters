@@ -55,7 +55,7 @@ post-implementation Claude Code Opus reviews returned `VERDICT: SHIP`.
 3. New readers accept schema 1 as profile and schema 2 as workspace; older readers fail closed on schema 2 through the existing exact-version check.
 4. Add `create --layout profile|workspace`, retaining profile as the default.
 5. Create a portable workspace directory set and platform-specific macOS/Linux directories behind the platform module. Every creation target must remain beneath the validated space root, use existing private-directory helpers and modes, create no escaping symlink, and perform no host-side registration.
-6. Describe workspace directories as conventions backed by HOME/XDG and best-effort platform adapters—not containment, passwd-home replacement, TCC isolation, or proof that every application follows them.
+6. Describe workspace directories as conventions backed by HOME/XDG and best-effort platform adapters, not as containment, passwd-home replacement, TCC isolation, or proof that every application follows them.
 7. Expose layout and capability limits in list/status/doctor, CLI JSON, documentation, and the compatibility matrix. The additive CLI output schema remains version 1 unless a breaking shape is introduced.
 8. Extend MCP `CreateParams` with an optional closed layout enum and `SpaceView` with an optional layout for unhealthy/legacy entries; verify schemas and calls on both 2026-07-28 and 2025-11-25.
 9. Test v1 compatibility, v2 fail-closed behavior, platform directories/modes, CLI JSON, MCP valid/invalid layout on both families, and doctor JSON.

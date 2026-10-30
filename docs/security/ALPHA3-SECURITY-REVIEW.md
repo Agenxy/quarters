@@ -35,7 +35,7 @@ profile. No result from that unavailable worker is counted as review evidence.
 
 ## Resolved findings
 
-### QSR-001: nested environments lost the real host backup chain — high
+### QSR-001: nested environments lost the real host backup chain (high)
 
 An inner Quarter originally captured the outer Quarter's redirected HOME and
 PATH as its host values. This could recurse through the outer OpenSSH adapter
@@ -44,7 +44,7 @@ prefers an existing `QUARTERS_HOST_*` backup over the current redirected value.
 Acceptance tests prove nested adapter dispatch and host escape return to the
 original host values.
 
-### QSR-002: adapter dispatch trusted forgeable baseline context — high
+### QSR-002: adapter dispatch trusted forgeable baseline context (high)
 
 The managed adapter originally accepted path variables without reopening the
 declared store. Baseline dispatch now validates the absolute root, parsed space
@@ -53,7 +53,7 @@ directory and single-link regular config file. Forged context fails closed.
 Linux home-view remains an explicitly documented exception because its mount
 hides the authoritative store and disables host escape.
 
-### QSR-003: private-agent PID evidence was insufficient at signal time — high
+### QSR-003: private-agent PID evidence was insufficient at signal time (high)
 
 PID liveness, socket inode and protocol response did not prove that the process
 accepting the Unix connection still matched the registry PID. Verification now
@@ -61,14 +61,14 @@ requires the kernel-reported Unix peer PID on macOS and Linux. Stop repeats the
 complete device, inode, peer-PID and protocol proof immediately before sending
 SIGTERM. Interrupted stopping recovery uses the same proof.
 
-### QSR-004: lifecycle operations could overlap agent mutations — high
+### QSR-004: lifecycle operations could overlap agent mutations (high)
 
 Agent start, stop and recovery were serialized only by the runtime agent lock.
 They now also acquire the space activity lease and reject rename or rollback
 targets, preventing Quarters-managed rename or replacement from racing an
 agent transition.
 
-### QSR-005: interrupted transactions did not consistently guard normal use — high
+### QSR-005: interrupted transactions did not consistently guard normal use (high)
 
 Some CLI entry paths could open a raw space while it was the named target of a
 durable rename or rollback marker. Public store opening now routes through the
@@ -76,14 +76,14 @@ guarded named inspection path, and creation, copy, artifact, rollback, upgrade,
 agent and command-link mutations reject affected names. Unrelated spaces remain
 available, and recovery continues past an ambiguous independent rename marker.
 
-### QSR-006: command-link cleanup could unlink a replaced entry — medium
+### QSR-006: command-link cleanup could unlink a replaced entry (medium)
 
 Installation rollback remembered only paths, and adapter removal relied on an
 earlier classification. Rollback now records and rechecks link type, target,
 device and inode before cleanup. Removal preflights the complete set and
 rechecks the exact relative target immediately before unlinking.
 
-### QSR-007: managed-command ancestry and operational state were incomplete — medium
+### QSR-007: managed-command ancestry and operational state were incomplete (medium)
 
 Inspection validated only the final `.local/bin` directory and could describe
 an exact adapter link as managed after its launcher disappeared. It now rejects
@@ -91,21 +91,21 @@ symlinked or broadly writable home, `.local` or bin anchors; reports exact links
 as stale when the launcher is absent; and repairs an absent launcher without
 replacing those exact links.
 
-### QSR-008: read-only status created runtime directories — medium
+### QSR-008: read-only status created runtime directories (medium)
 
 Agent status used the runtime creation function, so CLI and MCP observation
 could mutate temporary state. Observation now performs validation-only lookup
 and returns `unset` when the per-space runtime does not exist. Start remains the
 only status-path operation that creates the runtime hierarchy.
 
-### QSR-009: post-publication command-link failure could be mistaken for rollback — low
+### QSR-009: post-publication command-link failure could be mistaken for rollback (low)
 
 Managed command links are derived machine-local state installed after a space
 publication. Failure now retains the published space and returns an explicit
 repair instruction; it never deletes a successfully published tree. Lifecycle
 copies omit only the closed managed link set and recreate it for the target.
 
-### QSR-010: OpenSSH defaults still resolved through the passwd home — high
+### QSR-010: OpenSSH defaults still resolved through the passwd home (high)
 
 Installed-binary `ssh -G` evidence showed that forcing a per-space config does
 not change OpenSSH's compiled default identity and user-known-host paths. Those
@@ -116,7 +116,7 @@ An explicit `-i` or agent key remains an intentional user choice. Acceptance
 tests assert the resolved OpenSSH configuration contains the space path and no
 host user-known-host path.
 
-### QSR-011: agent failure paths could lose cleanup evidence — high
+### QSR-011: agent failure paths could lose cleanup evidence (high)
 
 A legacy-space start created runtime state and spawned the helper before
 rejecting the missing stable identity. Separately, automatic restart of a dead
@@ -126,7 +126,7 @@ spawn, spawned children are boundedly terminated and reaped on startup failure,
 and failed-state restart uses the same exact recovery validation before removing
 its record. Hostile socket paths retain both the record and filesystem entry.
 
-### QSR-012: a recycled live PID could pin stale active state — high
+### QSR-012: a recycled live PID could pin stale active state (high)
 
 After reboot or PID reuse, an `active` record could describe an unrelated live
 process while its exact recorded socket was absent or disconnected. Recovery
@@ -135,7 +135,7 @@ absent or exact device/inode socket and matching registry, and never signals the
 live PID. Tests cover both a dead record with a leftover socket and a live
 unrelated process whose PID was placed in the record.
 
-### QSR-013: OpenSSH option parsing and path representation were incomplete — high
+### QSR-013: OpenSSH option parsing and path representation were incomplete (high)
 
 The first adapter revision rejected only a standalone `-F`, and an unquoted
 `UserKnownHostsFile` value was reparsed incorrectly when a space path contained
@@ -145,7 +145,7 @@ quotes and escapes the path for OpenSSH's option grammar, and rejects line
 breaks that grammar cannot safely represent. Installed-tool acceptance uses a
 store path containing spaces.
 
-### QSR-014: removal could orphan an agent holding keys — high
+### QSR-014: removal could orphan an agent holding keys (high)
 
 Space removal now refuses every private-agent state except `unset`. After a
 verified stop, removal deletes persistent state first and then reclaims only
@@ -153,7 +153,7 @@ that space's validated private runtime tree. The acceptance test starts a real
 agent, proves removal is blocked, stops it, removes the space and confirms the
 runtime is gone.
 
-### QSR-015: private-agent keys were not offered by network clients — medium
+### QSR-015: private-agent keys were not offered by network clients (medium)
 
 The generated config and adapter combination previously made the empty default
 identity set too restrictive. Adapters now pair `IdentityFile=none` with
@@ -162,21 +162,21 @@ intentionally added to the private agent and explicit `-i` keys remain usable.
 Acceptance generates an ephemeral Ed25519 key, loads it through the managed
 `ssh-add` path and verifies the private agent lists it.
 
-### QSR-016: compatibility reporting could claim a stale adapter route — medium
+### QSR-016: compatibility reporting could claim a stale adapter route (medium)
 
 `doctor NAME` now includes the observed launcher and all four command-link
 states. Its SSH compatibility mechanism is derived from that report, so stale,
 absent or colliding links say PATH may fall through rather than claiming the
 managed route. Global doctor output describes the conditional mechanism only.
 
-### QSR-017: socket probing could exceed a bounded status budget — low
+### QSR-017: socket probing could exceed a bounded status budget (low)
 
 Unix-socket connect is now nonblocking and poll-bounded before the existing
 read/write deadlines. Named MCP status performs full agent verification; the
 bounded all-spaces inventory reports `not-inspected` instead of multiplying a
 per-socket deadline across as many as 128 spaces.
 
-### QSR-018: upgrade and removal could strand runtime directories — low
+### QSR-018: upgrade and removal could strand runtime directories (low)
 
 Stable-ID upgrade recognizes the exact deterministic legacy runtime identity
 and re-keys an existing tree by same-parent rename. Lookup accepts that fallback
@@ -185,7 +185,7 @@ display name. Removal reclaims the exact validated runtime after refusing live
 agent state. Acceptance preserves a runtime proof file across upgrade and
 confirms the legacy path disappears.
 
-### QSR-019: adapter context and helper launch checks were too permissive — low
+### QSR-019: adapter context and helper launch checks were too permissive (low)
 
 The home-view bypass now requires the exact internal value `home-view`; mere
 presence is insufficient. Agent start validates the fixed executable and Unix
@@ -194,7 +194,7 @@ status instead of collapsing into a generic message. Restart stops only an
 actually active verified agent, then delegates stale-state handling to the same
 start/recovery policy.
 
-### QSR-020: bare ssh-add could import passwd-home defaults — high
+### QSR-020: bare ssh-add could import passwd-home defaults (high)
 
 The managed `ssh-add` link originally passed every argument through unchanged.
 OpenSSH defines a no-file invocation as loading its default identity files,
@@ -205,7 +205,7 @@ locking and deletion remain available; intentional host import uses the
 explicit host escape. Acceptance proves both refusal and explicit ephemeral-key
 loading.
 
-### QSR-021: one shared OpenSSH option grammar left -F bypasses — high
+### QSR-021: one shared OpenSSH option grammar left -F bypasses (high)
 
 `ssh`, `scp` and `sftp` do not assign arguments to the same short options. A
 shared table consumed `ssh -F` after `-X`, stopped early after `ssh -D`, and
@@ -214,7 +214,7 @@ each tool. Unit and process acceptance reject all three forms plus attached and
 bundled `-F`, while still allowing `-F` in a remote command after the SSH
 destination.
 
-### QSR-022: stale-state triage and aggregate status were not bounded — medium
+### QSR-022: stale-state triage and aggregate status were not bounded (medium)
 
 Named doctor previously aborted while building an environment for a stale
 agent, even though doctor is the triage surface. It now reports the agent,
@@ -223,7 +223,7 @@ command. Named status retains full live verification; aggregate CLI and MCP
 status both report `not-inspected`, preventing a per-space socket deadline from
 multiplying across a large store.
 
-### QSR-023: forged home-view context and relocated launchers degraded silently — medium
+### QSR-023: forged home-view context and relocated launchers degraded silently (medium)
 
 The environment-only home-view adapter exception is now compiled only on
 Linux, where that experimental mount mode can hide the authoritative store.
@@ -233,7 +233,7 @@ set is incomplete, so a moved package installation does not silently fall
 through to host OpenSSH state. Environment values remain mutable under the
 documented same-UID boundary.
 
-### QSR-024: residual agent and lifecycle states needed bounded exits — low
+### QSR-024: residual agent and lifecycle states needed bounded exits (low)
 
 The agent handoff token moved from process arguments to the short-lived helper
 environment and is cleared before exec into OpenSSH. A disconnected exact
@@ -243,7 +243,7 @@ refuses legacy artifact bindings that would otherwise become unreachable after
 an upgrade/name change. Artifact source lookup indexes spaces once per bounded
 catalog pass, and single-artifact display no longer repeats the catalog scan.
 
-### QSR-025: home-view host-tool resolution could recurse — medium
+### QSR-025: home-view host-tool resolution could recurse (medium)
 
 Linux home-view can place a space's `.local/bin` at a path that also appeared
 in the original host PATH. A managed `ssh` link there could therefore resolve
@@ -252,7 +252,7 @@ running executable's device/inode, including symlink and hard-link spellings.
 A parent-PID handoff also stops direct recursive adapter dispatch before it can
 spawn, without blocking a later adapter launched by an OpenSSH proxy command.
 
-### QSR-026: shortcut-spelled launchers could strand managed commands — medium
+### QSR-026: shortcut-spelled launchers could strand managed commands (medium)
 
 Some platforms can report the invoked symlink path from `current_exe()`. The
 documented `qts create` path could publish a space and then fail launcher-name
@@ -260,14 +260,14 @@ validation. CLI and MCP installation now canonicalize the running executable
 before validating it. Acceptance invokes the test binary through a `qts`
 symlink and verifies all five managed links are present.
 
-### QSR-027: MCP failures discarded recovery guidance — low
+### QSR-027: MCP failures discarded recovery guidance (low)
 
 MCP diagnostics previously serialized the error category and message but
 dropped the bounded Quarters hint. Diagnostic output now carries an optional,
 escaped 512-byte recovery hint, so stale private-agent failures retain the
 exact confirmed-recovery guidance available to the CLI.
 
-### QSR-028: rename-marker limits could prevent recovery — low
+### QSR-028: rename-marker limits could prevent recovery (low)
 
 Rename inspection previously combined valid and malformed markers under one
 128-entry hard failure. Malformed records could therefore make every operation,
@@ -278,7 +278,7 @@ records do not consume that progress budget. Regressions prove 129 actionable
 markers drain in two passes and 128 ambiguous markers cannot starve a later
 actionable record, without weakening target blocking.
 
-### QSR-029: home-view could overmount the installed adapter — low-medium
+### QSR-029: home-view could overmount the installed adapter (low-medium)
 
 When the installed launcher lived beneath the host home, Linux home-view could
 cover its absolute target and leave the managed space links unreachable. The
@@ -286,7 +286,7 @@ launcher now copies itself into the protected runtime bin and installs four
 verified relative OpenSSH links there before mounting. That directory is first
 on PATH; collisions fail closed and no unverified entry is replaced.
 
-### QSR-030: released runtime spelling was not recognized — low
+### QSR-030: released runtime spelling was not recognized (low)
 
 The stable-ID transition initially recognized only its new BLAKE3 legacy key,
 not the released `NAME-{fnv(root):016x}` directory. Runtime lookup, migration
@@ -295,21 +295,21 @@ be authoritative; multiple live candidates are retained with a corruption
 error rather than merged or deleted. Upgrade acceptance moves an actual
 released-form tree and preserves its contents.
 
-### QSR-031: special OpenSSH path bytes lacked parser evidence — low
+### QSR-031: special OpenSSH path bytes lacked parser evidence (low)
 
 The known-hosts option encoder had only a string-shape unit test for quotes and
 backslashes. Installed-tool acceptance now creates the complete store beneath a
 path containing spaces, quotes and backslashes and requires `ssh -G` to return
 the exact per-space path and exactly one `identityfile none` directive.
 
-### QSR-032: standalone MCP launcher policy diverged — informational
+### QSR-032: standalone MCP launcher policy diverged (informational)
 
 The stdio MCP server now resolves and validates the canonical installed
 `quarters` launcher before accepting requests, matching CLI-created command
 policy. The bounded in-memory library transport explicitly receives no
 machine-local launcher and continues to omit command links for test embedding.
 
-### QSR-033: a distinct home-view launcher could rediscover Quarters — medium
+### QSR-033: a distinct home-view launcher could rediscover Quarters (medium)
 
 The protected home-view launcher copy has a different inode from a
 system-installed Quarters binary. If the captured host PATH began with the
@@ -319,14 +319,14 @@ reaching OpenSSH. Host-tool lookup now canonicalizes candidates and rejects
 both the running device/inode and every resolved basename of `quarters`. A
 home-view-shaped regression uses distinct launcher and fallback inodes.
 
-### QSR-034: failed runtime publication retained staging — low
+### QSR-034: failed runtime publication retained staging (low)
 
 A launcher-copy failure removed its private temporary, but a following rename
 failure did not. Publication now removes that exact staging file on either
 failure path, and a collision regression verifies the runtime bin contains no
 temporary residue.
 
-### QSR-035: agent registry staging exposed the ownership token — informational
+### QSR-035: agent registry staging exposed the ownership token (informational)
 
 The private registry directory is mode 0700, but its temporary filename did
 not need to repeat the handoff token. Registry replacement now uses the

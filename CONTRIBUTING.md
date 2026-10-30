@@ -14,6 +14,12 @@ packaging and publication interface. Direct dependencies are exact in
 `Cargo.toml`; `Cargo.lock` is committed. Platform behavior stays behind the
 platform module, and capability requests fail rather than degrading silently.
 
+The gate also refuses shell scripts, whether named `.sh` or started with a
+shell shebang (write a uv script or a compiled program instead), and em dashes
+in any text file. The only exceptions are entries in
+`crates/quarters-quality/shell-allowlist.txt`, each with a reason, reviewed as
+decisions; it has none today.
+
 Toolchain versions are pinned in `rust-toolchain.toml`, the launcher's
 `packageManager`, `pyproject.toml` and the workflows, and every mention of one
 must match its pin. `cargo run -p quarters-quality -- drift` reports any pin

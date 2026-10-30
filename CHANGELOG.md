@@ -4,7 +4,7 @@ Quarters follows [Semantic Versioning](https://semver.org/). Until 1.0, minor
 versions may refine the space format and environment contract; migrations and
 compatibility notes will be called out here.
 
-## 0.1.0-alpha.4 — unreleased
+## 0.1.0-alpha.4 (unreleased)
 
 - Relicense from Apache-2.0 to GPL-3.0-or-later from this release onward, with
   a commercial licence available from Agenxy. Releases through 0.1.0-alpha.2
@@ -311,6 +311,11 @@ compatibility notes will be called out here.
 - Answer `prompts/list` and `completion/complete` with method-not-found:
   Quarters advertises neither capability, and rmcp's defaults returned empty
   results.
+- Run the release-binary test-hook guard on the binary each PyPI wheel
+  installs, and state in the README that the PyPI workflow builds and tests
+  wheels but nothing has been published there.
+- Make the quality gate refuse em dashes in repository text and files that
+  start with a shell shebang, alongside the existing `.sh` refusal.
 - Move the CLI's remaining platform-specific code, the Linux descriptor exec
   and device-number normalization, behind the core platform module.
 - Watch every pin for drift: `quarters-quality drift` compares the Rust,
@@ -321,7 +326,7 @@ compatibility notes will be called out here.
   toolchain version other than the pin, and npm is now pinned (12.2.1) where
   it publishes.
 
-## 0.1.0-alpha.2 — 2026-08-20
+## 0.1.0-alpha.2 (2026-08-20)
 
 - Stop carrying host credential and agent paths under backup variable names;
   the baseline now satisfies the documented deny-by-default environment policy.
@@ -333,7 +338,7 @@ compatibility notes will be called out here.
 - Add distribution-version, target-build and npm runtime checks, plus package
   assembly preflights, to the release gate.
 
-## 0.1.0-alpha.1 — 2026-08-20
+## 0.1.0-alpha.1 (2026-08-20)
 
 First public alpha.
 

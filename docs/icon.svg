@@ -3,7 +3,7 @@
   <!-- One account, divided: the outer rectangle is the host account and it is
        never broken, because Quarters does not create a second user. The divider
        splits what the shell sees. Both sides carry a bar at the same height and
-       the same length, because the two homes are peers — same UID, same
+       the same length, because the two homes are peers: same UID, same
        permissions, different state.
 
        The right bar is coloured, not the pane behind it. Filling a whole half

@@ -29,16 +29,28 @@ fn quarters(root: &Path) -> Command {
 }
 
 fn run(command: &mut Command) -> Result<Output, Box<dyn Error>> {
-    let output = command.output()?;
-    if !output.status.success() {
-        return Err(format!(
-            "command failed with {:?}: {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
-        )
-        .into());
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::Stdio;
+
+    // Spawned rather than `output()` so a failure names the process and the
+    // signal, if any, that ended it.
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let pid = child.id();
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        return Ok(output);
     }
-    Ok(output)
+    Err(format!(
+        "{command:?} (pid {pid}) failed with code {:?}, signal {:?}: {}",
+        output.status.code(),
+        output.status.signal(),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .into())
 }
 
 /// Create a space whose runtime carries the name a published alpha gave it.
