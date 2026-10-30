@@ -284,6 +284,11 @@ compatibility notes will be called out here.
 - Recognize the runtime directory name the published alpha.1 and alpha.2
   releases used, so an upgraded space's runtime is re-keyed on launch and
   deleted by `quarters rm` instead of being left behind.
+- `doctor` reports, and `recover --confirm stale-state` finishes, a removal
+  that alpha.1 or alpha.2 left in trash (`<name>-<pid>-<millis>`) when its
+  `rm` failed, including that space's alpha runtime directory. An entry whose
+  lease is still held, and the runtime of a space recreated under the same
+  name, are left alone.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 
