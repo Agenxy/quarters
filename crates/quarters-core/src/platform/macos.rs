@@ -57,6 +57,24 @@ pub(super) fn platform_directory_open_flags() -> i32 {
         .bits()
 }
 
+pub(super) fn platform_device_number(device: nix::libc::dev_t) -> u64 {
+    u64::from(device.cast_unsigned())
+}
+
+pub(super) fn platform_exec_descriptor(
+    _descriptor: &std::fs::File,
+    program: &Path,
+    _arguments: &[OsString],
+) -> Result<std::convert::Infallible> {
+    Err(QuartersError::new(
+        ErrorKind::Unsupported,
+        format!(
+            "descriptor-bound confinement execution is unavailable for {}",
+            program.display()
+        ),
+    ))
+}
+
 /// Network mounts and FUSE volumes are not `MNT_LOCAL`; a call into one can
 /// block on a remote peer or a userspace daemon.
 pub(super) fn platform_filesystem_is_local(directory: &nix::dir::Dir) -> nix::Result<bool> {

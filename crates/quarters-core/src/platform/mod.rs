@@ -89,11 +89,22 @@ pub struct ConfinedExecutable {
 }
 
 impl ConfinedExecutable {
-    /// Consume the stable executable into its diagnostic path and descriptor.
-    #[must_use]
-    pub fn into_parts(self) -> (PathBuf, File) {
-        (self.path, self.descriptor)
+    /// Replace the current process with this executable through its held
+    /// descriptor, passing `arguments` and the current environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the platform cannot execute a descriptor or the
+    /// kernel refuses the replacement; on success it does not return.
+    pub fn exec(self, arguments: &[OsString]) -> Result<std::convert::Infallible> {
+        platform_exec_descriptor(&self.descriptor, &self.path, arguments)
     }
+}
+
+/// Normalize a platform `st_dev` into one unsigned device number.
+#[must_use]
+pub fn device_number(device: nix::libc::dev_t) -> u64 {
+    platform_device_number(device)
 }
 
 /// Access requested for one invocation-local host data grant.
@@ -558,18 +569,18 @@ pub fn resolve_confined_executable(
 #[cfg(target_os = "linux")]
 use linux::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
-    platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_filesystem_is_local, platform_open_report_descriptor,
-    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
-    platform_workspace_directories,
+    platform_device_number, platform_directory_open_flags, platform_enter_filesystem_confinement,
+    platform_enter_home_view, platform_exec_descriptor, platform_extend_environment, platform_filesystem_is_local,
+    platform_open_report_descriptor, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
+    platform_runtime_base, platform_workspace_directories,
 };
 #[cfg(target_os = "macos")]
 use macos::{
     PlatformPreparedConfinement, platform_capabilities, platform_confinement_plan, platform_derived_cache_directories,
-    platform_directory_open_flags, platform_enter_filesystem_confinement, platform_enter_home_view,
-    platform_extend_environment, platform_filesystem_is_local, platform_open_report_descriptor,
-    platform_prepare_filesystem_confinement, platform_resolve_confined_executable, platform_runtime_base,
-    platform_workspace_directories,
+    platform_device_number, platform_directory_open_flags, platform_enter_filesystem_confinement,
+    platform_enter_home_view, platform_exec_descriptor, platform_extend_environment, platform_filesystem_is_local,
+    platform_open_report_descriptor, platform_prepare_filesystem_confinement, platform_resolve_confined_executable,
+    platform_runtime_base, platform_workspace_directories,
 };
 
 #[cfg(target_os = "macos")]

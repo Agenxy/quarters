@@ -313,6 +313,8 @@ compatibility notes will be called out here.
   results.
 - Make the quality gate refuse em dashes in repository text and files that
   start with a shell shebang, alongside the existing `.sh` refusal.
+- Move the CLI's remaining platform-specific code, the Linux descriptor exec
+  and device-number normalization, behind the core platform module.
 
 ## 0.1.0-alpha.2 (2026-08-20)
 
