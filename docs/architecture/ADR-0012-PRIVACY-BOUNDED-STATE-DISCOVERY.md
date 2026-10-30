@@ -72,6 +72,16 @@ writes under runtime `bin` are measured rather than excluded.
 The alpha gives each selected root an independent per-phase budget of 262,144
 entries, depth 64, 4,096 relative-path bytes, 16 MiB of pending directory-entry
 names and five seconds. Each root reports its own completeness and bound state.
+The time bound is checked between filesystem calls, so it cannot preempt one
+call that blocks. Two measures keep a hung network or FUSE mount from holding
+discovery. At each mount crossing the scanner asks the platform whether the
+filesystem is local (`MNT_LOCAL` on macOS; the `statfs` type against network,
+cluster and FUSE magics on Linux) and does not enter one that is not; it counts
+it in `non_local_filesystems` and marks the root incomplete. As a backstop, the
+scan runs on a worker thread and the caller stops waiting once every root's
+budget plus one second has passed, reporting each root incomplete; the blocked
+thread ends when its call returns or the process exits. Neither needs signals
+or unsafe code, and a stall can never make a report claim completeness.
 Library callers are rejected before scanning when depth exceeds the supported
 recursive ceiling of 256; the relative-path byte bound independently limits
 practical depth.

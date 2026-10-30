@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Linux `--report-fd` reopening through `/proc/self/fd`.
+
+use crate::platform::report_descriptor::{
+    descriptor_flags, descriptor_system_error, invalid_descriptor, not_writable, validate_writable, writable_options,
+};
+use crate::{ErrorKind, QuartersError, Result};
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
+use std::fs::File;
+use std::path::PathBuf;
+
+pub(in crate::platform) fn platform_open_report_descriptor(descriptor: i32) -> Result<File> {
+    use nix::sys::stat::{SFlag, fstat};
+    use std::io::{Seek, SeekFrom};
+    use std::os::unix::fs::MetadataExt;
+
+    let info = linux_fd_info(descriptor)?;
+    if info.flags & OFlag::O_ACCMODE == OFlag::O_RDONLY {
+        return Err(not_writable(descriptor));
+    }
+    let path = PathBuf::from(format!("/proc/self/fd/{descriptor}"));
+    let link = std::fs::read_link(&path).map_err(|error| invalid_descriptor(descriptor, error))?;
+    if link.as_os_str().as_encoded_bytes().starts_with(b"socket:") {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "Linux --report-fd does not accept a socket descriptor without unsafe raw-fd ownership",
+        )
+        .with_hint("use a regular file, pipe, or the human stderr report"));
+    }
+    let original = std::fs::metadata(&path).map_err(|error| invalid_descriptor(descriptor, error))?;
+    if original.ino() != info.inode {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "the Linux discovery report descriptor changed during validation",
+        ));
+    }
+    let append = info.flags.contains(OFlag::O_APPEND);
+    let anonymous_pipe = link.as_os_str().as_encoded_bytes().starts_with(b"pipe:");
+    let named_pipe = original.mode() & nix::libc::S_IFMT == nix::libc::S_IFIFO;
+    if named_pipe && !anonymous_pipe {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "Linux --report-fd does not accept a named FIFO because its reader can disconnect before safe reopening",
+        )
+        .with_hint("use a regular file, blocking anonymous pipe, or the human stderr report"));
+    }
+    let pipe = anonymous_pipe;
+    let originally_nonblocking = info.flags.contains(OFlag::O_NONBLOCK);
+    if pipe && originally_nonblocking {
+        return Err(QuartersError::new(
+            ErrorKind::Unsupported,
+            "Linux --report-fd requires a blocking pipe descriptor",
+        )
+        .with_hint("open a blocking pipe, use a regular file, or use the human stderr report"));
+    }
+    let mut file = writable_options(append, pipe || originally_nonblocking)
+        .open(&path)
+        .map_err(|error| invalid_descriptor(descriptor, error))?;
+    let metadata =
+        fstat(&file).map_err(|error| descriptor_system_error("inspect reopened report descriptor", error))?;
+    if metadata.st_dev != original.dev() || metadata.st_ino != original.ino() {
+        return Err(QuartersError::new(
+            ErrorKind::CorruptState,
+            "the Linux discovery report descriptor identity changed during validation",
+        ));
+    }
+    if SFlag::from_bits_truncate(metadata.st_mode) == SFlag::S_IFREG && !append {
+        file.seek(SeekFrom::Start(info.position)).map_err(|error| {
+            QuartersError::new(
+                ErrorKind::System,
+                "could not restore the Linux report descriptor position",
+            )
+            .with_source(error)
+        })?;
+    }
+    if pipe && !originally_nonblocking {
+        let reopened = descriptor_flags(&file)?;
+        fcntl(&file, FcntlArg::F_SETFL(reopened.difference(OFlag::O_NONBLOCK)))
+            .map_err(|error| descriptor_system_error("restore report descriptor blocking mode", error))?;
+    }
+    validate_writable(&file, descriptor)?;
+    Ok(file)
+}
+
+struct LinuxFdInfo {
+    position: u64,
+    flags: OFlag,
+    inode: u64,
+}
+
+fn linux_fd_info(descriptor: i32) -> Result<LinuxFdInfo> {
+    use std::io::Read;
+
+    let path = PathBuf::from(format!("/proc/self/fdinfo/{descriptor}"));
+    let file = File::open(&path).map_err(|error| invalid_descriptor(descriptor, error))?;
+    let mut text = String::new();
+    file.take(4_096).read_to_string(&mut text).map_err(|error| {
+        QuartersError::new(ErrorKind::System, "could not read Linux report descriptor metadata").with_source(error)
+    })?;
+    let position = parse_fdinfo(&text, "pos", 10)?;
+    let flags = parse_fdinfo(&text, "flags", 8)?;
+    let inode = parse_fdinfo(&text, "ino", 10)?;
+    Ok(LinuxFdInfo {
+        position,
+        flags: OFlag::from_bits_truncate(i32::try_from(flags).map_err(fdinfo_range_error)?),
+        inode,
+    })
+}
+
+fn parse_fdinfo(text: &str, name: &str, radix: u32) -> Result<u64> {
+    let value = text.lines().find_map(|line| line.strip_prefix(name)?.strip_prefix(':'));
+    let value = value.ok_or_else(|| {
+        QuartersError::new(
+            ErrorKind::Unsupported,
+            format!("Linux report descriptor metadata has no {name} field"),
+        )
+    })?;
+    u64::from_str_radix(value.trim(), radix).map_err(|error| {
+        QuartersError::new(
+            ErrorKind::Unsupported,
+            format!("Linux report descriptor metadata has an invalid {name} field"),
+        )
+        .with_source(error)
+    })
+}
+
+fn fdinfo_range_error(error: impl std::error::Error + Send + Sync + 'static) -> QuartersError {
+    QuartersError::new(
+        ErrorKind::Unsupported,
+        "Linux report descriptor metadata cannot be represented safely",
+    )
+    .with_source(error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::platform_open_report_descriptor as open_report;
+    use crate::platform::report_descriptor::descriptor_flags;
+    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+    use std::error::Error;
+    use std::fs::OpenOptions;
+    use std::os::fd::IntoRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn socket_report_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let (stream, peer) = UnixStream::pair()?;
+        let descriptor = stream.into_raw_fd();
+        let error = open_report(descriptor).err().ok_or("socket must fail")?;
+        assert_eq!(error.kind(), crate::ErrorKind::Unsupported);
+        nix::unistd::close(descriptor)?;
+        drop(peer);
+        Ok(())
+    }
+
+    #[test]
+    fn nonblocking_named_pipe_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let temporary = tempfile::tempdir()?;
+        let path = temporary.path().join("report-fifo");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR)?;
+        let reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_NONBLOCK)
+            .open(&path)?;
+        let writer = OpenOptions::new()
+            .write(true)
+            .custom_flags(nix::libc::O_NONBLOCK)
+            .open(&path)?;
+        let descriptor = writer.into_raw_fd();
+        let error = open_report(descriptor).err().ok_or("nonblocking fifo must fail")?;
+        assert_eq!(error.kind(), crate::ErrorKind::Unsupported);
+        nix::unistd::close(descriptor)?;
+        drop(reader);
+        Ok(())
+    }
+
+    #[test]
+    fn nonblocking_anonymous_pipe_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let (reader, writer) = nix::unistd::pipe()?;
+        let flags = fcntl(&writer, FcntlArg::F_GETFL).map(OFlag::from_bits_truncate)?;
+        fcntl(&writer, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
+        let descriptor = writer.into_raw_fd();
+        let error = open_report(descriptor)
+            .err()
+            .ok_or("nonblocking anonymous pipe must fail")?;
+        assert_eq!(error.kind(), crate::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("requires a blocking pipe"));
+        nix::unistd::close(descriptor)?;
+        drop(reader);
+        Ok(())
+    }
+
+    #[test]
+    fn blocking_anonymous_pipe_is_reopened_in_blocking_mode() -> Result<(), Box<dyn Error>> {
+        let (reader, writer) = nix::unistd::pipe()?;
+        let descriptor = writer.into_raw_fd();
+        let report = open_report(descriptor)?;
+        assert!(!descriptor_flags(&report)?.contains(OFlag::O_NONBLOCK));
+        drop(report);
+        drop(reader);
+        Ok(())
+    }
+
+    #[test]
+    fn blocking_named_pipe_descriptors_fail_explicitly() -> Result<(), Box<dyn Error>> {
+        let temporary = tempfile::tempdir()?;
+        let path = temporary.path().join("report-fifo");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR)?;
+        let reader = OpenOptions::new()
+            .read(true)
+            .custom_flags(nix::libc::O_NONBLOCK)
+            .open(&path)?;
+        let writer = OpenOptions::new().write(true).open(&path)?;
+        let descriptor = writer.into_raw_fd();
+        let error = open_report(descriptor).err().ok_or("named fifo must fail")?;
+        assert_eq!(error.kind(), crate::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("named FIFO"));
+        nix::unistd::close(descriptor)?;
+        drop(reader);
+        Ok(())
+    }
+}

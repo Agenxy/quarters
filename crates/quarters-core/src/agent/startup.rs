@@ -3,7 +3,7 @@
 
 use super::model::{AgentFailure, AgentRecord, REGISTRY_SCHEMA_VERSION, StoredAgentState};
 use super::{
-    STOP_TIMEOUT, agent_lock, inspect_at, legacy_agent_error, missing_registry, process, protocol,
+    STOP_TIMEOUT, agent_lock, agent_lock_until, inspect_at, legacy_agent_error, missing_registry, process, protocol,
     recover_inactive_record, registry, reject_unowned_socket,
 };
 use crate::store::epoch_millis;
@@ -30,7 +30,7 @@ pub(super) fn start(store: &Store, space: &Space, host: &HostEnvironment) -> Res
     loop {
         ensure_startup_time_remains(absolute_deadline)?;
         let reservation = {
-            let _lock = agent_lock(&runtime)?;
+            let _lock = agent_lock_until(&runtime, absolute_deadline)?;
             ensure_startup_time_remains(absolute_deadline)?;
             reserve(store, space, &runtime)?
         };
@@ -84,7 +84,7 @@ pub(super) fn reconcile(
     loop {
         let observed = protocol::verified_socket_identity(&registry::socket_path(runtime), current_starting.pid).ok();
         let alive = process::process_matches_generation(current_starting.pid, current_starting.process_generation)?;
-        match reconcile_orphan(space, runtime, &current_starting, observed, alive)? {
+        match reconcile_orphan(space, runtime, &current_starting, observed, alive, absolute_deadline)? {
             ReconcileStep::Ready(status) => return Ok(Reconciled::Active(status)),
             ReconcileStep::Follow(replacement) => {
                 // A replacement launch gets the same full window as its owner.
@@ -111,8 +111,9 @@ fn reconcile_orphan(
     starting: &AgentRecord,
     observed: Option<protocol::SocketIdentity>,
     alive: bool,
+    absolute_deadline: Instant,
 ) -> Result<ReconcileStep> {
-    let _lock = agent_lock(runtime)?;
+    let _lock = agent_lock_until(runtime, absolute_deadline)?;
     let Some(record) = registry::read(runtime, space)? else {
         return if orphan_startup_guard(runtime)?.is_some() {
             Ok(ReconcileStep::Rereserve)
@@ -282,7 +283,7 @@ fn await_spawned(
     stall_first_poll_for_test();
     loop {
         if let Ok(identity) = protocol::verified_socket_identity(&registry::socket_path(runtime), starting.pid) {
-            return match commit_activation(space, runtime, &starting, identity) {
+            return match commit_activation(space, runtime, &starting, identity, absolute_deadline) {
                 Ok(status) => Ok(status),
                 Err(error) => abort_spawned(space, runtime, &mut child, &starting, error),
             };
@@ -294,7 +295,7 @@ fn await_spawned(
             // deadline may already be spent by lock waits or a late first poll.
             if attempts < MAXIMUM_LAUNCH_ATTEMPTS {
                 cleanup_exited_socket(runtime)?;
-                match retry_exited_launch(store, space, runtime, &starting) {
+                match retry_exited_launch(store, space, runtime, &starting, absolute_deadline) {
                     Ok(RetryLaunch::Active(status)) => return Ok(status),
                     Ok(RetryLaunch::Spawned(replacement_child, replacement_starting)) => {
                         child = replacement_child;
@@ -356,10 +357,16 @@ fn stall_first_poll_for_test() {
     }
 }
 
-fn retry_exited_launch(store: &Store, space: &Space, runtime: &Path, starting: &AgentRecord) -> Result<RetryLaunch> {
+fn retry_exited_launch(
+    store: &Store,
+    space: &Space,
+    runtime: &Path,
+    starting: &AgentRecord,
+    absolute_deadline: Instant,
+) -> Result<RetryLaunch> {
     let token = generate_token()?;
     let created_unix_ms = epoch_millis()?;
-    let _lock = agent_lock(runtime)?;
+    let _lock = agent_lock_until(runtime, absolute_deadline)?;
     let current = inspect_at(space, runtime)?;
     if current.state == AgentState::Active && current.pid == Some(starting.pid) {
         return Ok(RetryLaunch::Active(current));
@@ -456,8 +463,9 @@ fn commit_activation(
     runtime: &Path,
     starting: &AgentRecord,
     observed: protocol::SocketIdentity,
+    absolute_deadline: Instant,
 ) -> Result<AgentStatus> {
-    let _lock = agent_lock(runtime)?;
+    let _lock = agent_lock_until(runtime, absolute_deadline)?;
     let current = inspect_at(space, runtime)?;
     if current.state == AgentState::Active && current.pid == Some(starting.pid) {
         return Ok(current);
@@ -481,6 +489,8 @@ fn commit_activation(
     inspect_at(space, runtime)
 }
 
+// Recording a failure keeps the full lock timeout rather than the startup
+// budget, so an expired budget never abandons a launch half-recorded.
 fn commit_failure(
     space: &Space,
     runtime: &Path,
