@@ -1,0 +1,55 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-create 1  "quarters-create " 
+.SH NAME
+quarters\-create \- Create a private, persistent space
+.SH SYNOPSIS
+\fBquarters\-create\fR [\fB\-\-shell\fR] [\fB\-\-layout\fR] [\fB\-\-from\-host\fR] [\fB\-\-from\-host\-path\fR] [\fB\-\-preview\fR] [\fB\-\-confirm\-plan\fR] [\fB\-\-replace\-generated\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> 
+.SH DESCRIPTION
+Create a private, persistent space
+.SH OPTIONS
+.TP
+\fB\-\-shell\fR \fI<PATH>\fR
+Default absolute shell path. Uses the host SHELL or /bin/sh
+.TP
+\fB\-\-layout\fR \fI<LAYOUT>\fR [default: profile]
+User\-directory layout to create
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+profile: Minimal shell and CLI state profile
+.IP \(bu 2
+workspace: Expanded home with common personal and platform directories
+.RE
+.TP
+\fB\-\-from\-host\fR \fI<FROM_HOST>\fR
+Preview or import a closed set of host\-owned state
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+shell: Selected startup and editing convention files; no credentials or history
+.RE
+.TP
+\fB\-\-from\-host\-path\fR \fI<RELATIVE_PATH>\fR
+Add one explicit regular file beneath host HOME (maximum 32)
+.TP
+\fB\-\-preview\fR
+Validate and print the exact metadata\-bound host\-fork plan
+.TP
+\fB\-\-confirm\-plan\fR \fI<DIGEST>\fR
+Execute only the exact 64\-hex digest returned by preview
+.TP
+\fB\-\-replace\-generated\fR
+Replace generated files selected by the confirmed plan
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fINAME\fR>
+Portable space name: letters, numbers, hyphens or underscores

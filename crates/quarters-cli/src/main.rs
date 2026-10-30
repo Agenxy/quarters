@@ -6,6 +6,8 @@ mod app;
 mod cli;
 mod context;
 mod discovery;
+#[cfg(test)]
+mod man_pages;
 mod output;
 mod process;
 mod report_fd;

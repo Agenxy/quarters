@@ -99,9 +99,10 @@ jobs:
         working-directory: packaging/npm/quarters-cli
       - name: Pack launcher
         run: |
-          mkdir -p npm-stage/dist/src npm-dist
+          mkdir -p npm-stage/dist/src npm-stage/man npm-dist
           cp packaging/npm/quarters-cli/package.json packaging/npm/quarters-cli/README.md npm-stage/
           cp packaging/npm/quarters-cli/dist/src/*.js npm-stage/dist/src/
+          cp man/*.1 npm-stage/man/
           cp LICENSE NOTICE npm-stage/
           npm pack --ignore-scripts ./npm-stage --pack-destination npm-dist
       - name: Upload launcher package
@@ -157,6 +158,8 @@ jobs:
             ./npm-smoke/quarters-cli-[0-9]*.tgz
           export PATH="$prefix/bin:$PATH"
           quarters --version
+          test -s "$prefix/share/man/man1/quarters.1"
+          test -s "$prefix/share/man/man1/quarters-exec.1"
           QUARTERS_ROOT="$store" quarters create smoke
           QUARTERS_ROOT="$store" quarters exec smoke -- /bin/sh -c 'test "$QUARTERS_SPACE" = smoke'
 

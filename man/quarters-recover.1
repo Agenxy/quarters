@@ -1,0 +1,16 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-recover 1  "quarters-recover " 
+.SH NAME
+quarters\-recover \- Reclaim abandoned internal creation and deletion state
+.SH SYNOPSIS
+\fBquarters\-recover\fR [\fB\-h\fR|\fB\-\-help\fR] <\fB\-\-confirm\fR> 
+.SH DESCRIPTION
+Reclaim abandoned internal creation and deletion state
+.SH OPTIONS
+.TP
+\fB\-\-confirm\fR \fI<stale\-state>\fR
+Must be exactly "stale\-state" before reserved paths are removed
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

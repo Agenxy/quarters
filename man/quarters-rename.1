@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-rename 1  "quarters-rename " 
+.SH NAME
+quarters\-rename \- Change an inactive stable\-identity space display name
+.SH SYNOPSIS
+\fBquarters\-rename\fR [\fB\-\-preview\fR] [\fB\-\-confirm\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIPREVIOUS\fR> <\fINAME\fR> 
+.SH DESCRIPTION
+Change an inactive stable\-identity space display name
+.SH OPTIONS
+.TP
+\fB\-\-preview\fR
+Validate identities, activity and collisions without changing state
+.TP
+\fB\-\-confirm\fR \fI<PREVIOUS>\fR
+Exactly repeat PREVIOUS to execute the recoverable rename
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIPREVIOUS\fR>
+Current space name
+.TP
+<\fINAME\fR>
+New space name

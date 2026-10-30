@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-import 1  "quarters-import " 
+.SH NAME
+quarters\-import \- Authenticate a bundle and import it as a fresh template
+.SH SYNOPSIS
+\fBquarters\-import\fR [\fB\-\-preview\fR] [\fB\-\-confirm\-plan\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fB\-\-key\fR> <\fIBUNDLE\fR> <\fINAME\fR> 
+.SH DESCRIPTION
+Authenticate a bundle and import it as a fresh template
+.SH OPTIONS
+.TP
+\fB\-\-key\fR \fI<PATH>\fR
+Absolute private 32\-byte key file in a protected directory outside the Quarters store
+.TP
+\fB\-\-preview\fR
+Authenticate and return the exact plan digest without mutation
+.TP
+\fB\-\-confirm\-plan\fR \fI<DIGEST>\fR
+Execute only the exact digest returned by preview
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIBUNDLE\fR>
+Absolute path to one authenticated bundle
+.TP
+<\fINAME\fR>
+New local template display name

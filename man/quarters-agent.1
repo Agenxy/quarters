@@ -1,0 +1,32 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters-agent 1  "quarters-agent " 
+.SH NAME
+quarters\-agent \- Manage a verified private OpenSSH agent for one space
+.SH SYNOPSIS
+\fBquarters\-agent\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Manage a verified private OpenSSH agent for one space
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+quarters\-agent\-status(1)
+Inspect process, socket identity and protocol liveness
+.TP
+quarters\-agent\-start(1)
+Start a private OpenSSH agent, or report the verified active agent
+.TP
+quarters\-agent\-stop(1)
+Stop only an identity\-verified private OpenSSH agent
+.TP
+quarters\-agent\-restart(1)
+Stop and start the private OpenSSH agent
+.TP
+quarters\-agent\-recover(1)
+Reconcile only dead or protocol\-verified private\-agent state
+.TP
+quarters\-agent\-help(1)
+Print this message or the help of the given subcommand(s)

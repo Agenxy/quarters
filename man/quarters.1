@@ -1,0 +1,112 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH quarters 1  "quarters 0.1.0-alpha.4" 
+.SH NAME
+quarters \- Persistent alternate user\-state profiles for native processes
+.SH SYNOPSIS
+\fBquarters\fR [\fB\-\-json\fR] [\fB\-\-root\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Persistent alternate user\-state profiles for native processes
+.SH OPTIONS
+.TP
+\fB\-\-json\fR
+Emit a stable JSON envelope for management and inspection commands
+.TP
+\fB\-\-root\fR \fI<PATH>\fR
+Use this absolute storage root instead of ~/.quarters
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+quarters\-create(1)
+Create a private, persistent space
+.TP
+quarters\-clone(1)
+Clone persistent state into a new independent space
+.TP
+quarters\-upgrade(1)
+Assign stable identity to an inactive legacy space
+.TP
+quarters\-rename(1)
+Change an inactive stable\-identity space display name
+.TP
+quarters\-freeze(1)
+Block new Quarters\-managed launches and mutations
+.TP
+quarters\-unfreeze(1)
+Remove a cooperative freeze marker after exact confirmation
+.TP
+quarters\-template(1)
+Create and manage reusable named creation sources
+.TP
+quarters\-snapshot(1)
+Create and manage named recovery points
+.TP
+quarters\-rollback(1)
+Replace a Quarter from a snapshot after capturing recovery
+.TP
+quarters\-export(1)
+Export an authenticated plaintext template or snapshot bundle
+.TP
+quarters\-import(1)
+Authenticate a bundle and import it as a fresh template
+.TP
+quarters\-export\-key(1)
+Create private authentication keys for portable bundles
+.TP
+quarters\-list(1)
+List each space entry, its health and its stored home
+.TP
+quarters\-status(1)
+Report current and cooperative lease state for spaces
+.TP
+quarters\-current(1)
+Print the current space, or "host" outside Quarters
+.TP
+quarters\-env(1)
+Show the exact environment Quarters would apply
+.TP
+quarters\-enter(1)
+Enter an interactive shell in a space
+.TP
+quarters\-exec(1)
+Run one native command in a space
+.TP
+quarters\-discover(1)
+Measure privacy\-bounded Quarter\-owned state changes from one command
+.TP
+quarters\-host(1)
+Run a command with host user\-state paths from a baseline space
+.TP
+quarters\-agent(1)
+Manage a verified private OpenSSH agent for one space
+.TP
+quarters\-adapter(1)
+Inspect or manage compiled OpenSSH invocation adapters
+.TP
+quarters\-doctor(1)
+Inspect capabilities and optionally prepare and validate one environment
+.TP
+quarters\-rm(1)
+Remove an inactive space after exact\-name confirmation
+.TP
+quarters\-recover(1)
+Reclaim abandoned internal creation and deletion state
+.TP
+quarters\-shell\-init(1)
+Print composable shell prompt integration code
+.TP
+quarters\-shortcut(1)
+Inspect or manage a short command that resolves to Quarters
+.TP
+quarters\-mcp(1)
+Serve the local agent interface over bounded MCP stdio
+.TP
+quarters\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.1.0\-alpha.4
