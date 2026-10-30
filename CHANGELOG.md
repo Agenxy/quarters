@@ -298,6 +298,9 @@ compatibility notes will be called out here.
 - Answer `prompts/list` and `completion/complete` with method-not-found:
   Quarters advertises neither capability, and rmcp's defaults returned empty
   results.
+- Run the release-binary test-hook guard on the binary each PyPI wheel
+  installs, and state in the README that the PyPI workflow builds and tests
+  wheels but nothing has been published there.
 
 ## 0.1.0-alpha.2 — 2026-08-20
 

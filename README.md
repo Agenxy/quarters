@@ -157,8 +157,10 @@ npm install --global quarters-cli@alpha
 
 Alpha 4 adds native npm builds for macOS arm64, macOS x64, Linux arm64 and
 Linux x64. Linux arm64 is absent from the public Alpha 2 package because the
-earlier Quarters workflow did not build it; npm supports the target. PyPI
-publication is not yet available and is not advertised as an install path.
+earlier Quarters workflow did not build it; npm supports the target. PyPI is
+not an install path: a manually dispatched workflow builds, guards and
+smoke-tests wheels for these four targets, but no release has been published
+to PyPI, and publishing one is a separate maintainer decision.
 
 ## Commands
 
