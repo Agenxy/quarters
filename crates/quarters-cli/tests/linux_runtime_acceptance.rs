@@ -12,7 +12,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 
 #[path = "support/grant_probes.rs"]
 mod grant_probes;

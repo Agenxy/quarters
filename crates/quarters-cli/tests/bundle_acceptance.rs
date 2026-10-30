@@ -7,7 +7,9 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));

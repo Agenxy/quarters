@@ -188,6 +188,7 @@ fn reservation_defers_while_an_owner_has_not_published_a_record() {
 }
 
 struct Fixture {
+    _runtime_guard: super::test_runtime::TestRuntime,
     _temporary: tempfile::TempDir,
     store: Store,
     space: Space,
@@ -203,8 +204,9 @@ impl Fixture {
             .create(SpaceName::parse(name).expect("space name"), PathBuf::from("/bin/sh"))
             .expect("create space");
         let host = HostEnvironment::capture();
-        let runtime = crate::platform::runtime_directory(&space, &host).expect("runtime");
+        let (runtime_guard, runtime) = super::test_runtime::TestRuntime::create(&space, &host).expect("runtime");
         Self {
+            _runtime_guard: runtime_guard,
             _temporary: temporary,
             store,
             space,

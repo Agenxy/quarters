@@ -276,6 +276,14 @@ compatibility notes will be called out here.
 - Validate stored names during deserialization and escape terminal control
   characters without damaging printable Unicode.
 - Request npm provenance attestations for every native and launcher package.
+- `quarters rm` and recovery remove a space of any size. They no longer stop at
+  131,072 entries, a limit a Go module cache inside a Quarter could exceed;
+  hitting it left the space stranded in trash. Cleanup now bounds only its own
+  memory (256 levels, 131,072 queued directories), and `rm` checks those bounds
+  before retiring a space, so a space outside them fails and stays in place.
+- Recognize the runtime directory name the published alpha.1 and alpha.2
+  releases used, so an upgraded space's runtime is re-keyed on launch and
+  deleted by `quarters rm` instead of being left behind.
 - Enter `--workdir` by identity: the directory's device and inode are recorded
   when it is validated, and the launch changes into a descriptor with that
   identity, refusing a path replaced in between instead of following it.

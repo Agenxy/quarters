@@ -8,7 +8,9 @@ use std::path::Path;
 use std::process::{Child, Command, Output};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 
 static INHERITED_FD_TEST_LOCK: Mutex<()> = Mutex::new(());
 

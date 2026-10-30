@@ -5,7 +5,9 @@ use serde_json::Value;
 use std::error::Error;
 use std::path::Path;
 use std::process::{Command, Output};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
 
 mod support;
 /// A host-context invocation, even when the test itself runs inside a Quarter.
@@ -66,6 +68,8 @@ fn private_agent_never_follows_an_unowned_socket_link() -> Result<(), Box<dyn Er
     let doctor: Value = serde_json::from_slice(&doctor.stdout)?;
     assert_eq!(doctor["result"]["space_environment_validated"], false);
     assert_eq!(doctor["result"]["space_ssh_agent"]["state"], "stale");
+    // The planted link is not Quarters state, so the test removes its own fixture.
+    std::fs::remove_file(&socket)?;
     Ok(())
 }
 #[test]

@@ -5,7 +5,13 @@ use serde_json::Value;
 use std::error::Error;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use tempfile::TempDir;
+#[path = "support/test_store.rs"]
+mod test_store;
+use test_store::TestTemp as TempDir;
+
+#[path = "support/agent_guard.rs"]
+mod agent_guard;
+use agent_guard::AgentGuard;
 
 fn quarters(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_quarters"));
@@ -40,6 +46,7 @@ fn concurrent_starts_converge_without_a_launcher_failure() -> Result<(), Box<dyn
 fn concurrent_round(inject_exit: bool) -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
     run(quarters(temporary.path()).args(["create", "concurrent-agent"]))?;
+    let _agent = AgentGuard::new(temporary.path(), &["concurrent-agent"]);
     let children = (0..6)
         .map(|_| {
             let mut command = quarters(temporary.path());
@@ -71,6 +78,7 @@ fn concurrent_round(inject_exit: bool) -> Result<(), Box<dyn Error>> {
 fn the_single_retry_runs_even_when_the_first_exit_is_seen_after_the_deadline() -> Result<(), Box<dyn Error>> {
     let temporary = TempDir::new()?;
     run(quarters(temporary.path()).args(["create", "late-poll"]))?;
+    let _agent = AgentGuard::new(temporary.path(), &["late-poll"]);
     // The launcher exits at once, but its owner first looks after the whole
     // ten-second startup budget has passed, as a heavily loaded host can.
     let output = run(quarters(temporary.path())

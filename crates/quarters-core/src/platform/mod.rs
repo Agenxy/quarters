@@ -367,16 +367,28 @@ fn runtime_candidates(space: &Space, namespace_root: &Path) -> Vec<PathBuf> {
 }
 
 fn legacy_runtime_fallbacks(space: &Space, namespace_root: &Path) -> Vec<PathBuf> {
-    let mut candidates = Vec::with_capacity(2);
+    let mut candidates = Vec::with_capacity(3);
     if space.id().is_some() {
         candidates.push(namespace_root.join(legacy_runtime_identity(space)));
     }
     candidates.push(namespace_root.join(pre_alpha4_runtime_identity(space)));
+    candidates.push(namespace_root.join(published_alpha_runtime_identity(space)));
     candidates
 }
 
 fn pre_alpha4_runtime_identity(space: &Space) -> String {
     format!("{}-{:016x}", space.manifest().name, path_fingerprint(space.root()))
+}
+
+/// The runtime name the published alpha.1 and alpha.2 releases used: the
+/// space name and a 32-bit FNV-1a fingerprint of its root.
+fn published_alpha_runtime_identity(space: &Space) -> String {
+    let mut hash = 2_166_136_261_u32;
+    for byte in space.root().as_os_str().as_encoded_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    format!("{}-{hash:08x}", space.manifest().name)
 }
 
 fn path_fingerprint(path: &Path) -> u64 {
