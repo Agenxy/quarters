@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! macOS profile backend.
 
+mod report_descriptor;
+pub(super) use report_descriptor::platform_open_report_descriptor;
+
 use super::{Capabilities, CapabilityStatus, ConfinementPlan, ConfinementRequest, unsupported_home_view};
 use crate::{ErrorKind, HostEnvironment, QuartersError, Result};
 use std::collections::BTreeMap;
@@ -70,6 +73,13 @@ pub(super) fn platform_exec_descriptor(
             program.display()
         ),
     ))
+}
+
+/// Network mounts and FUSE volumes are not `MNT_LOCAL`; a call into one can
+/// block on a remote peer or a userspace daemon.
+pub(super) fn platform_filesystem_is_local(directory: &nix::dir::Dir) -> nix::Result<bool> {
+    let filesystem = nix::sys::statfs::fstatfs(directory)?;
+    Ok(filesystem.flags().contains(nix::mount::MntFlags::MNT_LOCAL))
 }
 
 pub(super) fn platform_runtime_base(_host: &HostEnvironment) -> PathBuf {

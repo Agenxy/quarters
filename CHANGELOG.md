@@ -295,6 +295,22 @@ compatibility notes will be called out here.
 - Record why `__CFBundleIdentifier` is inherited (terminal context naming the
   hosting app, like `TERM_PROGRAM`) and test that no other CoreFoundation
   private variable is.
+- Bound every private-agent startup lock wait by the startup's remaining
+  budget, so a contended lock can no longer stretch startup past ten seconds;
+  recording a failure still waits the full lock timeout.
+- Include the Linux boot identity in the private-agent process generation, so
+  a PID and start time repeated after a reboot never match a stale record;
+  records written before this change still match on start time.
+- Refuse a non-blocking pipe or FIFO as the macOS `--report-fd`, which shares
+  its status flags and could drop the report, and move descriptor reopening
+  behind the platform module.
+- Keep discovery off network and FUSE filesystems: a mount crossing onto one
+  is not entered, is counted in `non_local_filesystems` and marks the root
+  incomplete. The scan also runs on a worker thread whose caller stops waiting
+  once the time budget passes, so a hung mount can no longer hold discovery.
+- Answer `prompts/list` and `completion/complete` with method-not-found:
+  Quarters advertises neither capability, and rmcp's defaults returned empty
+  results.
 - Move the CLI's remaining platform-specific code, the Linux descriptor exec
   and device-number normalization, behind the core platform module.
 

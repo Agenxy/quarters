@@ -118,11 +118,27 @@ pub(super) fn process_generation(pid: u32) -> Result<u128> {
 pub(super) fn process_matches_generation(pid: u32, expected: Option<u128>) -> Result<bool> {
     let pid = validated_pid(pid)?;
     match expected {
-        Some(expected) => process_generation_optional(pid).map(|generation| generation == Some(expected)),
+        Some(expected) => process_generation_optional(pid)
+            .map(|generation| generation.is_some_and(|current| generations_match(current, expected))),
         None => process_is_alive(u32::try_from(pid.as_raw()).map_err(|error| {
             QuartersError::new(ErrorKind::CorruptState, "the private-agent PID is invalid").with_source(error)
         })?),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn generations_match(current: u128, expected: u128) -> bool {
+    current == expected
+}
+
+/// Records written before the boot fingerprint carry only the start time, in
+/// the low 64 bits, and still match on it.
+#[cfg(target_os = "linux")]
+fn generations_match(current: u128, expected: u128) -> bool {
+    if expected >> 64 == 0 {
+        return current & u128::from(u64::MAX) == expected;
+    }
+    current == expected
 }
 
 #[cfg(target_os = "macos")]
@@ -152,9 +168,31 @@ fn process_generation_optional(pid: Pid) -> Result<Option<u128>> {
         .split_ascii_whitespace()
         .nth(19)
         .ok_or_else(invalid_linux_process_stat)?
-        .parse::<u128>()
+        .parse::<u64>()
         .map_err(|error| invalid_linux_process_stat().with_source(error))?;
-    Ok(Some(started))
+    // Start time counts clock ticks since boot, so a PID and start time can
+    // recur after a reboot; the boot fingerprint keeps generations distinct.
+    Ok(Some(
+        (u128::from(linux_boot_fingerprint()?) << 64) | u128::from(started),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_boot_fingerprint() -> Result<u64> {
+    let path = Path::new("/proc/sys/kernel/random/boot_id");
+    let boot =
+        fs::read_to_string(path).map_err(|error| QuartersError::io("read the Linux boot identity", path, error))?;
+    let digits: String = boot
+        .trim()
+        .chars()
+        .filter(|character| *character != '-')
+        .take(16)
+        .collect();
+    let fingerprint = u64::from_str_radix(&digits, 16).map_err(|error| {
+        QuartersError::new(ErrorKind::CorruptState, "the kernel returned an invalid boot identity").with_source(error)
+    })?;
+    // Zero is reserved for records written before the boot fingerprint.
+    Ok(fingerprint.max(1))
 }
 
 #[cfg(target_os = "linux")]
@@ -460,5 +498,23 @@ mod linux_tests {
             .trim()
             .parse::<u32>()
             .map_err(std::io::Error::other)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_generations_carry_the_boot_and_still_match_older_records() {
+        let generation = process_generation(std::process::id()).expect("inspect this process");
+        let started_only = generation & u128::from(u64::MAX);
+
+        assert_ne!(generation >> 64, 0, "the boot fingerprint is missing");
+        assert!(generations_match(generation, generation));
+        assert!(
+            generations_match(generation, started_only),
+            "a pre-boot-fingerprint record no longer matches"
+        );
+        assert!(
+            !generations_match(generation, generation ^ (1 << 64)),
+            "another boot matched"
+        );
     }
 }
