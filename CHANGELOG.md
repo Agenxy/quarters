@@ -318,6 +318,19 @@ compatibility notes will be called out here.
   start with a shell shebang, alongside the existing `.sh` refusal.
 - Move the CLI's remaining platform-specific code, the Linux descriptor exec
   and device-number normalization, behind the core platform module.
+- Watch every pin for drift: `quarters-quality drift` compares the Rust,
+  Bun, Node.js LTS, maturin, uv, npm and cargo-audit pins, every SHA-pinned
+  Action, every exact Cargo pin and the launcher's npm dev dependencies with
+  their upstream releases, and a daily workflow runs it beside a report-only
+  RustSec audit. The gate also refuses a workflow or document that names a
+  toolchain version other than the pin, and npm is now pinned (12.2.1) where
+  it publishes.
+- Audit Quarters against Agenxy's engineering standards
+  (`docs/standards/ENGINEERING-AUDIT.md`) and enforce what the audit found:
+  code lines at 120 characters, cyclomatic complexity 15, clippy cognitive
+  complexity 20, a reason on every lint suppression, the standard's avoided
+  vocabulary refused in Markdown, and weekly Dependabot updates for Cargo,
+  GitHub Actions and Bun. Two departures are recorded with their reasons.
 
 ## 0.1.0-alpha.2 (2026-08-20)
 

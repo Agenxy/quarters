@@ -95,7 +95,8 @@ impl Store {
         if let Err(error) = sync_parent_directory(&destination) {
             drop(creation_lock);
             return Err(error.with_hint(format!(
-                "space '{requested_name}' was published completely, but directory durability could not be confirmed; inspect it before retrying"
+                "space '{requested_name}' was published completely, but directory durability could not be confirmed; \
+                    inspect it before retrying"
             )));
         }
         drop(creation_lock);
@@ -168,7 +169,8 @@ pub(super) fn populate_space(
     create_git_config(&home)?;
     write_private_file(
         &home.join(".ssh/config"),
-        b"# Quarters-owned SSH configuration.\n# OpenSSH expands ~ from the host passwd home; use explicit space paths.\nHost *\n  AddKeysToAgent no\n",
+        b"# Quarters-owned SSH configuration.\n# OpenSSH expands ~ from the host passwd home; use explicit space \
+            paths.\nHost *\n  AddKeysToAgent no\n",
     )?;
     write_private_file(&root.join(".active"), b"")?;
     let manifest = SpaceManifest {
@@ -257,11 +259,16 @@ fn ensure_directory_if_absent(path: &Path) -> Result<()> {
 fn create_shell_files(home: &Path) -> Result<()> {
     write_private_file(
         &home.join(".zshrc"),
-        b"# Quarters-owned starting point. This file belongs to this space.\nexport HISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/zsh_history\"\nsetopt APPEND_HISTORY INC_APPEND_HISTORY SHARE_HISTORY\nif command -v quarters >/dev/null 2>&1; then\n  eval \"$(quarters shell-init zsh 2>/dev/null)\"\nfi\n",
+        b"# Quarters-owned starting point. This file belongs to this space.\nexport \
+            HISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/zsh_history\"\nsetopt APPEND_HISTORY \
+            INC_APPEND_HISTORY SHARE_HISTORY\nif command -v quarters >/dev/null 2>&1; then\n  eval \"$(quarters \
+            shell-init zsh 2>/dev/null)\"\nfi\n",
     )?;
     write_private_file(
         &home.join(".bashrc"),
-        b"# Quarters-owned starting point. This file belongs to this space.\nHISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/bash_history\"\nexport HISTFILE\nif command -v quarters >/dev/null 2>&1; then\n  eval \"$(quarters shell-init bash 2>/dev/null)\"\nfi\n",
+        b"# Quarters-owned starting point. This file belongs to this \
+            space.\nHISTFILE=\"${XDG_STATE_HOME:-$HOME/.local/state}/shell/bash_history\"\nexport HISTFILE\nif \
+            command -v quarters >/dev/null 2>&1; then\n  eval \"$(quarters shell-init bash 2>/dev/null)\"\nfi\n",
     )
 }
 

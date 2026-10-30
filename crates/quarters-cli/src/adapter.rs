@@ -146,7 +146,8 @@ pub(crate) fn warn_if_incomplete(space: &Space) {
     );
     if let Some(summary) = summary {
         eprintln!(
-            "quarters: warning: managed command route is incomplete ({summary}); OpenSSH names may resolve to host tools"
+            "quarters: warning: managed command route is incomplete ({summary}); OpenSSH names may resolve to host \
+                tools"
         );
         eprintln!("Try: quarters adapter status {}", space.manifest().name.as_str());
     }

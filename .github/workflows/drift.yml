@@ -1,0 +1,39 @@
+name: Drift
+
+# Scheduled, not gated: an upstream release or a new advisory is not a defect
+# in any one pull request. Each job fails, and so notifies the maintainers,
+# when something pinned has moved; neither job edits the repository.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  toolchain:
+    name: Toolchain and dependency drift
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare every pin with its upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo run --locked --quiet --package quarters-quality -- drift
+
+  advisories:
+    name: RustSec advisories
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit --version 0.22.2
+      - name: Report advisories against the committed lockfile
+        run: cargo audit --deny warnings

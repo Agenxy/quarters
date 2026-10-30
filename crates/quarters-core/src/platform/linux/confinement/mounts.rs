@@ -344,7 +344,10 @@ mod tests {
     #[test]
     fn mounts_beneath_protected_roots_are_protected() -> std::result::Result<(), Box<dyn Error>> {
         // The store keeps its spaces on a data disk bound beneath the store root.
-        let mounts = with(b"9 2 8:3 /qspaces /home/u/.local/share/quarters/spaces rw - ext4 /dev/sdb1 rw\n10 1 8:3 / /data rw - ext4 /dev/sdb1 rw\n")?;
+        let mounts = with(
+            b"9 2 8:3 /qspaces /home/u/.local/share/quarters/spaces rw - ext4 /dev/sdb1 rw\n10 1 8:3 / \
+            /data rw - ext4 /dev/sdb1 rw\n",
+        )?;
         assert!(check(&mounts, "/data/qspaces/other", &store()).is_err());
         assert!(check(&mounts, "/data", &store()).is_err());
         check(&mounts, "/data/unrelated", &store())?;
@@ -356,7 +359,8 @@ mod tests {
         // A tmpfs at /srv/protected is later covered by a bind of the spaces
         // directory over /srv; the kernel serves /srv/protected from the bind.
         let mounts = with(
-            b"9 1 0:9 / /srv/protected rw - tmpfs  rw\n10 1 8:2 /u/.local/share/quarters/spaces /srv rw - ext4 /dev/sda2 rw\n",
+            b"9 1 0:9 / /srv/protected rw - tmpfs  rw\n10 1 8:2 /u/.local/share/quarters/spaces /srv rw - ext4 \
+                /dev/sda2 rw\n",
         )?;
         let serving_bind = |path: &Path| Ok((10, path.to_path_buf()));
         assert!(

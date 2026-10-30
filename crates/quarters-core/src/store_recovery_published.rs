@@ -119,9 +119,14 @@ mod tests {
         fs::set_permissions(&retired, fs::Permissions::from_mode(0o700))?;
         fs::write(retired.join(".active"), b"")?;
         fs::set_permissions(retired.join(".active"), fs::Permissions::from_mode(0o600))?;
-        let manifest = format!(
-            "{{\"schema_version\":1,\"name\":\"{name}\",\"created_unix_ms\":1793290860761,\"default_shell\":\"/bin/zsh\",\"authority_model\":\"host-account-state-profile\"}}"
-        );
+        let manifest = serde_json::json!({
+            "schema_version": 1,
+            "name": name,
+            "created_unix_ms": 1_793_290_860_761_u64,
+            "default_shell": "/bin/zsh",
+            "authority_model": "host-account-state-profile",
+        })
+        .to_string();
         fs::write(retired.join(".quarters.json"), manifest)?;
         fs::set_permissions(retired.join(".quarters.json"), fs::Permissions::from_mode(0o600))?;
         let module = retired.join("home/go/pkg/mod/example.com/m@v1.0.0");

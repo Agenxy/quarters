@@ -33,7 +33,8 @@ fn discover_with_report(root: &Path, report: &Path, script: &str) -> Result<Outp
     Ok(Command::new("/bin/sh")
         .arg("-c")
         .arg(
-            "exec 3>\"$REPORT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /bin/sh -c \"$CHILD_SCRIPT\"",
+            "exec 3>\"$REPORT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- \
+                /bin/sh -c \"$CHILD_SCRIPT\"",
         )
         .env("REPORT_PATH", report)
         .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
@@ -116,7 +117,10 @@ fn execution_preserves_child_streams_and_reports_only_classified_metadata() -> R
     let report = temporary.path().join("report.json");
     let hostile = "private-hostile-entry-name";
     let script = format!(
-        "/bin/mkdir -p \"$HOME/.config/tool\" \"$HOME/.ssh\" \"$HOME/.cache/tool\" \"$XDG_RUNTIME_DIR/bin\"; printf config > \"$HOME/.config/tool/settings\"; printf secret > \"$HOME/.ssh/token\"; printf cache > \"$HOME/.cache/tool/item\"; printf hidden > \"$HOME/{hostile}\"; printf runtime > \"$XDG_RUNTIME_DIR/bin/child-created\"; printf 'child-out\\n'; printf 'child-err\\n' >&2"
+        "/bin/mkdir -p \"$HOME/.config/tool\" \"$HOME/.ssh\" \"$HOME/.cache/tool\" \"$XDG_RUNTIME_DIR/bin\"; printf \
+            config > \"$HOME/.config/tool/settings\"; printf secret > \"$HOME/.ssh/token\"; printf cache > \
+            \"$HOME/.cache/tool/item\"; printf hidden > \"$HOME/{hostile}\"; printf runtime > \
+            \"$XDG_RUNTIME_DIR/bin/child-created\"; printf 'child-out\\n'; printf 'child-err\\n' >&2"
     );
     let output = discover_with_report(temporary.path(), &report, &script)?;
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -177,7 +181,8 @@ fn report_descriptor_preserves_position_append_and_pipe_delivery() -> Result<(),
     let output = Command::new("/bin/sh")
         .arg("-c")
         .arg(
-            "exec 3>>\"$REPORT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /usr/bin/true",
+            "exec 3>>\"$REPORT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- \
+                /usr/bin/true",
         )
         .env("REPORT_PATH", &report)
         .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
@@ -209,7 +214,8 @@ fn read_only_report_descriptor_fails_before_child_execution() -> Result<(), Box<
     let output = Command::new("/bin/sh")
         .arg("-c")
         .arg(
-            "exec 3<\"$INPUT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /bin/sh -c 'printf marker > \"$HOME/must-not-run\"'",
+            "exec 3<\"$INPUT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- \
+                /bin/sh -c 'printf marker > \"$HOME/must-not-run\"'",
         )
         .env("INPUT_PATH", &input)
         .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
@@ -232,7 +238,8 @@ fn unowned_report_number_cannot_collide_with_store_descriptors() -> Result<(), B
     let output = Command::new("/bin/sh")
         .arg("-c")
         .arg(
-            "exec 4>&-; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 4 -- /bin/sh -c 'printf marker > \"$HOME/must-not-run\"'",
+            "exec 4>&-; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 4 -- /bin/sh -c \
+                'printf marker > \"$HOME/must-not-run\"'",
         )
         .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
         .env("STORE_ROOT", temporary.path())
@@ -303,7 +310,8 @@ fn closed_stderr_and_child_signal_preserve_native_status() -> Result<(), Box<dyn
     let output = Command::new("/bin/sh")
         .arg("-c")
         .arg(
-            "exec 3>\"$REPORT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /bin/sh -c 'exit 17' 2>&-",
+            "exec 3>\"$REPORT_PATH\"; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- \
+                /bin/sh -c 'exit 17' 2>&-",
         )
         .env("REPORT_PATH", &report)
         .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
@@ -329,7 +337,8 @@ fn report_write_failure_does_not_replace_child_exit() -> Result<(), Box<dyn Erro
     let output = Command::new("/bin/sh")
         .arg("-c")
         .arg(
-            "exec 3>/dev/full; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /bin/sh -c 'exit 29'",
+            "exec 3>/dev/full; exec \"$QUARTERS_BIN\" --root \"$STORE_ROOT\" discover demo --report-fd 3 -- /bin/sh \
+                -c 'exit 29'",
         )
         .env("QUARTERS_BIN", env!("CARGO_BIN_EXE_quarters"))
         .env("STORE_ROOT", temporary.path())

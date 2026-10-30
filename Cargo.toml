@@ -46,6 +46,7 @@ unreachable_pub = "deny"
 
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }
+cognitive_complexity = "deny"
 dbg_macro = "deny"
 expect_used = "deny"
 panic = "deny"

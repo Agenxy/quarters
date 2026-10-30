@@ -356,7 +356,7 @@ login services remain host-bound.
 Seatbelt is not part of the alpha's guarantee. `doctor` can report the deprecated
 `sandbox-exec` binary, but no confinement flag exists without a reviewed policy.
 
-Workspace layout additionally creates conventional personal directories plus
+Workspace layout also creates conventional personal directories plus
 `Applications`, `Movies` and selected `Library` state directories beneath the
 space home. No Launch Services, TCC, app-container or Finder registration is
 performed, and applications are free to ignore these paths.

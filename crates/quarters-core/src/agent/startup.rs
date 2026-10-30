@@ -323,7 +323,8 @@ fn await_spawned(
             return Err(QuartersError::new(
                 ErrorKind::System,
                 format!(
-                    "the OpenSSH agent exited before its protocol became ready on all {attempts} launch attempts ({exit})"
+                    "the OpenSSH agent exited before its protocol became ready on all {attempts} launch attempts \
+                        ({exit})"
                 ),
             ));
         }

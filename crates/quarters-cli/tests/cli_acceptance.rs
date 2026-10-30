@@ -381,17 +381,9 @@ fn current_json_rejects_hostile_self_reported_state() -> Result<(), Box<dyn Erro
     Ok(())
 }
 
-#[test]
-fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), Box<dyn Error>> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let temporary = TempDir::new()?;
-    create(temporary.path(), "healthy")?;
-    create(temporary.path(), "broken")?;
-    let manifest = temporary.path().join("spaces/broken/.quarters.json");
-    std::fs::set_permissions(&manifest, std::fs::Permissions::from_mode(0o644))?;
-
-    let output = run(quarters(temporary.path()).args(["--json", "list"]))?;
+/// `list` reports the unhealthy sibling without hiding the healthy one.
+fn assert_listing_keeps_both_siblings(root: &Path) -> Result<(), Box<dyn Error>> {
+    let output = run(quarters(root).args(["--json", "list"]))?;
     let listed: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(listed["result"].as_array().map(Vec::len), Some(2));
     assert!(listed["result"].as_array().is_some_and(|entries| {
@@ -404,6 +396,20 @@ fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), 
             .iter()
             .any(|entry| entry["name"] == "healthy" && entry["health"] == "healthy")
     }));
+    Ok(())
+}
+
+#[test]
+fn inspection_reports_an_unhealthy_sibling_and_removal_recovers() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = TempDir::new()?;
+    create(temporary.path(), "healthy")?;
+    create(temporary.path(), "broken")?;
+    let manifest = temporary.path().join("spaces/broken/.quarters.json");
+    std::fs::set_permissions(&manifest, std::fs::Permissions::from_mode(0o644))?;
+
+    assert_listing_keeps_both_siblings(temporary.path())?;
 
     let output = run(quarters(temporary.path()).args(["--json", "status"]))?;
     let status: Value = serde_json::from_slice(&output.stdout)?;
@@ -914,7 +920,8 @@ fn linux_home_view_is_exercised_or_fails_closed() -> Result<(), Box<dyn Error>> 
             "--",
             "/bin/sh",
             "-c",
-            "test -f \"$HOME/.quarters-home-view-marker\" && test -f .quarters-home-view-marker && test \"$(quarters current)\" = work",
+            "test -f \"$HOME/.quarters-home-view-marker\" && test -f .quarters-home-view-marker && test \"$(quarters \
+                current)\" = work",
         ])
         .output()?;
 

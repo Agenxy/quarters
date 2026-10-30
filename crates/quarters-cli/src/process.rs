@@ -181,7 +181,8 @@ impl ProfileLaunch<'_> {
                 && plan.omitted_host_path_entries > 0
             {
                 eprintln!(
-                    "quarters: filesystem confinement omitted {} resolvable host PATH entr{}; inspect 'quarters env {} --confinement filesystem'",
+                    "quarters: filesystem confinement omitted {} resolvable host PATH entr{}; inspect 'quarters env \
+                        {} --confinement filesystem'",
                     plan.omitted_host_path_entries,
                     if plan.omitted_host_path_entries == 1 {
                         "y"

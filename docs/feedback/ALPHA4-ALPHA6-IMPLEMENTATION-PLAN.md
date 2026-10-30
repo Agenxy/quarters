@@ -212,7 +212,7 @@ Each release slice receives:
   Linux arm64 evidence where applicable;
 - updated threat model, architecture ADRs, capability matrix, tutorials,
   changelog, registry operations, and stable JSON examples;
-- a comprehensive Codex security scan and an independent read-only Opus 5
+- a full Codex security scan and an independent read-only Opus 5
   maximum-effort review, with every high and medium finding resolved before
   merge or publication.
 

@@ -58,6 +58,10 @@ async function stageNativePackage(root: string, nativePackage: string): Promise<
     join(packageRoot, "package.json"),
     JSON.stringify({ name: nativePackage, exports: { "./binary": "./bin/quarters" } }),
   );
-  await writeFile(binary, '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify(process.argv.slice(2))); process.exitCode = 42;\n');
+  await writeFile(
+    binary,
+    '#!/usr/bin/env node\n' +
+      'process.stdout.write(JSON.stringify(process.argv.slice(2))); process.exitCode = 42;\n',
+  );
   await chmod(binary, 0o755);
 }

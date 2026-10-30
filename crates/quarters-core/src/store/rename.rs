@@ -162,7 +162,10 @@ fn reject_legacy_artifact_bindings(store: &Store, source: &Space) -> Result<()> 
             source.manifest().name
         ),
     )
-    .with_hint("retain the current name, or recreate and explicitly remove those legacy templates and snapshots before renaming"))
+    .with_hint(
+        "retain the current name, or recreate and explicitly remove those legacy templates and snapshots \
+        before renaming",
+    ))
 }
 
 fn recover_one(spaces: &Path, marker_path: &Path, marker: &RenameMarker) -> Result<()> {
@@ -413,6 +416,7 @@ fn rename_recovery_error(error: QuartersError, marker: &Path) -> QuartersError {
     ))
 }
 
+// Test assertions use `expect` to keep the failing context in the message.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

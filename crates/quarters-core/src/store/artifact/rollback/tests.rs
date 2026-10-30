@@ -137,8 +137,7 @@ fn orphan_marker_temporary_is_reclaimed_without_a_published_marker()
 }
 
 #[test]
-fn ambiguous_marker_blocks_only_its_target_for_normal_operations() -> std::result::Result<(), Box<dyn std::error::Error>>
-{
+fn ambiguous_marker_blocks_only_its_target_for_normal_use() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let (_temporary, store, blocked, blocked_space) = test_space("blocked")?;
     let healthy = SpaceName::parse("healthy")?;
     store.create(healthy.clone(), PathBuf::from("/bin/sh"))?;

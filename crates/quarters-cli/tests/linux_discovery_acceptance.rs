@@ -64,7 +64,8 @@ fn discover_with_launcher(
     nix::fcntl::fcntl(&report, nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()))?;
     let descriptor = report.as_raw_fd();
     let script = format!(
-        "printf smuggle >&{descriptor} 2>/dev/null || :; printf child > \"$HOME/child-state\"; printf child > \"$XDG_RUNTIME_DIR/bin/child-state\""
+        "printf smuggle >&{descriptor} 2>/dev/null || :; printf child > \"$HOME/child-state\"; printf child > \
+            \"$XDG_RUNTIME_DIR/bin/child-state\""
     );
     let mut command = quarters(root, home);
     command.arg("discover").arg(name).args(options);
