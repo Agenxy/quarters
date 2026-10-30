@@ -4,7 +4,7 @@
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -15,13 +15,17 @@ use crate::store::lifecycle::remove_tree_restoring_owner_access;
 use crate::store::scan::ScanBudget;
 use crate::store::{StoreLayout, entry_exists, open_private_lock, sync_directory, unique_suffix};
 use crate::store_policy::{validate_private_dir, validate_private_file, validate_store_root};
+use crate::store_recovery_published::{
+    PublishedAlphaRetirement, published_alpha_retired_entries, remove_published_alpha_runtimes,
+    unleased_published_alpha_entries,
+};
 use crate::{
     ArtifactId, ArtifactInspection, ArtifactKind, ErrorKind, QuartersError, Result, RollbackIssue, RollbackObservation,
     SourceStatus, Store,
 };
 
 const CREATING_PREFIX: &[u8] = b".creating-";
-const MAX_RECOVERY_ENTRIES: usize = 1_024;
+pub(crate) const MAX_RECOVERY_ENTRIES: usize = 1_024;
 const RECLAIMING_PREFIX: &[u8] = b".reclaiming-";
 const RETIRED_PREFIX: &[u8] = b".retired-";
 pub(crate) const CREATION_LOCK_FILE: &str = ".creating.lock";
@@ -161,15 +165,15 @@ impl Store {
         let rollbacks = self.recover_rollbacks()?;
         let rollback_issues = self.rollback_issues_for_recovery()?;
         let artifacts = inspect_artifact_state(self)?;
-        let (summary, reclaiming, trash_root) = {
+        let (summary, reclaiming, trash_root, published) = {
             let mutation = self.begin_mutation()?;
             let layout = mutation.layout();
-            let (mut summary, mut reclaiming) = prepare_recovery(&self.root, layout)?;
+            let (mut summary, mut reclaiming, published) = prepare_recovery(&self.root, layout)?;
             summary.freeze_marker_temps = remove_freeze_marker_temporaries(layout.spaces_root())?;
             let artifact_reclaiming = prepare_artifact_recovery(self, layout.trash_root())?;
             reclaiming.extend(artifact_reclaiming);
             summary.apply_artifacts(&artifacts);
-            (summary, reclaiming, layout.trash_root().to_path_buf())
+            (summary, reclaiming, layout.trash_root().to_path_buf(), published)
         };
         let mut first_failure = None;
         for path in &reclaiming {
@@ -186,6 +190,7 @@ impl Store {
             ));
         }
         sync_result?;
+        remove_published_alpha_runtimes(&published)?;
         let unknown_entries_at_least = summary
             .unknown_entries_at_least
             .saturating_add(rollback_issues.len())
@@ -215,13 +220,17 @@ fn inspect(
     let (unfinished, active) = classify_creations(layout.spaces_root())?;
     let retired = matching_entries(layout.trash_root(), &[RETIRED_PREFIX])?;
     let reclaiming = matching_entries(layout.trash_root(), &[RECLAIMING_PREFIX])?;
+    let published = published_alpha_retired_entries(layout.trash_root())?;
     let unknown_entries_at_least = count_unknown_space_entries(layout.spaces_root())?
         .saturating_add(rollback_issues.len())
         .saturating_add(rename_issues);
     let mut summary = RecoverySummary {
         active_creations: active,
         unfinished_creations: unfinished.len(),
-        retired_entries: retired.len().saturating_add(reclaiming.len()),
+        retired_entries: retired
+            .len()
+            .saturating_add(reclaiming.len())
+            .saturating_add(published.len()),
         rollback_transactions: rollbacks.len(),
         rename_transactions,
         rename_issues,
@@ -235,11 +244,23 @@ fn inspect(
     Ok(summary)
 }
 
-fn prepare_recovery(root: &Path, layout: &StoreLayout) -> Result<(RecoverySummary, Vec<std::path::PathBuf>)> {
+type PreparedRecovery = (RecoverySummary, Vec<PathBuf>, Vec<PublishedAlphaRetirement>);
+
+fn prepare_recovery(root: &Path, layout: &StoreLayout) -> Result<PreparedRecovery> {
     validate_layout(root, layout)?;
     let (creations, active_creations) = classify_creations(layout.spaces_root())?;
-    let retired = matching_entries(layout.trash_root(), &[RETIRED_PREFIX])?;
+    let mut retired = matching_entries(layout.trash_root(), &[RETIRED_PREFIX])?;
     let existing_reclaiming = matching_entries(layout.trash_root(), &[RECLAIMING_PREFIX])?;
+    let published = unleased_published_alpha_entries(layout.trash_root())?;
+    let retired_count = retired.len().saturating_add(published.len());
+    let mut published_spaces = Vec::with_capacity(published.len());
+    for (path, name) in published {
+        published_spaces.push(PublishedAlphaRetirement {
+            space_root: layout.spaces_root().join(name.as_str()),
+            name,
+        });
+        retired.push(path);
+    }
     for path in retired.iter().chain(&existing_reclaiming) {
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
@@ -267,7 +288,7 @@ fn prepare_recovery(root: &Path, layout: &StoreLayout) -> Result<(RecoverySummar
     let summary = RecoverySummary {
         active_creations,
         unfinished_creations: creations.len(),
-        retired_entries: retired.len().saturating_add(existing_reclaiming.len()),
+        retired_entries: retired_count.saturating_add(existing_reclaiming.len()),
         rollback_transactions: 0,
         rename_transactions: 0,
         rollbacks: Vec::new(),
@@ -275,7 +296,7 @@ fn prepare_recovery(root: &Path, layout: &StoreLayout) -> Result<(RecoverySummar
         unknown_entries_at_least: count_unknown_space_entries(layout.spaces_root())?,
         ..RecoverySummary::default()
     };
-    Ok((summary, reclaiming))
+    Ok((summary, reclaiming, published_spaces))
 }
 
 fn inspect_artifact_state(store: &Store) -> Result<ArtifactRecoveryState> {
